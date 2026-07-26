@@ -6,14 +6,43 @@ Ya 是一个以用户同意为先的个人研究型 CLI Agent。它使用 DeepSe
 在本地保存长期记忆，并且仅会在用户明确请求和确认后，才启动受限的
 Tree of Agents（ToA）模式。
 
+## 操作系统支持
+
+CLI 可运行于 Python 3.9 或更高版本。它不提供 Web 或桌面图形界面。
+
+| 操作系统 | 安装与运行 | API Key 存储 |
+| --- | --- | --- |
+| macOS | 已在本地验证支持。 | `ya auth deepseek` 会将密钥保存至 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
+| Linux | 设置 `DEEPSEEK_API_KEY` 后支持运行。 | 在 shell 中设置环境变量。 |
+| Windows | 在 PowerShell 中设置 `DEEPSEEK_API_KEY` 后支持运行。 | 在 PowerShell 中设置环境变量。 |
+
+`ya auth deepseek` 仅支持 macOS，因为它使用了 macOS 的 `security` 命令。
+请勿在 Linux 或 Windows 上运行该命令；应改用环境变量。
+
 ## 安装
 
 Ya 需要 Python 3.9 或更高版本以及一个 DeepSeek API Key。
+
+### macOS 和 Linux
 
 ```sh
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
 python3 -m pip install .
+```
+
+### Windows（PowerShell）
+
+```powershell
+git clone https://github.com/ZedingZhang/ya-agent.git
+cd ya-agent
+py -m pip install .
+```
+
+设置下方的 `DEEPSEEK_API_KEY` 后，可不依赖 PATH 直接启动 Ya：
+
+```powershell
+py -m ya.cli ask "用通俗语言解释 Graph Engineering"
 ```
 
 如需进行开发，请以可编辑模式安装当前检出目录：
@@ -59,10 +88,16 @@ python3 -m ya.cli ask "用通俗语言解释 Graph Engineering"
 ya auth deepseek
 ```
 
-对于非交互式 shell 或其他操作系统，请改为为当前 shell 提供 API Key：
+在 Linux 上，请改为为当前 shell 提供 API Key：
 
 ```sh
 export DEEPSEEK_API_KEY="your-api-key"
+```
+
+在 Windows PowerShell 中，请使用：
+
+```powershell
+$env:DEEPSEEK_API_KEY = "your-api-key"
 ```
 
 ### 2. 提出问题
