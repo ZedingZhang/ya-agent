@@ -8,11 +8,12 @@ keeps long-term memory locally, and only starts its bounded Tree of Agents
 
 ## Install
 
-Ya requires Python 3.9 or later.
+Ya requires Python 3.9 or later and a DeepSeek API key.
 
 ```sh
+git clone https://github.com/ZedingZhang/ya-agent.git
+cd ya-agent
 python3 -m pip install .
-ya auth deepseek
 ```
 
 For development, install the checkout in editable mode:
@@ -22,21 +23,65 @@ python3 -m pip install -e .
 python3 -m pytest -q
 ```
 
-`ya auth deepseek` stores the key in the macOS Keychain. For non-interactive
-environments, set `DEEPSEEK_API_KEY` instead. Ya stores configuration and
-memory under `~/.ya`; set `YA_HOME` to use a different local state directory.
+On macOS, `ya auth deepseek` saves the key in the Keychain. For non-interactive
+environments, set `DEEPSEEK_API_KEY` instead. Never commit an API key. Ya
+stores configuration and memory under `~/.ya`; set `YA_HOME` to use a different
+local state directory.
 
 ## Use
 
+### 1. Authenticate
+
+Run this once on macOS, then paste the DeepSeek API key when prompted:
+
 ```sh
-ya ask "Explain Graph Engineering"
-ya ask "Compare two database designs" --model pro --thinking on
-ya ask "Assess this proposal" --toa --toa-workers 2
-ya memory review
+ya auth deepseek
 ```
 
-`--toa` shows a preflight and requires confirmation. In a non-interactive
-shell, use `--toa --yes` to explicitly authorize the current run.
+For a non-interactive shell or another operating system, provide the key for
+the current shell instead:
+
+```sh
+export DEEPSEEK_API_KEY="your-api-key"
+```
+
+### 2. Ask a question
+
+Pass the complete task as the argument to `ya ask`. Ya sends it to DeepSeek and
+prints the answer under `[Ya single result]`:
+
+```sh
+ya ask "Explain Graph Engineering in plain language"
+```
+
+After an interactive answer, Ya asks whether to create a memory candidate. This
+is optional; choosing `N` leaves memory unchanged.
+
+### Common commands
+
+```sh
+# Use the more capable model for one request.
+ya ask "Compare two database designs" --model pro --thinking on
+
+# Save defaults for future requests.
+ya config set model pro
+ya config set thinking on
+ya config set reasoning-effort max
+
+# Use the bounded Tree of Agents mode. Confirm the displayed preflight.
+ya ask "Assess this proposal" --toa --toa-workers 2
+
+# In a non-interactive shell, explicitly authorize that ToA run.
+ya ask "Assess this proposal" --toa --toa-workers 2 --yes
+
+# Review and explicitly approve a memory candidate.
+ya memory review
+ya memory approve <card-id>
+```
+
+`--toa` is not enabled by default. It shows its model, worker count, token
+budget, and timeout before it starts. Use `--no-feedback` to skip the optional
+memory prompt after any request.
 
 ## Safety model
 
