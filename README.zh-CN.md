@@ -2,9 +2,9 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya 是一个以用户同意为先的个人研究型 CLI Agent。它使用 DeepSeek V4 API，
-在本地保存长期记忆，并且仅会在用户明确请求和确认后，才启动受限的
-Tree of Agents（ToA）模式。
+Agent 名称为 **Ya**，含义为“萌芽慢慢成长”，也可以叫她“丫丫”。它是一个以 CLI 为唯一界面的个人研究与决策
+Agent：在用户许可下积累偏好、经验与来源化知识，不会无边界地改写自身。它使用 DeepSeek V4 API，
+在本地保存长期记忆，并且仅会在用户明确请求和确认后，才启动受限的 Tree of Agents（ToA）模式。
 
 ## 操作系统支持
 

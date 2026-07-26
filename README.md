@@ -2,7 +2,9 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya is a consent-first personal research CLI agent. It uses the DeepSeek V4 API,
+Ya is a personal research and decision agent with a CLI as its only interface.
+With user permission, it accumulates preferences, experience, and source-backed
+knowledge without unbounded self-modification. It uses the DeepSeek V4 API,
 keeps long-term memory locally, and only starts its bounded Tree of Agents
 (ToA) mode when the user explicitly requests and confirms it.
 
