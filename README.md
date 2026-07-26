@@ -6,14 +6,44 @@ Ya is a consent-first personal research CLI agent. It uses the DeepSeek V4 API,
 keeps long-term memory locally, and only starts its bounded Tree of Agents
 (ToA) mode when the user explicitly requests and confirms it.
 
+## Platform support
+
+The CLI runs on Python 3.9 or later. It does not provide a web or desktop UI.
+
+| Operating system | Install and run | API key storage |
+| --- | --- | --- |
+| macOS | Supported and tested locally. | `ya auth deepseek` saves the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
+| Linux | Supported when `DEEPSEEK_API_KEY` is set. | Set the environment variable in your shell. |
+| Windows | Supported in PowerShell when `DEEPSEEK_API_KEY` is set. | Set the environment variable in PowerShell. |
+
+`ya auth deepseek` is macOS-only because it uses the macOS `security` command.
+Do not run that command on Linux or Windows; use the environment variable
+instead.
+
 ## Install
 
 Ya requires Python 3.9 or later and a DeepSeek API key.
+
+### macOS and Linux
 
 ```sh
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
 python3 -m pip install .
+```
+
+### Windows (PowerShell)
+
+```powershell
+git clone https://github.com/ZedingZhang/ya-agent.git
+cd ya-agent
+py -m pip install .
+```
+
+After setting `DEEPSEEK_API_KEY` below, start Ya without relying on a PATH entry:
+
+```powershell
+py -m ya.cli ask "Explain Graph Engineering in plain language"
 ```
 
 For development, install the checkout in editable mode:
@@ -61,11 +91,16 @@ Run this once on macOS, then paste the DeepSeek API key when prompted:
 ya auth deepseek
 ```
 
-For a non-interactive shell or another operating system, provide the key for
-the current shell instead:
+On Linux, provide the key for the current shell instead:
 
 ```sh
 export DEEPSEEK_API_KEY="your-api-key"
+```
+
+On Windows PowerShell, use:
+
+```powershell
+$env:DEEPSEEK_API_KEY = "your-api-key"
 ```
 
 ### 2. Ask a question
