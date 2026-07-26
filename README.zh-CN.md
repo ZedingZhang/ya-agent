@@ -78,6 +78,12 @@ ya ask --help
 python3 -m ya.cli ask "用通俗语言解释 Graph Engineering"
 ```
 
+## 使用示例输出
+
+这张终端风格图片展示了一次真实 Ya CLI 运行的命令和回答。
+
+![Ya CLI 使用示例输出](assets/ya-cli-example.png)
+
 ## 执行流程
 
 ```mermaid
