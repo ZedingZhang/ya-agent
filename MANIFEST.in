@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+include README.zh-CN.md
+recursive-include assets *.png *.svg
