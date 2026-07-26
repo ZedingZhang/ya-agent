@@ -28,6 +28,29 @@ environments, set `DEEPSEEK_API_KEY` instead. Never commit an API key. Ya
 stores configuration and memory under `~/.ya`; set `YA_HOME` to use a different
 local state directory.
 
+## Run Ya
+
+Ya is a terminal command-line program. It does not start a web server or GUI.
+After installation, open a terminal and run `ya` from any directory:
+
+```sh
+ya ask "Explain Graph Engineering in plain language"
+```
+
+To see the available options for a request, run:
+
+```sh
+ya ask --help
+```
+
+If your shell reports `ya: command not found`, first activate the Python
+environment where you installed Ya. From the cloned project directory, you can
+also run Ya directly through Python:
+
+```sh
+python3 -m ya.cli ask "Explain Graph Engineering in plain language"
+```
+
 ## Use
 
 ### 1. Authenticate
@@ -51,7 +74,7 @@ Pass the complete task as the argument to `ya ask`. Ya sends it to DeepSeek and
 prints the answer under `[Ya single result]`:
 
 ```sh
-ya ask "Explain Graph Engineering in plain language"
+ya ask "Summarize the benefits and tradeoffs of a relational database"
 ```
 
 After an interactive answer, Ya asks whether to create a memory candidate. This
