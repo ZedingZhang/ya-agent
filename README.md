@@ -81,6 +81,33 @@ also run Ya directly through Python:
 python3 -m ya.cli ask "Explain Graph Engineering in plain language"
 ```
 
+## Execution flow
+
+```mermaid
+flowchart TD
+    S["User submits a Ya CLI task"] --> C["Load minimal relevant context"]
+    C --> G["Resolve model, thinking, and budget settings"]
+    G --> O["CLI ToA option"]
+    O -->|Default or no --toa| X["Single-agent execution"]
+    O -->|With --toa| P["Show ToA preflight"]
+    P -->|User confirms| T["ToA root coordination"]
+    P -->|User declines| X
+    T --> W["Up to two temporary worker agents"]
+    W --> A["Aggregate evidence packets"]
+    X --> V["Evidence validation"]
+    A --> V
+    V --> I["ICM targeted exploration"]
+    I -->|Done or budget reached| R["Return sourced result"]
+    I -->|Supplementary search| E["Targeted search"]
+    E --> V
+    R --> F["Collect explicit user feedback"]
+    F --> L["SEA candidate experience card"]
+    L --> H["CLI user approval"]
+    H -->|Approve| M["Local memory version update"]
+    H -->|Reject or ignore| Z["Finish"]
+    M --> Z
+```
+
 ## Use
 
 ### 1. Authenticate
