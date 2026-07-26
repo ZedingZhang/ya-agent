@@ -10,6 +10,7 @@ from .config import ModelConfig
 
 
 API_URL = "https://api.deepseek.com/chat/completions"
+MAX_TOOL_CALL_ROUNDS = 6
 
 
 class DeepSeekError(RuntimeError):
@@ -81,10 +82,12 @@ class DeepSeekClient:
         """Preserve reasoning only inside a single tool-call turn."""
         transient_messages = list(messages)
         handlers = tool_handlers or {}
-        for _ in range(3):
+        for round_number in range(MAX_TOOL_CALL_ROUNDS + 1):
             reply = self.complete(transient_messages, config, max_tokens, tools)
             if not reply.tool_calls:
                 return reply
+            if round_number == MAX_TOOL_CALL_ROUNDS:
+                break
             transient_messages.append(reply.assistant_message)
             for call in reply.tool_calls:
                 function = call.get("function", {})
@@ -98,4 +101,6 @@ class DeepSeekClient:
                     except Exception as error:  # Tool errors are returned to the model, not persisted.
                         result = json.dumps({"error": str(error)})
                 transient_messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
-        raise DeepSeekError("Tool-call limit reached before a final answer.")
+        raise DeepSeekError(
+            f"Tool-call limit ({MAX_TOOL_CALL_ROUNDS} rounds) reached before a final answer."
+        )
