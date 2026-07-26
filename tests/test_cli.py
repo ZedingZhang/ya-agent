@@ -1,9 +1,16 @@
 import os
 import tempfile
 import unittest
+from io import StringIO
 from unittest.mock import patch
 
 from ya import cli
+from ya.orchestrator import RunResult
+
+
+class _TtyStringIO(StringIO):
+    def isatty(self):
+        return True
 
 
 class CliTests(unittest.TestCase):
@@ -37,3 +44,43 @@ class CliTests(unittest.TestCase):
         parser = cli._parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["ask", "test", "--toa", "--toa-workers", "3"])
+
+    def test_ask_auto_renders_markdown_in_a_tty(self):
+        stream = _TtyStringIO()
+        result = RunResult(content="## Title\n\n**bold**", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "test"]), 0)
+        self.assertIn("Title", stream.getvalue())
+        self.assertIn("bold", stream.getvalue())
+        self.assertNotIn("##", stream.getvalue())
+        self.assertNotIn("**", stream.getvalue())
+
+    def test_ask_auto_preserves_markdown_when_redirected(self):
+        stream = StringIO()
+        result = RunResult(content="## Title", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "test"]), 0)
+        self.assertIn("## Title", stream.getvalue())
+
+    def test_ask_markdown_format_bypasses_terminal_renderer(self):
+        stream = _TtyStringIO()
+        result = RunResult(content="## Title", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "test", "--format", "markdown"]), 0)
+        self.assertIn("## Title", stream.getvalue())
+
+    def test_ask_terminal_format_renders_when_redirected(self):
+        stream = StringIO()
+        result = RunResult(content="## Title", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "test", "--format", "terminal"]), 0)
+        self.assertIn("Title", stream.getvalue())
+        self.assertNotIn("##", stream.getvalue())
