@@ -27,6 +27,28 @@ python3 -m pytest -q
 `DEEPSEEK_API_KEY`。请勿提交 API Key。Ya 会将配置和记忆存储在 `~/.ya` 下；可通过
 设置 `YA_HOME` 使用其他本地状态目录。
 
+## 运行 Ya
+
+Ya 是一个终端命令行程序，不需要启动 Web 服务或图形界面。安装完成后，在任意目录打开
+终端并运行 `ya`：
+
+```sh
+ya ask "用通俗语言解释 Graph Engineering"
+```
+
+要查看提问命令可用的选项，请运行：
+
+```sh
+ya ask --help
+```
+
+如果 shell 提示 `ya: command not found`，请先激活安装 Ya 时所使用的 Python 环境。
+也可以在克隆的项目目录中通过 Python 直接运行 Ya：
+
+```sh
+python3 -m ya.cli ask "用通俗语言解释 Graph Engineering"
+```
+
 ## 使用
 
 ### 1. 完成认证
@@ -49,7 +71,7 @@ export DEEPSEEK_API_KEY="your-api-key"
 `[Ya single result]` 标题下输出答案：
 
 ```sh
-ya ask "用通俗语言解释 Graph Engineering"
+ya ask "总结关系型数据库的优点与取舍"
 ```
 
 交互式回答结束后，Ya 会询问是否创建记忆候选项。这是可选操作；选择 `N` 不会改动记忆。
