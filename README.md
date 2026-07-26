@@ -81,6 +81,12 @@ also run Ya directly through Python:
 python3 -m ya.cli ask "Explain Graph Engineering in plain language"
 ```
 
+## Example output
+
+This terminal-style image shows the command and answer from a real Ya CLI run.
+
+![Ya CLI example output](assets/ya-cli-example.png)
+
 ## Execution flow
 
 ```mermaid
