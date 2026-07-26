@@ -83,9 +83,15 @@ also run Ya directly through Python:
 python3 -m ya.cli ask "Explain Graph Engineering in plain language"
 ```
 
+Interactive terminals render Ya's common Markdown output automatically. When
+redirecting or piping output, Ya preserves raw Markdown for scripts and files.
+Use `--format terminal` to force readable terminal formatting or
+`--format markdown` to always keep the source Markdown. Set `NO_COLOR=1` to
+disable ANSI styles.
+
 ## Example output
 
-This terminal-style image shows the command and answer from a real Ya CLI run.
+This is an illustrative terminal-style rendering based on a real Ya CLI answer.
 
 ![Ya CLI example output](assets/ya-cli-example.png)
 
@@ -145,6 +151,8 @@ prints the answer under `[Ya single result]`:
 
 ```sh
 ya ask "Summarize the benefits and tradeoffs of a relational database"
+ya ask "Summarize a proposal" --format markdown > answer.md
+ya ask "Summarize a proposal" --format terminal
 ```
 
 After an interactive answer, Ya asks whether to create a memory candidate. This

@@ -10,6 +10,7 @@ from .deepseek import DeepSeekClient, DeepSeekError
 from .keychain import load_api_key, save_api_key
 from .memory import create_candidate, list_cards, set_status
 from .orchestrator import RunResult, single_agent, toa_agent
+from .terminal import format_output
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,6 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     ask.add_argument("--toa-token-budget", type=int)
     ask.add_argument("--toa-timeout", type=int)
     ask.add_argument("--no-feedback", action="store_true")
+    ask.add_argument("--format", choices=("auto", "terminal", "markdown"), default="auto")
 
     auth = commands.add_parser("auth", help="Store credentials")
     auth.add_argument("provider", choices=("deepseek",))
@@ -111,7 +113,7 @@ def _ask(args: argparse.Namespace) -> int:
     else:
         result = single_agent(client, args.task, config)
     print(f"\n[Ya {result.mode} result]\n")
-    print(result.content)
+    print(format_output(result.content, args.format, sys.stdout.isatty()))
     if result.partial:
         print("\n[Some ToA worker results were unavailable; the synthesis may be incomplete.]", file=sys.stderr)
     _collect_feedback(result, args.no_feedback)

@@ -78,9 +78,13 @@ ya ask --help
 python3 -m ya.cli ask "用通俗语言解释 Graph Engineering"
 ```
 
+交互式终端会自动渲染 Ya 常见的 Markdown 输出。重定向或通过管道输出时，Ya 会保留原始
+Markdown，便于脚本和文件使用。使用 `--format terminal` 可强制终端排版，使用
+`--format markdown` 可始终保留源 Markdown。设置 `NO_COLOR=1` 可关闭 ANSI 样式。
+
 ## 使用示例输出
 
-这张终端风格图片展示了一次真实 Ya CLI 运行的命令和回答。
+这是一张基于真实 Ya CLI 回答制作的终端风格渲染示意图。
 
 ![Ya CLI 使用示例输出](assets/ya-cli-example.png)
 
@@ -140,6 +144,8 @@ $env:DEEPSEEK_API_KEY = "your-api-key"
 
 ```sh
 ya ask "总结关系型数据库的优点与取舍"
+ya ask "总结一个方案" --format markdown > answer.md
+ya ask "总结一个方案" --format terminal
 ```
 
 交互式回答结束后，Ya 会询问是否创建记忆候选项。这是可选操作；选择 `N` 不会改动记忆。

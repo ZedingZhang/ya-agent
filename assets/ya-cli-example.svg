@@ -14,5 +14,5 @@
     <text x="130" y="522">涵盖数据建模、存储、查询与推理等全流程。它旨在通过高效的图算法和系统架构，使机器能够更好地利用图数据中的</text>
     <text x="130" y="569">实体与关系信息，支撑搜索、推荐、AI 推理等上层应用。</text>
   </g>
-  <text x="130" y="755" fill="#7f919f" font-family="Menlo, Monaco, Consolas, 'PingFang SC', sans-serif" font-size="21">Example output from a real Ya CLI request</text>
+  <text x="130" y="755" fill="#7f919f" font-family="Menlo, Monaco, Consolas, 'PingFang SC', sans-serif" font-size="21">Illustrative terminal-style rendering based on a real Ya CLI response</text>
 </svg>
