@@ -1,3 +1,9 @@
+## Markdown rendering resilience
+
+- Terminal rendering now recovers when a model leaves a fenced code block
+  unclosed before a subsequent Markdown heading, so later headings, lists, and
+  emphasis do not appear as raw Markdown.
+
 ## Relevant local memory
 
 - Ya now ranks approved memory for each task instead of always injecting the
@@ -59,6 +65,11 @@ macOS 和 Windows 文件当前未签名。在绕过系统提示前，请先校�
   同分时优先较新的卡片，低分卡片不会进入模型上下文。
 - `ya ask --show-memory` 可显示本次任务实际选用的卡片和分数。该选项需要显式传入，因为它可能
   打印个人记忆文本。
+
+### Markdown 渲染恢复能力
+
+- 当模型漏掉围栏代码块的结束标记、随后输出 Markdown 标题时，终端渲染现在会自动恢复，后续的
+  标题、列表和强调文本不会再原样显示 Markdown 标记。
 
 ### Python 包
 
