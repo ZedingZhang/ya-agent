@@ -125,6 +125,60 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["ask", "latest weather"]), 0)
         self.assertIsNone(agent.call_args.kwargs["on_content"])
 
+    def test_show_memory_displays_selected_cards_before_answer(self):
+        card = create_candidate("Use PostgreSQL indexes", "evidence")
+        set_status(card.id, "approved")
+        stream = StringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "Explain PostgreSQL indexes", "--show-memory"]), 0)
+        self.assertIn("[Ya memory context]", stream.getvalue())
+        self.assertIn(card.id, stream.getvalue())
+        self.assertIn("score", stream.getvalue())
+
+    def test_show_memory_reports_no_matching_cards(self):
+        card = create_candidate("Use PostgreSQL indexes", "evidence")
+        set_status(card.id, "approved")
+        stream = StringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "Explain coffee brewing", "--show-memory"]), 0)
+        self.assertIn("No approved memory met the relevance threshold.", stream.getvalue())
+        self.assertNotIn(card.id, stream.getvalue())
+
+    def test_show_memory_precedes_streaming_answer(self):
+        card = create_candidate("Use PostgreSQL indexes", "evidence")
+        set_status(card.id, "approved")
+        stream = _TtyStringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+
+        def agent(client, task, config, web_mode, on_content):
+            on_content("answer")
+            return result
+
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", side_effect=agent), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "Explain PostgreSQL indexes", "--show-memory"]), 0)
+        self.assertLess(stream.getvalue().index(card.id), stream.getvalue().index("[Ya single result]"))
+        self.assertIn("answer", stream.getvalue())
+
+    def test_memory_is_silent_without_show_memory(self):
+        card = create_candidate("Use PostgreSQL indexes", "evidence")
+        set_status(card.id, "approved")
+        stream = StringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "Explain PostgreSQL indexes"]), 0)
+        self.assertNotIn("[Ya memory context]", stream.getvalue())
+        self.assertNotIn(card.id, stream.getvalue())
+
     def test_feedback_prompt_uses_plain_language(self):
         result = RunResult(content="answer", mode="single", usage={})
         with patch("ya.cli.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n") as prompt:

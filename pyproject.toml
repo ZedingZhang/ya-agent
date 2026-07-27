@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ya-agent"
-version = "0.1.4"
+version = "0.1.5"
 description = "A consent-first personal research CLI agent"
 requires-python = ">=3.9"
 readme = "README.md"

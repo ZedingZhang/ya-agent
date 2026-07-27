@@ -45,8 +45,8 @@ class RunResult:
 
 
 def _messages(task: str, extra_instruction: str = "") -> list[dict]:
-    memory = relevant_context()
-    context = f"\nApproved user preferences:\n{memory}" if memory else ""
+    memory = relevant_context(task)
+    context = f"\nApproved relevant memory:\n{memory}" if memory else ""
     return [
         {"role": "system", "content": CORE_PROMPT + context + "\n" + extra_instruction},
         {"role": "user", "content": task},

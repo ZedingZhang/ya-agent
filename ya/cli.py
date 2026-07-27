@@ -16,6 +16,7 @@ from .memory import (
     create_candidate,
     list_cards,
     prune_cards,
+    select_relevant_cards,
     set_status,
 )
 from .orchestrator import RunResult, should_use_web, single_agent, toa_agent
@@ -40,6 +41,7 @@ def _parser() -> argparse.ArgumentParser:
     ask.add_argument("--format", choices=("auto", "terminal", "markdown"), default="auto")
     ask.add_argument("--web", choices=("auto", "on", "off"), default="auto")
     ask.add_argument("--stream", choices=("auto", "off"), default="auto")
+    ask.add_argument("--show-memory", action="store_true", help="Show approved memory selected for this task")
 
     auth = commands.add_parser("auth", help="Store credentials")
     auth.add_argument("provider", choices=("deepseek",))
@@ -123,12 +125,24 @@ def _collect_feedback(result: RunResult, disabled: bool) -> None:
     print(f"Created candidate {card.id}. Review it with: ya memory review")
 
 
+def _show_memory(task: str) -> None:
+    matches = select_relevant_cards(task)
+    print("\n[Ya memory context]")
+    if not matches:
+        print("  No approved memory met the relevance threshold.")
+        return
+    for match in matches:
+        print(f"  {match.card.id}  score {match.score:<2} {match.card.kind:10} {match.card.text}")
+
+
 def _ask(args: argparse.Namespace) -> int:
     config = _resolve_config(args)
     api_key = load_api_key()
     if not api_key:
         raise ValueError("No DeepSeek API key found. Run: ya auth deepseek")
     client = DeepSeekClient(api_key)
+    if args.show_memory:
+        _show_memory(args.task)
     can_stream = (
         args.stream == "auto"
         and not args.toa

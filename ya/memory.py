@@ -12,8 +12,20 @@ from .config import data_home
 
 
 MAX_MEMORY_CARDS = 100
+MAX_RELEVANT_MEMORY_CARDS = 3
+MIN_RELEVANCE_SCORE = 3
 ACTIVE_MEMORY_STATUSES = {"candidate", "approved"}
 DEFAULT_PRUNE_STATUSES = {"rejected", "revoked"}
+ENGLISH_WORD = re.compile(r"[a-z0-9][a-z0-9_-]*")
+HAN_TEXT = re.compile(r"[\u4e00-\u9fff]+")
+ENGLISH_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "is",
+    "it", "of", "on", "or", "the", "this", "that", "to", "what", "when", "where", "with",
+}
+CHINESE_STOP_PHRASES = {
+    "什么", "如何", "为什", "什么是", "怎么", "可以", "请问", "一个", "这个", "那个",
+    "我们", "你们", "他们", "关于", "以及", "进行", "一下", "是否", "需要",
+}
 
 
 class DuplicateMemoryError(ValueError):
@@ -35,6 +47,12 @@ class MemoryCard:
     status: str
     created_at: str
     version: int = 1
+
+
+@dataclass(frozen=True)
+class MemoryMatch:
+    card: MemoryCard
+    score: int
 
 
 def memory_path() -> Path:
@@ -126,9 +144,67 @@ def prune_cards(include_candidates: bool = False) -> list[MemoryCard]:
     return removed
 
 
-def relevant_context(limit: int = 3) -> str:
-    cards = list_cards("approved")[:limit]
-    if not cards:
+def _english_words(text: str) -> set[str]:
+    return {
+        word
+        for word in ENGLISH_WORD.findall(text)
+        if len(word) >= 2 and word not in ENGLISH_STOP_WORDS
+    }
+
+
+def _english_phrases(text: str) -> set[str]:
+    words = [word for word in ENGLISH_WORD.findall(text) if word not in ENGLISH_STOP_WORDS]
+    return {" ".join(words[index : index + 2]) for index in range(len(words) - 1)}
+
+
+def _han_ngrams(text: str, width: int) -> set[str]:
+    grams: set[str] = set()
+    for run in HAN_TEXT.findall(text):
+        grams.update(run[index : index + width] for index in range(len(run) - width + 1))
+    return {gram for gram in grams if gram not in CHINESE_STOP_PHRASES}
+
+
+def _memory_score(task: str, card: MemoryCard) -> int:
+    task_text = normalize_memory_text(task)
+    card_text = normalize_memory_text(card.text)
+    if not task_text or not card_text:
+        return 0
+
+    shared_words = _english_words(task_text) & _english_words(card_text)
+    shared_bigrams = _han_ngrams(task_text, 2) & _han_ngrams(card_text, 2)
+    shared_phrases = (
+        (_english_phrases(task_text) & _english_phrases(card_text))
+        or (_han_ngrams(task_text, 3) & _han_ngrams(card_text, 3))
+    )
+    exact_containment = (
+        min(len(task_text), len(card_text)) >= 4
+        and (task_text in card_text or card_text in task_text)
+    )
+    phrase_score = 5 if shared_phrases or exact_containment else 0
+    return phrase_score + 3 * len(shared_words) + len(shared_bigrams)
+
+
+def _created_timestamp(card: MemoryCard) -> float:
+    try:
+        return datetime.fromisoformat(card.created_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def select_relevant_cards(task: str, limit: int = MAX_RELEVANT_MEMORY_CARDS) -> list[MemoryMatch]:
+    """Return approved cards ranked by local, deterministic task relevance."""
+    matches = [
+        MemoryMatch(card, score)
+        for card in list_cards("approved")
+        if (score := _memory_score(task, card)) >= MIN_RELEVANCE_SCORE
+    ]
+    matches.sort(key=lambda match: (-match.score, -_created_timestamp(match.card), match.card.id))
+    return matches[:limit]
+
+
+def relevant_context(task: str, limit: int = MAX_RELEVANT_MEMORY_CARDS) -> str:
+    matches = select_relevant_cards(task, limit)
+    if not matches:
         return ""
-    lines = [f"- [{card.kind}] {card.text}" for card in cards]
+    lines = [f"- [{match.card.kind}] {match.card.text}" for match in matches]
     return "\n".join(lines)
