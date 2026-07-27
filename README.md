@@ -155,8 +155,9 @@ ya ask "Summarize a proposal" --format markdown > answer.md
 ya ask "Summarize a proposal" --format terminal
 ```
 
-After an interactive answer, Ya asks whether to create a memory candidate. This
-is optional; choosing `N` leaves memory unchanged.
+After an interactive answer, Ya asks whether to save your feedback as a memory.
+This creates a candidate for review; it is optional, and choosing `N` leaves
+memory unchanged.
 
 ### Common commands
 
