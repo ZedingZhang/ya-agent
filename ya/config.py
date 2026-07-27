@@ -13,7 +13,7 @@ VALID_EFFORTS = {"high", "max"}
 @dataclass
 class ModelConfig:
     model: str = "deepseek-v4-flash"
-    thinking_enabled: bool = True
+    thinking_enabled: bool = False
     reasoning_effort: str = "high"
     toa_token_budget: int = 8000
     toa_timeout: int = 90

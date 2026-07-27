@@ -28,7 +28,9 @@ class DeepSeekTests(unittest.TestCase):
             return _Response({"choices": [{"message": {"content": "ok"}}]})
 
         client = DeepSeekClient("test-key", opener=opener)
-        reply = client.complete([{"role": "user", "content": "hello"}], ModelConfig(), 100)
+        reply = client.complete(
+            [{"role": "user", "content": "hello"}], ModelConfig(thinking_enabled=True), 100
+        )
         self.assertEqual(reply.content, "ok")
         self.assertEqual(seen["model"], "deepseek-v4-flash")
         self.assertEqual(seen["thinking"], {"type": "enabled"})
