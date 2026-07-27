@@ -101,6 +101,21 @@ class DeepSeekClient:
                     except Exception as error:  # Tool errors are returned to the model, not persisted.
                         result = json.dumps({"error": str(error)})
                 transient_messages.append({"role": "tool", "tool_call_id": call["id"], "content": result})
+        # Some models keep searching after the useful evidence is already available.
+        # Give them one tool-free turn to synthesize an answer instead of failing the CLI.
+        transient_messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "The tool-call budget is exhausted. Return the best final answer to the "
+                    "original request now without using any tools. Be concise and state "
+                    "uncertainty when needed."
+                ),
+            }
+        )
+        reply = self.complete(transient_messages, config, max_tokens, tools=None)
+        if not reply.tool_calls:
+            return reply
         raise DeepSeekError(
             f"Tool-call limit ({MAX_TOOL_CALL_ROUNDS} rounds) reached before a final answer."
         )
