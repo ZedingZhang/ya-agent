@@ -207,9 +207,9 @@ Thinking is off by default. Use `--thinking on` for a request that benefits
 from extended reasoning, and add `--reasoning-effort high` or `max` to select
 its budget.
 
-After an interactive answer, Ya asks whether to save your feedback as a memory.
-This creates a candidate for review; it is optional, and choosing `N` leaves
-memory unchanged.
+After an interactive answer, Ya asks whether to learn from that answer by
+creating a memory candidate. This is optional; choosing `N` leaves memory
+unchanged, and a candidate still requires review and approval.
 
 ### Common commands
 
