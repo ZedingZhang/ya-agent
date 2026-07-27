@@ -8,7 +8,15 @@ import sys
 from .config import ModelConfig, load_config, model_id, save_config
 from .deepseek import DeepSeekClient, DeepSeekError
 from .keychain import load_api_key, save_api_key
-from .memory import create_candidate, list_cards, set_status
+from .memory import (
+    DuplicateMemoryError,
+    MemoryLimitError,
+    cards_to_prune,
+    create_candidate,
+    list_cards,
+    prune_cards,
+    set_status,
+)
 from .orchestrator import RunResult, single_agent, toa_agent
 from .terminal import format_output
 
@@ -45,6 +53,9 @@ def _parser() -> argparse.ArgumentParser:
     for action in ("approve", "reject", "revoke"):
         action_parser = memory_subcommands.add_parser(action)
         action_parser.add_argument("card_id")
+    prune = memory_subcommands.add_parser("prune", help="Delete rejected and revoked memory cards")
+    prune.add_argument("--include-candidates", action="store_true")
+    prune.add_argument("--yes", action="store_true", help="Confirm deletion without an interactive prompt")
     return parser
 
 
@@ -98,7 +109,14 @@ def _collect_feedback(result: RunResult, disabled: bool) -> None:
             print("Knowledge candidates require a source URL.")
             return
         evidence += f"; source: {source}"
-    card = create_candidate(text, evidence=evidence, kind=kind)
+    try:
+        card = create_candidate(text, evidence=evidence, kind=kind)
+    except DuplicateMemoryError as error:
+        print(f"Matching memory {error.card.id} already exists; no new candidate created.")
+        return
+    except MemoryLimitError as error:
+        print(f"{error}. No candidate created.")
+        return
     print(f"Created candidate {card.id}. Review it with: ya memory review")
 
 
@@ -145,6 +163,24 @@ def _memory(args: argparse.Namespace) -> int:
             print("No memory cards.")
         for card in cards:
             print(f"{card.id}  {card.status:9} {card.kind:10} {card.text}")
+        return 0
+    if args.memory_command == "prune":
+        cards = cards_to_prune(args.include_candidates)
+        if not cards:
+            print("No matching memory cards to delete.")
+            return 0
+        print(f"Memory cards to delete ({len(cards)}):")
+        for card in cards:
+            print(f"  {card.id}  {card.status:9} {card.kind:10} {card.text}")
+        if not args.yes:
+            if not sys.stdin.isatty():
+                raise ValueError("ya memory prune requires --yes in a non-interactive shell.")
+            answer = input("Permanently delete these memory cards? [y/N] ").strip().lower()
+            if answer not in {"y", "yes"}:
+                print("No memory cards deleted.")
+                return 0
+        removed = prune_cards(args.include_candidates)
+        print(f"Deleted {len(removed)} memory card(s).")
         return 0
     status = {"approve": "approved", "reject": "rejected", "revoke": "revoked"}[args.memory_command]
     card = set_status(args.card_id, status)

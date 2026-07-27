@@ -7,6 +7,7 @@ from io import StringIO
 from unittest.mock import patch
 
 from ya import cli
+from ya.memory import create_candidate, list_cards, set_status
 from ya.orchestrator import RunResult
 
 
@@ -102,3 +103,40 @@ class CliTests(unittest.TestCase):
         with patch("ya.cli.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n") as prompt:
             cli._collect_feedback(result, disabled=False)
         self.assertEqual(prompt.call_args.args[0], "\nLearn from this answer? [y/N] ")
+
+    def test_memory_prune_requires_yes_when_noninteractive(self):
+        card = create_candidate("discard me", "evidence")
+        set_status(card.id, "rejected")
+        with patch("ya.cli.sys.stdin.isatty", return_value=False):
+            self.assertEqual(cli.main(["memory", "prune"]), 2)
+        self.assertEqual([existing.id for existing in list_cards()], [card.id])
+
+    def test_memory_prune_can_be_declined_interactively(self):
+        card = create_candidate("discard me", "evidence")
+        set_status(card.id, "rejected")
+        stream = StringIO()
+        with patch("ya.cli.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n"), patch(
+            "ya.cli.sys.stdout", stream
+        ):
+            self.assertEqual(cli.main(["memory", "prune"]), 0)
+        self.assertIn(card.id, stream.getvalue())
+        self.assertIn("No memory cards deleted.", stream.getvalue())
+        self.assertEqual([existing.id for existing in list_cards()], [card.id])
+
+    def test_memory_prune_with_yes_deletes_default_statuses(self):
+        rejected = create_candidate("rejected", "evidence")
+        candidate = create_candidate("candidate", "evidence")
+        set_status(rejected.id, "rejected")
+        stream = StringIO()
+        with patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["memory", "prune", "--yes"]), 0)
+        self.assertIn(rejected.id, stream.getvalue())
+        self.assertIn("Deleted 1 memory card(s).", stream.getvalue())
+        self.assertEqual([existing.id for existing in list_cards()], [candidate.id])
+
+    def test_memory_prune_can_include_candidates(self):
+        candidate = create_candidate("candidate", "evidence")
+        approved = create_candidate("approved", "evidence")
+        set_status(approved.id, "approved")
+        self.assertEqual(cli.main(["memory", "prune", "--include-candidates", "--yes"]), 0)
+        self.assertEqual([existing.id for existing in list_cards()], [approved.id])
