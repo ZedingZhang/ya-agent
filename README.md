@@ -10,13 +10,14 @@ keeps long-term memory locally, and only starts its bounded Tree of Agents
 
 ## Platform support
 
-The CLI runs on Python 3.9 or later. It does not provide a web or desktop UI.
+Ya is a terminal-only CLI. Release binaries do not require Python, pip, or a
+PATH change.
 
 | Operating system | Install and run | API key storage |
 | --- | --- | --- |
-| macOS | Supported and tested locally. | `ya auth deepseek` saves the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
-| Linux | Supported when `DEEPSEEK_API_KEY` is set. | Set the environment variable in your shell. |
-| Windows | Supported in PowerShell when `DEEPSEEK_API_KEY` is set. | Set the environment variable in PowerShell. |
+| macOS | Apple Silicon and Intel standalone binaries. | `ya auth deepseek` saves the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
+| Linux | x64 glibc binary, built on Ubuntu 22.04. | Set `DEEPSEEK_API_KEY` in your shell. |
+| Windows | x64 standalone executable for PowerShell. | Set `DEEPSEEK_API_KEY` in PowerShell. |
 
 `ya auth deepseek` is macOS-only because it uses the macOS `security` command.
 Do not run that command on Linux or Windows; use the environment variable
@@ -24,35 +25,83 @@ instead.
 
 ## Install
 
-Ya requires Python 3.9 or later and a DeepSeek API key.
+Ya needs a DeepSeek API key. Python is required only for source development or
+the optional Python package installation.
 
-### macOS and Linux
+### Standalone executable (recommended)
+
+Download the matching file from the [latest GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest).
+Run it from the directory where it was downloaded; no administrator permission
+or PATH change is needed.
+
+#### macOS Apple Silicon
+
+```sh
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-macos-arm64
+chmod +x ya-macos-arm64
+./ya-macos-arm64 ask "Explain Graph Engineering in plain language"
+```
+
+Use `ya-macos-x64` instead on an Intel Mac.
+
+#### Linux x64
+
+```sh
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-linux-x64
+chmod +x ya-linux-x64
+./ya-linux-x64 ask "Explain Graph Engineering in plain language"
+```
+
+The Linux binary targets x64 systems using glibc, such as Ubuntu 22.04 or
+later. Alpine Linux and other musl-based systems are not supported by this
+binary.
+
+#### Windows x64 (PowerShell)
+
+```powershell
+Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-windows-x64.exe -OutFile ya-windows-x64.exe
+.\ya-windows-x64.exe ask "Explain Graph Engineering in plain language"
+```
+
+### Verify an unsigned download
+
+The macOS and Windows binaries are currently unsigned. Before overriding an
+operating-system warning, download
+[`checksums.txt`](https://github.com/ZedingZhang/ya-agent/releases/latest/download/checksums.txt)
+and compare its matching SHA-256 entry with the downloaded file:
+
+```sh
+shasum -a 256 ya-macos-arm64
+# Linux: sha256sum ya-linux-x64
+```
+
+```powershell
+Get-FileHash .\ya-windows-x64.exe -Algorithm SHA256
+```
+
+On macOS, only after verifying the checksum, remove the download quarantine if
+the system blocks execution:
+
+```sh
+xattr -d com.apple.quarantine ./ya-macos-arm64
+```
+
+On Windows, only after verifying the checksum, remove the downloaded-file mark
+if SmartScreen blocks the file:
+
+```powershell
+Unblock-File .\ya-windows-x64.exe
+```
+
+### Python package and development
+
+For development, clone the repository and install it in editable mode:
 
 ```sh
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
-python3 -m pip install .
-```
-
-### Windows (PowerShell)
-
-```powershell
-git clone https://github.com/ZedingZhang/ya-agent.git
-cd ya-agent
-py -m pip install .
-```
-
-After setting `DEEPSEEK_API_KEY` below, start Ya without relying on a PATH entry:
-
-```powershell
-py -m ya.cli ask "Explain Graph Engineering in plain language"
-```
-
-For development, install the checkout in editable mode:
-
-```sh
 python3 -m pip install -e .
-python3 -m pytest -q
+python3 -m unittest discover -s tests -q
 ```
 
 On macOS, `ya auth deepseek` saves the key in the Keychain. For non-interactive
@@ -63,24 +112,23 @@ local state directory.
 ## Run Ya
 
 Ya is a terminal command-line program. It does not start a web server or GUI.
-After installation, open a terminal and run `ya` from any directory:
+After downloading a standalone file, run that file from its download directory:
 
 ```sh
-ya ask "Explain Graph Engineering in plain language"
+./ya-macos-arm64 ask "Explain Graph Engineering in plain language"
 ```
 
-To see the available options for a request, run:
+To see the available options, append `--help`:
 
 ```sh
-ya ask --help
+./ya-macos-arm64 ask --help
 ```
 
-If your shell reports `ya: command not found`, first activate the Python
-environment where you installed Ya. From the cloned project directory, you can
-also run Ya directly through Python:
+When using the Python package from a checkout, the same CLI can run without a
+console-script PATH entry:
 
 ```sh
-python3 -m ya.cli ask "Explain Graph Engineering in plain language"
+python3 -m ya ask "Explain Graph Engineering in plain language"
 ```
 
 Interactive terminals render Ya's common Markdown output automatically. When

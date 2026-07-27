@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-binary:
+    name: Build ${{ matrix.asset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            asset: ya-macos-arm64
+          - os: macos-15-intel
+            asset: ya-macos-x64
+          - os: windows-2022
+            asset: ya-windows-x64.exe
+          - os: ubuntu-22.04
+            asset: ya-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate release version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import ast
+          import os
+          from pathlib import Path
+          import re
+
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          project_text = Path("pyproject.toml").read_text(encoding="utf-8")
+          project_version = re.search(r'^version = "([^"]+)"$', project_text, re.MULTILINE)
+          module = ast.parse(Path("ya/__init__.py").read_text(encoding="utf-8"))
+          module_version = next(
+              (
+                  node.value.value
+                  for node in module.body
+                  if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+                  and isinstance(node.value, ast.Constant)
+                  and isinstance(node.value.value, str)
+              ),
+              None,
+          )
+          if not project_version or project_version.group(1) != expected or module_version != expected:
+              raise SystemExit("Release tag, project version, and ya.__version__ must match.")
+          PY
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -q
+
+      - name: Install PyInstaller
+        run: python -m pip install PyInstaller==6.21.0
+
+      - name: Build standalone executable
+        run: python -m PyInstaller --clean --noconfirm --onefile --name ya ya/__main__.py
+
+      - name: Smoke test standalone executable on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export YA_HOME="$RUNNER_TEMP/ya-home"
+          ./dist/ya --help
+          ./dist/ya config set thinking off
+
+      - name: Smoke test standalone executable on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:YA_HOME = Join-Path $env:RUNNER_TEMP "ya-home"
+          & .\dist\ya.exe --help
+          & .\dist\ya.exe config set thinking off
+
+      - name: Stage release asset
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          mkdir release
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp dist/ya.exe "release/$ASSET"
+          else
+            cp dist/ya "release/$ASSET"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: release/${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    needs: build-binary
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download standalone executables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ya-*
+          path: release
+          merge-multiple: true
+
+      - name: Build Python packages
+        run: |
+          python -m pip install build
+          python -m build --outdir release
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum ya-* > checksums.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release/* \
+            --title "Ya $RELEASE_TAG" \
+            --notes-file .github/release-notes.md
