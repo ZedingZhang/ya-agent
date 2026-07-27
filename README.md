@@ -8,6 +8,22 @@ knowledge without unbounded self-modification. It uses the DeepSeek V4 API,
 keeps long-term memory locally, and only starts its bounded Tree of Agents
 (ToA) mode when the user explicitly requests and confirms it.
 
+## Distinctive Architecture
+
+Ya is designed around controlled recursive improvement rather than a static
+chat loop:
+
+- **SEA continuous learning and self-evolution**: explicit user feedback becomes
+  a candidate experience card. Only user-approved cards update Ya's local
+  preference, procedure, or source-backed knowledge for later tasks. This is
+  recursive improvement under user authority, not autonomous self-rewriting.
+- **ICM curiosity loop**: when a response identifies one material, source-backed
+  information gap, Ya performs one bounded targeted exploration and returns an
+  evidence supplement instead of silently guessing.
+- **Bounded ToA multi-agent architecture**: `--toa` creates a root coordinator
+  and up to two temporary evidence and risk workers. Ya shows a preflight and
+  requires explicit confirmation before this higher-cost research mode starts.
+
 ## Platform support
 
 Ya is a terminal-only CLI. Release binaries do not require Python, pip, or a
@@ -150,6 +166,11 @@ This is an illustrative terminal-style rendering based on a real Ya CLI answer.
 ![Ya CLI example output](assets/ya-cli-example-en.png)
 
 ## Execution flow
+
+The loop is deliberate: task-relevant approved memory informs the answer; ICM
+can close one evidence gap; explicit feedback enters SEA as a candidate; only
+approval updates local memory for a later task. ToA expands research breadth
+only when the user requests it.
 
 ```mermaid
 flowchart TD
