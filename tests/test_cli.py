@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from io import StringIO
@@ -29,6 +31,16 @@ class CliTests(unittest.TestCase):
     def test_effort_requires_thinking(self):
         with patch("ya.cli.load_api_key", return_value="key"):
             self.assertEqual(cli.main(["ask", "test", "--thinking", "off", "--reasoning-effort", "max"]), 2)
+
+    def test_module_entrypoint_shows_help(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "ya", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("usage: ya", completed.stdout)
 
     def test_config_set_pro(self):
         self.assertEqual(cli.main(["config", "set", "model", "pro"]), 0)

@@ -8,48 +8,90 @@ Agent：在用户许可下积累偏好、经验与来源化知识，不会无边
 
 ## 操作系统支持
 
-CLI 可运行于 Python 3.9 或更高版本。它不提供 Web 或桌面图形界面。
+Ya 是纯终端 CLI。Release 中的独立可执行文件无需 Python、pip 或修改 PATH。
 
 | 操作系统 | 安装与运行 | API Key 存储 |
 | --- | --- | --- |
-| macOS | 已在本地验证支持。 | `ya auth deepseek` 会将密钥保存至 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
-| Linux | 设置 `DEEPSEEK_API_KEY` 后支持运行。 | 在 shell 中设置环境变量。 |
-| Windows | 在 PowerShell 中设置 `DEEPSEEK_API_KEY` 后支持运行。 | 在 PowerShell 中设置环境变量。 |
+| macOS | 提供 Apple Silicon 和 Intel 独立可执行文件。 | `ya auth deepseek` 会将密钥保存至 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
+| Linux | 提供基于 Ubuntu 22.04 构建的 x64 glibc 可执行文件。 | 在 shell 中设置 `DEEPSEEK_API_KEY`。 |
+| Windows | 提供适用于 PowerShell 的 x64 独立可执行文件。 | 在 PowerShell 中设置 `DEEPSEEK_API_KEY`。 |
 
 `ya auth deepseek` 仅支持 macOS，因为它使用了 macOS 的 `security` 命令。
 请勿在 Linux 或 Windows 上运行该命令；应改用环境变量。
 
 ## 安装
 
-Ya 需要 Python 3.9 或更高版本以及一个 DeepSeek API Key。
+Ya 需要一个 DeepSeek API Key。仅在源码开发或选择 Python 包安装时才需要 Python。
 
-### macOS 和 Linux
+### 独立可执行文件（推荐）
+
+从[最新 GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest)下载对应文件。
+在下载目录中直接运行即可，无需管理员权限或修改 PATH。
+
+#### macOS Apple Silicon
+
+```sh
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-macos-arm64
+chmod +x ya-macos-arm64
+./ya-macos-arm64 ask "用通俗语言解释 Graph Engineering"
+```
+
+Intel Mac 请改用 `ya-macos-x64`。
+
+#### Linux x64
+
+```sh
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-linux-x64
+chmod +x ya-linux-x64
+./ya-linux-x64 ask "用通俗语言解释 Graph Engineering"
+```
+
+Linux 二进制面向使用 glibc 的 x64 系统，例如 Ubuntu 22.04 或更高版本。Alpine Linux
+及其他基于 musl 的系统不支持该二进制文件。
+
+#### Windows x64（PowerShell）
+
+```powershell
+Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-windows-x64.exe -OutFile ya-windows-x64.exe
+.\ya-windows-x64.exe ask "用通俗语言解释 Graph Engineering"
+```
+
+### 校验未签名下载文件
+
+macOS 和 Windows 二进制文件当前未签名。若系统给出警告，请先下载
+[`checksums.txt`](https://github.com/ZedingZhang/ya-agent/releases/latest/download/checksums.txt)，
+并将其中对应的 SHA-256 与下载文件进行比对：
+
+```sh
+shasum -a 256 ya-macos-arm64
+# Linux: sha256sum ya-linux-x64
+```
+
+```powershell
+Get-FileHash .\ya-windows-x64.exe -Algorithm SHA256
+```
+
+在 macOS 上，仅在校验哈希后且系统阻止运行时，才移除下载隔离标记：
+
+```sh
+xattr -d com.apple.quarantine ./ya-macos-arm64
+```
+
+在 Windows 上，仅在校验哈希后且 SmartScreen 阻止文件时，才移除下载文件标记：
+
+```powershell
+Unblock-File .\ya-windows-x64.exe
+```
+
+### Python 包与开发
+
+如需开发，请克隆仓库并以可编辑模式安装：
 
 ```sh
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
-python3 -m pip install .
-```
-
-### Windows（PowerShell）
-
-```powershell
-git clone https://github.com/ZedingZhang/ya-agent.git
-cd ya-agent
-py -m pip install .
-```
-
-设置下方的 `DEEPSEEK_API_KEY` 后，可不依赖 PATH 直接启动 Ya：
-
-```powershell
-py -m ya.cli ask "用通俗语言解释 Graph Engineering"
-```
-
-如需进行开发，请以可编辑模式安装当前检出目录：
-
-```sh
 python3 -m pip install -e .
-python3 -m pytest -q
+python3 -m unittest discover -s tests -q
 ```
 
 在 macOS 上，`ya auth deepseek` 会将密钥保存至钥匙串。对于非交互式环境，请改为设置
@@ -58,24 +100,23 @@ python3 -m pytest -q
 
 ## 运行 Ya
 
-Ya 是一个终端命令行程序，不需要启动 Web 服务或图形界面。安装完成后，在任意目录打开
-终端并运行 `ya`：
+Ya 是一个终端命令行程序，不需要启动 Web 服务或图形界面。下载独立可执行文件后，在其
+下载目录中运行：
 
 ```sh
-ya ask "用通俗语言解释 Graph Engineering"
+./ya-macos-arm64 ask "用通俗语言解释 Graph Engineering"
 ```
 
-要查看提问命令可用的选项，请运行：
+要查看可用选项，请追加 `--help`：
 
 ```sh
-ya ask --help
+./ya-macos-arm64 ask --help
 ```
 
-如果 shell 提示 `ya: command not found`，请先激活安装 Ya 时所使用的 Python 环境。
-也可以在克隆的项目目录中通过 Python 直接运行 Ya：
+在检出的项目目录中使用 Python 包时，也可不依赖 console-script 的 PATH 直接运行同一 CLI：
 
 ```sh
-python3 -m ya.cli ask "用通俗语言解释 Graph Engineering"
+python3 -m ya ask "用通俗语言解释 Graph Engineering"
 ```
 
 交互式终端会自动渲染 Ya 常见的 Markdown 输出。重定向或通过管道输出时，Ya 会保留原始
