@@ -147,7 +147,7 @@ complete answer.
 
 This is an illustrative terminal-style rendering based on a real Ya CLI answer.
 
-![Ya CLI example output](assets/ya-cli-example.png)
+![Ya CLI example output](assets/ya-cli-example-en.png)
 
 ## Execution flow
 

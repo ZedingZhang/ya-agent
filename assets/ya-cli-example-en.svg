@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <rect width="1600" height="900" fill="#101418"/>
+  <rect x="80" y="80" width="1440" height="740" rx="20" fill="#172027" stroke="#3a4752" stroke-width="2"/>
+  <path d="M100 100h1400a20 20 0 0 1 20 20v62H80v-62a20 20 0 0 1 20-20Z" fill="#202a32"/>
+  <circle cx="122" cy="141" r="12" fill="#ff5f56"/>
+  <circle cx="160" cy="141" r="12" fill="#ffbd2e"/>
+  <circle cx="198" cy="141" r="12" fill="#27c93f"/>
+  <text x="242" y="149" fill="#9fb0bc" font-family="Menlo, Monaco, Consolas, monospace" font-size="26">ya - zsh</text>
+  <text x="130" y="255" fill="#63d1ac" font-family="Menlo, Monaco, Consolas, monospace" font-size="25">$</text>
+  <text x="165" y="255" fill="#f1f5f8" font-family="Menlo, Monaco, Consolas, monospace" font-size="25">ya ask &quot;Explain Graph Engineering in two sentences.&quot; --no-feedback</text>
+  <text x="130" y="390" fill="#8cc6ff" font-family="Menlo, Monaco, Consolas, monospace" font-size="28" font-weight="700">[Ya single result]</text>
+  <g fill="#d7e0e8" font-family="Menlo, Monaco, Consolas, monospace" font-size="23">
+    <text x="130" y="475">Graph Engineering is the practice of building and operating systems that model</text>
+    <text x="130" y="522">entities and relationships as graphs. It combines data modeling, storage,</text>
+    <text x="130" y="569">querying, and graph algorithms for applications such as search and recommendation.</text>
+  </g>
+  <text x="130" y="755" fill="#7f919f" font-family="Menlo, Monaco, Consolas, monospace" font-size="21">Illustrative terminal-style rendering based on a real Ya CLI response</text>
+</svg>
