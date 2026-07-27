@@ -84,3 +84,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["ask", "test", "--format", "terminal"]), 0)
         self.assertIn("Title", stream.getvalue())
         self.assertNotIn("##", stream.getvalue())
+
+    def test_feedback_prompt_uses_plain_language(self):
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n") as prompt:
+            cli._collect_feedback(result, disabled=False)
+        self.assertEqual(prompt.call_args.args[0], "\nSave this feedback as a memory? [y/N] ")

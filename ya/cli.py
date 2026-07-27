@@ -83,7 +83,7 @@ def _toa_confirm(args: argparse.Namespace, config: ModelConfig) -> bool:
 def _collect_feedback(result: RunResult, disabled: bool) -> None:
     if disabled or not sys.stdin.isatty():
         return
-    answer = input("\nCreate a memory candidate from explicit feedback? [y/N] ").strip().lower()
+    answer = input("\nSave this feedback as a memory? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         return
     text = input("Candidate preference or procedure: ").strip()
