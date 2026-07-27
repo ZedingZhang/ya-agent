@@ -18,10 +18,10 @@ class ConfigTests(unittest.TestCase):
             os.environ["YA_HOME"] = self.previous_home
         self.temp.cleanup()
 
-    def test_defaults_are_flash_with_thinking(self):
+    def test_defaults_are_flash_without_thinking(self):
         config = load_config()
         self.assertEqual(config.model, "deepseek-v4-flash")
-        self.assertTrue(config.thinking_enabled)
+        self.assertFalse(config.thinking_enabled)
         self.assertEqual(config.reasoning_effort, "high")
 
     def test_config_round_trip(self):

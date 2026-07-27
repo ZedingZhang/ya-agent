@@ -155,6 +155,10 @@ ya ask "Summarize a proposal" --format markdown > answer.md
 ya ask "Summarize a proposal" --format terminal
 ```
 
+Thinking is off by default. Use `--thinking on` for a request that benefits
+from extended reasoning, and add `--reasoning-effort high` or `max` to select
+its budget.
+
 After an interactive answer, Ya asks whether to save your feedback as a memory.
 This creates a candidate for review; it is optional, and choosing `N` leaves
 memory unchanged.

@@ -148,6 +148,9 @@ ya ask "总结一个方案" --format markdown > answer.md
 ya ask "总结一个方案" --format terminal
 ```
 
+思考模式默认关闭。对于需要更深入推理的任务，可使用 `--thinking on`，并用
+`--reasoning-effort high` 或 `max` 选择推理预算。
+
 交互式回答结束后，Ya 会询问是否创建记忆候选项。这是可选操作；选择 `N` 不会改动记忆。
 
 ### 常用命令
