@@ -77,3 +77,33 @@ class DeepSeekTests(unittest.TestCase):
 
         self.assertEqual(reply.content, "final answer")
         self.assertEqual(request_count, MAX_TOOL_CALL_ROUNDS + 1)
+
+    def test_tool_loop_falls_back_to_tool_free_final_answer(self):
+        tool_call = {
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{}"},
+        }
+        request_count = 0
+        fallback_payload = {}
+
+        def opener(request, timeout):
+            nonlocal request_count
+            payload = json.loads(request.data.decode("utf-8"))
+            request_count += 1
+            if "tools" not in payload:
+                fallback_payload.update(payload)
+                return _Response({"choices": [{"message": {"content": "fallback answer"}}]})
+            return _Response({"choices": [{"message": {"tool_calls": [tool_call]}}]})
+
+        reply = DeepSeekClient("test-key", opener=opener).run_with_tools(
+            [{"role": "user", "content": "hello"}],
+            ModelConfig(),
+            100,
+            tools=[{"type": "function"}],
+            tool_handlers={"lookup": lambda arguments: "result"},
+        )
+
+        self.assertEqual(reply.content, "fallback answer")
+        self.assertEqual(request_count, MAX_TOOL_CALL_ROUNDS + 2)
+        self.assertNotIn("tools", fallback_payload)
