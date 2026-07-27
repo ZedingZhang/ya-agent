@@ -231,11 +231,30 @@ ya ask "Assess this proposal" --toa --toa-workers 2 --yes
 # Review and explicitly approve a memory candidate.
 ya memory review
 ya memory approve <card-id>
+
+# Delete rejected and revoked cards after reviewing the preview.
+ya memory prune
+
+# Include pending candidates and confirm explicitly for a script.
+ya memory prune --include-candidates --yes
 ```
 
 `--toa` is not enabled by default. It shows its model, worker count, token
 budget, and timeout before it starts. Use `--no-feedback` to skip the optional
 memory prompt after any request.
+
+### Memory limits and cleanup
+
+Ya stores at most 100 local memory cards, including candidates, approved,
+rejected, and revoked cards. It prevents duplicate active cards when the same
+kind has equivalent text after Unicode normalization, case folding, and
+whitespace cleanup. A rejected or revoked card does not block you from adding
+the same memory again.
+
+`ya memory prune` previews and then deletes rejected and revoked cards. Add
+`--include-candidates` to delete pending candidates too. It never deletes an
+approved card directly: run `ya memory revoke <card-id>` first, then prune it.
+In a non-interactive shell, `ya memory prune` requires `--yes`.
 
 ## Safety model
 

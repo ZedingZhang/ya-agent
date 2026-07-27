@@ -215,10 +215,26 @@ ya ask "评估这个方案" --toa --toa-workers 2 --yes
 # 查看并显式批准一个记忆候选项。
 ya memory review
 ya memory approve <card-id>
+
+# 预览后删除已拒绝和已撤销的卡片。
+ya memory prune
+
+# 同时包含待审核候选项，并在脚本中显式确认。
+ya memory prune --include-candidates --yes
 ```
 
 `--toa` 默认不会启用。它会在启动前显示模型、工作者数量、Token 预算和超时时间。
 任意请求后均可使用 `--no-feedback` 跳过可选的记忆提示。
+
+### 记忆上限与清理
+
+Ya 最多保存 100 张本地记忆卡片，包括候选、已批准、已拒绝和已撤销状态。对于同一种类的
+有效卡片，Ya 会在 Unicode 规范化、大小写折叠和空白整理后进行精确去重。已拒绝或已撤销的
+卡片不会阻止再次添加相同记忆。
+
+`ya memory prune` 会先预览，再删除已拒绝和已撤销的卡片。添加 `--include-candidates`
+可同时删除待审核候选项。该命令不会直接删除已批准卡片：请先执行
+`ya memory revoke <card-id>`，再运行 prune。非交互式 shell 中必须传入 `--yes`。
 
 ## 安全模型
 
