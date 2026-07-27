@@ -71,6 +71,10 @@ def render_markdown(text: str, color: bool = False) -> str:
             in_code_block = not in_code_block
             index += 1
             continue
+        # Models occasionally omit a closing fence. A real Markdown heading is
+        # stronger evidence of a new section than continuing an accidental block.
+        if in_code_block and HEADING.match(line):
+            in_code_block = False
         if in_code_block:
             rendered.append(f"  {line}")
             index += 1
@@ -144,6 +148,8 @@ class StreamingMarkdownRenderer:
                 previous = []
             self._code = not self._code
             return previous
+        if self._code and HEADING.match(line):
+            self._code = False
         if self._code:
             return [f"  {line}"]
         # Delay one line so GFM table headers can be converted after their divider.

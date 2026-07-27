@@ -55,3 +55,22 @@ class TerminalRendererTests(unittest.TestCase):
         self.assertIn("Title", rendered)
         self.assertIn("Name: Ya; Value: Agent", rendered)
         self.assertNotIn("##", rendered)
+
+    def test_recovers_from_an_unclosed_code_fence_at_a_heading(self):
+        text = """## Start
+```sql
+SELECT 1;
+   ## Recovered heading
+- **bold item**
+"""
+
+        buffered = render_markdown(text)
+        renderer = StreamingMarkdownRenderer()
+        streamed = renderer.write(text) + renderer.finish()
+
+        for rendered in (buffered, streamed):
+            self.assertIn("SELECT 1;", rendered)
+            self.assertIn("Recovered heading", rendered)
+            self.assertIn("- bold item", rendered)
+            self.assertNotIn("## Recovered", rendered)
+            self.assertNotIn("**bold item**", rendered)
