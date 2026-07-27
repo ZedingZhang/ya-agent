@@ -64,7 +64,7 @@ class CliTests(unittest.TestCase):
         with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result), patch(
             "ya.cli._collect_feedback"
         ), patch("ya.cli.sys.stdout", stream):
-            self.assertEqual(cli.main(["ask", "test"]), 0)
+            self.assertEqual(cli.main(["ask", "test", "--stream", "off"]), 0)
         self.assertIn("Title", stream.getvalue())
         self.assertIn("bold", stream.getvalue())
         self.assertNotIn("##", stream.getvalue())
@@ -97,6 +97,33 @@ class CliTests(unittest.TestCase):
             self.assertEqual(cli.main(["ask", "test", "--format", "terminal"]), 0)
         self.assertIn("Title", stream.getvalue())
         self.assertNotIn("##", stream.getvalue())
+
+    def test_ask_streams_simple_tty_answers(self):
+        stream = _TtyStringIO()
+        result = RunResult(content="## Title\n\n**bold**", mode="single", usage={})
+
+        def agent(client, task, config, web_mode, on_content):
+            on_content("## Ti")
+            on_content("tle\n\n**bold**")
+            return result
+
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", side_effect=agent), patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "explain a concept"]), 0)
+        self.assertIn("Title", stream.getvalue())
+        self.assertIn("bold", stream.getvalue())
+        self.assertNotIn("##", stream.getvalue())
+        self.assertNotIn("**", stream.getvalue())
+
+    def test_research_auto_does_not_request_streaming(self):
+        stream = _TtyStringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result) as agent, patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "latest weather"]), 0)
+        self.assertIsNone(agent.call_args.kwargs["on_content"])
 
     def test_feedback_prompt_uses_plain_language(self):
         result = RunResult(content="answer", mode="single", usage={})

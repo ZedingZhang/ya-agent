@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from ya.terminal import format_output, render_markdown, strip_terminal_controls
+from ya.terminal import StreamingMarkdownRenderer, format_output, render_markdown, strip_terminal_controls
 
 
 class TerminalRendererTests(unittest.TestCase):
@@ -48,3 +48,10 @@ class TerminalRendererTests(unittest.TestCase):
         with patch.dict(os.environ, {"NO_COLOR": ""}, clear=True):
             rendered = format_output("## Title", "terminal", is_tty=True)
         self.assertEqual(rendered, "Title")
+
+    def test_streaming_renderer_handles_split_markdown_lines_and_tables(self):
+        renderer = StreamingMarkdownRenderer()
+        rendered = renderer.write("## Ti") + renderer.write("tle\n\n| Name | Value |\n| --- | --- |\n| Ya | Agent |\n") + renderer.finish()
+        self.assertIn("Title", rendered)
+        self.assertIn("Name: Ya; Value: Agent", rendered)
+        self.assertNotIn("##", rendered)

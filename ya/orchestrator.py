@@ -3,6 +3,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
+import re
+from typing import Callable
 
 from .config import ModelConfig
 from .deepseek import DeepSeekClient, DeepSeekError, ModelReply
@@ -24,6 +26,15 @@ WORKER_PROMPTS = {
     "risk": "Act as a skeptical reviewer. Find counterexamples, risks, uncertainty, and source-backed limitations for this task.",
 }
 
+# Keep automatic search conservative: ordinary explanations answer directly,
+# while changing facts, source requests, and research language receive evidence.
+WEB_AUTO_PATTERN = re.compile(
+    r"\b(latest|current|today|news|price|prices|stock|weather|schedule|law|regulation|"
+    r"research|source|sources|cite|citation|compare|recommend|review)\b|"
+    r"最新|今天|新闻|价格|股价|天气|赛程|法律|法规|研究|来源|引用|对比|比较|推荐|评测",
+    re.IGNORECASE,
+)
+
 
 @dataclass
 class RunResult:
@@ -42,19 +53,48 @@ def _messages(task: str, extra_instruction: str = "") -> list[dict]:
     ]
 
 
-def _run_agent(client: DeepSeekClient, task: str, config: ModelConfig, max_tokens: int, instruction: str = "") -> ModelReply:
+def should_use_web(task: str, web_mode: str) -> bool:
+    if web_mode == "on":
+        return True
+    if web_mode == "off":
+        return False
+    return bool(WEB_AUTO_PATTERN.search(task))
+
+
+def _run_agent(
+    client: DeepSeekClient,
+    task: str,
+    config: ModelConfig,
+    max_tokens: int,
+    instruction: str = "",
+    web_mode: str = "auto",
+) -> ModelReply:
+    use_web = should_use_web(task, web_mode)
+    if web_mode == "on":
+        instruction += "\nWeb search is explicitly required for this request. Call web_search at least once before answering."
     return client.run_with_tools(
         _messages(task, instruction),
         config,
         max_tokens=max_tokens,
-        tools=[WEB_SEARCH_TOOL],
-        tool_handlers={"web_search": search},
+        tools=[WEB_SEARCH_TOOL] if use_web else None,
+        tool_handlers={"web_search": search} if use_web else None,
     )
 
 
-def single_agent(client: DeepSeekClient, task: str, config: ModelConfig) -> RunResult:
+def single_agent(
+    client: DeepSeekClient,
+    task: str,
+    config: ModelConfig,
+    web_mode: str = "auto",
+    on_content: Callable[[str], None] | None = None,
+) -> RunResult:
     reserve = min(1024, config.toa_token_budget // 4)
-    reply = _run_agent(client, task, config, max_tokens=min(4096, config.toa_token_budget - reserve))
+    max_tokens = min(4096, config.toa_token_budget - reserve)
+    if on_content is not None and not should_use_web(task, web_mode):
+        reply = client.complete_stream(_messages(task), config, max_tokens, on_content)
+        # An ICM follow-up requires a tool call and is deliberately buffered.
+        return RunResult(content=reply.content, mode="single", usage=reply.usage)
+    reply = _run_agent(client, task, config, max_tokens=max_tokens, web_mode=web_mode)
     result = RunResult(content=reply.content, mode="single", usage=reply.usage)
     return _apply_icm(client, task, config, result, reserve)
 
@@ -71,7 +111,7 @@ def toa_agent(client: DeepSeekClient, task: str, config: ModelConfig, workers: i
     executor = ThreadPoolExecutor(max_workers=workers)
     try:
         futures = {
-            executor.submit(_run_agent, client, task, config, allocation, WORKER_PROMPTS[role]): role
+            executor.submit(_run_agent, client, task, config, allocation, WORKER_PROMPTS[role], "on"): role
             for role in roles
         }
         try:
@@ -97,7 +137,7 @@ def toa_agent(client: DeepSeekClient, task: str, config: ModelConfig, workers: i
 Treat a worker's unsupported statement as an open question. Separate evidence, inference,
 risks, and remaining uncertainty. Include cited URLs from the packets when available.
 Evidence packets:\n""" + packet_text
-    reply = _run_agent(client, task, config, working_budget - allocation * workers, synthesis)
+    reply = _run_agent(client, task, config, working_budget - allocation * workers, synthesis, "on")
     usage = dict(reply.usage)
     usage["worker_count"] = workers
     result = RunResult(content=reply.content, mode="toa", usage=usage, partial=bool(failures))
@@ -123,7 +163,7 @@ def _apply_icm(
     instruction = """The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n""" + result.content
-    reply = _run_agent(client, task, config, reserve, instruction)
+    reply = _run_agent(client, task, config, reserve, instruction, "on")
     result.content = result.content.replace("[ICM_GAP]", "") + "\n\nEvidence supplement:\n" + reply.content
     result.usage["icm_follow_up"] = reply.usage
     return result
