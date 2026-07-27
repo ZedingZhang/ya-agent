@@ -208,6 +208,7 @@ ya ask "Summarize the benefits and tradeoffs of a relational database"
 ya ask "Summarize a proposal" --format markdown > answer.md
 ya ask "Summarize a proposal" --format terminal
 ya ask "Explain recursion" --stream off
+ya ask "Explain PostgreSQL indexes" --show-memory
 ```
 
 Thinking is off by default. Use `--thinking on` for a request that benefits
@@ -260,13 +261,22 @@ ya memory prune --include-candidates --yes
 budget, and timeout before it starts. Use `--no-feedback` to skip the optional
 memory prompt after any request.
 
+Pass `--show-memory` to display the approved cards selected for that task,
+including their IDs and local relevance scores. This may print personal memory
+text, so do not use it in shared terminal logs.
+
 ### Memory limits and cleanup
 
 Ya stores at most 100 local memory cards, including candidates, approved,
-rejected, and revoked cards. It prevents duplicate active cards when the same
-kind has equivalent text after Unicode normalization, case folding, and
-whitespace cleanup. A rejected or revoked card does not block you from adding
-the same memory again.
+rejected, and revoked cards. For each task, it selects at most three approved
+cards that meet a local relevance threshold: exact phrases and meaningful
+English keywords rank first, then Chinese character n-gram overlap; equal
+scores prefer newer cards. Low-relevance cards are not sent to the model.
+This selection is local, uses no embedding or network service, and consumes no
+extra API tokens. It prevents duplicate active cards when the same kind has
+equivalent text after Unicode normalization, case folding, and whitespace
+cleanup. A rejected or revoked card does not block you from adding the same
+memory again.
 
 `ya memory prune` previews and then deletes rejected and revoked cards. Add
 `--include-candidates` to delete pending candidates too. It never deletes an
