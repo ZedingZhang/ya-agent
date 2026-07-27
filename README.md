@@ -137,6 +137,12 @@ Use `--format terminal` to force readable terminal formatting or
 `--format markdown` to always keep the source Markdown. Set `NO_COLOR=1` to
 disable ANSI styles.
 
+For a simple single-agent question, Ya streams completed lines to an interactive
+terminal by default, so the answer starts appearing before the full response is
+finished. It buffers output for ToA, web research, pipes, and Markdown output
+to keep those workflows reliable. Use `--stream off` to always wait for the
+complete answer.
+
 ## Example output
 
 This is an illustrative terminal-style rendering based on a real Ya CLI answer.
@@ -201,11 +207,18 @@ prints the answer under `[Ya single result]`:
 ya ask "Summarize the benefits and tradeoffs of a relational database"
 ya ask "Summarize a proposal" --format markdown > answer.md
 ya ask "Summarize a proposal" --format terminal
+ya ask "Explain recursion" --stream off
 ```
 
 Thinking is off by default. Use `--thinking on` for a request that benefits
 from extended reasoning, and add `--reasoning-effort high` or `max` to select
 its budget.
+
+Web access defaults to `--web auto`: Ya searches for clearly time-sensitive,
+research, source, comparison, or recommendation tasks, and answers ordinary
+explanations directly. Use `--web on` to require a search, or `--web off` for
+a faster answer without web tools. Web and ToA answers remain buffered so Ya
+can validate tool results before printing them.
 
 After an interactive answer, Ya asks whether to learn from that answer by
 creating a memory candidate. This is optional; choosing `N` leaves memory
@@ -216,6 +229,10 @@ unchanged, and a candidate still requires review and approval.
 ```sh
 # Use the more capable model for one request.
 ya ask "Compare two database designs" --model pro --thinking on
+
+# Require a fresh web search, or disable web access for this request.
+ya ask "Latest database pricing" --web on
+ya ask "Explain a database index" --web off
 
 # Save defaults for future requests.
 ya config set model pro

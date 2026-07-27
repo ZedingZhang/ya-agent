@@ -4,6 +4,8 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from urllib.request import Request, urlopen
 import json
+import time
+import urllib.error
 
 
 class _ResultParser(HTMLParser):
@@ -32,7 +34,7 @@ class _ResultParser(HTMLParser):
             self._url = None
 
 
-def search(arguments: dict) -> str:
+def search(arguments: dict, opener=urlopen, sleep=time.sleep) -> str:
     query = str(arguments.get("query", "")).strip()
     if not query:
         raise ValueError("web_search requires a query")
@@ -40,9 +42,16 @@ def search(arguments: dict) -> str:
         f"https://html.duckduckgo.com/html/?q={quote_plus(query)}",
         headers={"User-Agent": "Ya/0.1 research agent"},
     )
-    with urlopen(request, timeout=15) as response:
-        parser = _ResultParser()
-        parser.feed(response.read().decode("utf-8", errors="replace"))
+    for attempt in range(3):
+        try:
+            with opener(request, timeout=15) as response:
+                parser = _ResultParser()
+                parser.feed(response.read().decode("utf-8", errors="replace"))
+            break
+        except (urllib.error.HTTPError, urllib.error.URLError):
+            if attempt == 2:
+                raise
+            sleep(0.5 * (attempt + 1))
     return json.dumps(parser.results[:5], ensure_ascii=False)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
 import sys
 
 from .config import ModelConfig, load_config, model_id, save_config
@@ -17,8 +18,8 @@ from .memory import (
     prune_cards,
     set_status,
 )
-from .orchestrator import RunResult, single_agent, toa_agent
-from .terminal import format_output
+from .orchestrator import RunResult, should_use_web, single_agent, toa_agent
+from .terminal import StreamingMarkdownRenderer, format_output
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -37,6 +38,8 @@ def _parser() -> argparse.ArgumentParser:
     ask.add_argument("--toa-timeout", type=int)
     ask.add_argument("--no-feedback", action="store_true")
     ask.add_argument("--format", choices=("auto", "terminal", "markdown"), default="auto")
+    ask.add_argument("--web", choices=("auto", "on", "off"), default="auto")
+    ask.add_argument("--stream", choices=("auto", "off"), default="auto")
 
     auth = commands.add_parser("auth", help="Store credentials")
     auth.add_argument("provider", choices=("deepseek",))
@@ -126,12 +129,34 @@ def _ask(args: argparse.Namespace) -> int:
     if not api_key:
         raise ValueError("No DeepSeek API key found. Run: ya auth deepseek")
     client = DeepSeekClient(api_key)
+    can_stream = (
+        args.stream == "auto"
+        and not args.toa
+        and not should_use_web(args.task, args.web)
+        and args.format != "markdown"
+        and sys.stdout.isatty()
+    )
+    renderer = StreamingMarkdownRenderer(color="NO_COLOR" not in os.environ) if can_stream else None
+
+    def emit(chunk: str) -> None:
+        assert renderer is not None
+        rendered = renderer.write(chunk)
+        if rendered:
+            print(rendered, end="", flush=True)
+
+    if renderer is not None:
+        print("\n[Ya single result]\n")
     if args.toa and _toa_confirm(args, config):
         result = toa_agent(client, args.task, config, args.toa_workers)
     else:
-        result = single_agent(client, args.task, config)
-    print(f"\n[Ya {result.mode} result]\n")
-    print(format_output(result.content, args.format, sys.stdout.isatty()))
+        result = single_agent(client, args.task, config, web_mode=args.web, on_content=emit if renderer else None)
+    if renderer is not None:
+        tail = renderer.finish()
+        if tail:
+            print(tail)
+    else:
+        print(f"\n[Ya {result.mode} result]\n")
+        print(format_output(result.content, args.format, sys.stdout.isatty()))
     if result.partial:
         print("\n[Some ToA worker results were unavailable; the synthesis may be incomplete.]", file=sys.stderr)
     _collect_feedback(result, args.no_feedback)

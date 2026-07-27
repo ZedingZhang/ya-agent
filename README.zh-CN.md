@@ -123,6 +123,10 @@ python3 -m ya ask "用通俗语言解释 Graph Engineering"
 Markdown，便于脚本和文件使用。使用 `--format terminal` 可强制终端排版，使用
 `--format markdown` 可始终保留源 Markdown。设置 `NO_COLOR=1` 可关闭 ANSI 样式。
 
+对于简单的单 Agent 问题，Ya 默认会在交互式终端中逐行流式输出，因此无需等到完整回答生成后
+才看到内容。ToA、网页检索、管道输出和 Markdown 输出会保持缓冲，以保证这些流程的可靠性。
+使用 `--stream off` 可始终等待完整回答。
+
 ## 使用示例输出
 
 这是一张基于真实 Ya CLI 回答制作的终端风格渲染示意图。
@@ -187,10 +191,15 @@ $env:DEEPSEEK_API_KEY = "your-api-key"
 ya ask "总结关系型数据库的优点与取舍"
 ya ask "总结一个方案" --format markdown > answer.md
 ya ask "总结一个方案" --format terminal
+ya ask "解释递归" --stream off
 ```
 
 思考模式默认关闭。对于需要更深入推理的任务，可使用 `--thinking on`，并用
 `--reasoning-effort high` 或 `max` 选择推理预算。
+
+网页访问默认使用 `--web auto`：对于明显需要时效信息、研究、来源、比较或推荐的任务，Ya 会
+检索网页；普通解释会直接回答。使用 `--web on` 可要求检索，使用 `--web off` 可关闭网页工具
+以获得更快的回答。网页检索和 ToA 的回答会先缓冲，确保工具结果经过处理后再输出。
 
 交互式回答结束后，Ya 会询问是否从本次回答中学习，并创建记忆候选项。这是可选操作；选择
 `N` 不会改动记忆，候选项仍需审核和批准。
@@ -200,6 +209,10 @@ ya ask "总结一个方案" --format terminal
 ```sh
 # 为单次请求使用能力更强的模型。
 ya ask "比较两种数据库设计" --model pro --thinking on
+
+# 强制获取最新网页信息，或为本次请求关闭网页访问。
+ya ask "最新数据库价格" --web on
+ya ask "解释数据库索引" --web off
 
 # 保存默认设置，供之后的请求使用。
 ya config set model pro

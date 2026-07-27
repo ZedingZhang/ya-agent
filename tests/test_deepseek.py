@@ -1,5 +1,6 @@
 import json
 import unittest
+import urllib.error
 
 from ya.config import ModelConfig
 from ya.deepseek import DeepSeekClient, MAX_TOOL_CALL_ROUNDS
@@ -17,6 +18,14 @@ class _Response:
 
     def __exit__(self, *args):
         return False
+
+
+class _StreamResponse(_Response):
+    def __init__(self, lines):
+        self.lines = lines
+
+    def __iter__(self):
+        return iter(self.lines)
 
 
 class DeepSeekTests(unittest.TestCase):
@@ -107,3 +116,41 @@ class DeepSeekTests(unittest.TestCase):
         self.assertEqual(reply.content, "fallback answer")
         self.assertEqual(request_count, MAX_TOOL_CALL_ROUNDS + 2)
         self.assertNotIn("tools", fallback_payload)
+
+    def test_stream_accumulates_visible_content_and_hides_reasoning(self):
+        seen = {}
+
+        def opener(request, timeout):
+            seen.update(json.loads(request.data.decode("utf-8")))
+            return _StreamResponse(
+                [
+                    b'data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}\n',
+                    b'data: {"choices":[{"delta":{"content":"hello "}}]}\n',
+                    b'data: {"choices":[{"delta":{"content":"world"}}],"usage":{"total_tokens":3}}\n',
+                    b"data: [DONE]\n",
+                ]
+            )
+
+        output = []
+        reply = DeepSeekClient("test-key", opener=opener).complete_stream(
+            [{"role": "user", "content": "hello"}], ModelConfig(), 100, output.append
+        )
+        self.assertTrue(seen["stream"])
+        self.assertEqual(output, ["hello ", "world"])
+        self.assertEqual(reply.content, "hello world")
+        self.assertEqual(reply.reasoning_content, "hidden")
+        self.assertEqual(reply.usage["total_tokens"], 3)
+
+    def test_request_retries_transient_failure_before_output(self):
+        attempts = 0
+
+        def opener(request, timeout):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise urllib.error.URLError("temporary")
+            return _Response({"choices": [{"message": {"content": "ok"}}]})
+
+        reply = DeepSeekClient("test-key", opener=opener, sleep=lambda _: None).complete([], ModelConfig(), 100)
+        self.assertEqual(reply.content, "ok")
+        self.assertEqual(attempts, 3)

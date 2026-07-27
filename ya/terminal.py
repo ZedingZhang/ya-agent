@@ -106,3 +106,68 @@ def format_output(text: str, output_format: str, is_tty: bool) -> str:
     if output_format == "markdown" or (output_format == "auto" and not is_tty):
         return sanitized
     return render_markdown(sanitized, color=is_tty and "NO_COLOR" not in os.environ)
+
+
+class StreamingMarkdownRenderer:
+    """Small line buffer for readable streamed terminal Markdown."""
+
+    def __init__(self, color: bool = False) -> None:
+        self.color = color
+        self._pending = ""
+        self._previous: str | None = None
+        self._code = False
+
+    def write(self, chunk: str) -> str:
+        self._pending += strip_terminal_controls(chunk)
+        output: list[str] = []
+        while "\n" in self._pending:
+            line, self._pending = self._pending.split("\n", 1)
+            output.extend(self._line(line))
+        return "\n".join(output) + ("\n" if output else "")
+
+    def finish(self) -> str:
+        output: list[str] = []
+        if self._pending:
+            output.extend(self._line(self._pending))
+            self._pending = ""
+        if self._previous is not None:
+            output.extend(self._render_plain(self._previous))
+            self._previous = None
+        return "\n".join(output)
+
+    def _line(self, line: str) -> list[str]:
+        if line.lstrip().startswith("```"):
+            if self._previous is not None:
+                previous = self._render_plain(self._previous)
+                self._previous = None
+            else:
+                previous = []
+            self._code = not self._code
+            return previous
+        if self._code:
+            return [f"  {line}"]
+        # Delay one line so GFM table headers can be converted after their divider.
+        if self._previous is not None and _is_table_separator(line) and "|" in self._previous:
+            headers = _table_cells(self._previous)
+            self._previous = "\x00TABLE:" + "\x1f".join(headers)
+            return []
+        if self._previous is not None and self._previous.startswith("\x00TABLE:"):
+            if "|" in line and line.strip():
+                headers = self._previous.removeprefix("\x00TABLE:").split("\x1f")
+                pairs = [
+                    f"{_render_inline(header, self.color)}: {_render_inline(cell, self.color)}"
+                    for header, cell in zip(headers, _table_cells(line))
+                ]
+                return [f"- {'; '.join(pairs)}"]
+            previous = []
+        elif self._previous is not None:
+            previous = self._render_plain(self._previous)
+        else:
+            previous = []
+        self._previous = line
+        return previous
+
+    def _render_plain(self, line: str) -> list[str]:
+        if line.startswith("\x00TABLE:"):
+            return []
+        return render_markdown(line, color=self.color).splitlines() or [""]
