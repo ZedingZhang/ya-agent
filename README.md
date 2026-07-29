@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya is a personal research and decision agent with a CLI as its only interface.
+Ya is a personal research and decision agent with a CLI and a native desktop GUI.
 With user permission, it accumulates preferences, experience, and source-backed
 knowledge without unbounded self-modification. It uses the DeepSeek V4 API,
 keeps long-term memory locally, and only starts its bounded Tree of Agents
@@ -26,14 +26,14 @@ chat loop:
 
 ## Platform support
 
-Ya is a terminal-only CLI. Release binaries do not require Python, pip, or a
-PATH change.
+Release binaries do not require Python, pip, or a PATH change. The CLI and
+native Tk desktop app are issued together.
 
-| Operating system | Install and run | API key storage |
+| Operating system | CLI and GUI support | API key storage |
 | --- | --- | --- |
-| macOS | Apple Silicon and Intel standalone binaries. | `ya auth deepseek` saves the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
-| Linux | x64 glibc binary, built on Ubuntu 22.04. | Set `DEEPSEEK_API_KEY` in your shell. |
-| Windows | x64 standalone executable for PowerShell. | Set `DEEPSEEK_API_KEY` in PowerShell. |
+| macOS | Apple Silicon and Intel CLI binaries plus native `.app` bundles. | CLI and GUI save the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
+| Linux | x64 glibc CLI and native GUI executables, built on Ubuntu 22.04. | Set `DEEPSEEK_API_KEY`, or enter a session-only key in the GUI. |
+| Windows | x64 CLI and native GUI executables. | Set `DEEPSEEK_API_KEY`, or enter a session-only key in the GUI. |
 
 `ya auth deepseek` is macOS-only because it uses the macOS `security` command.
 Do not run that command on Linux or Windows; use the environment variable
@@ -109,6 +109,38 @@ if SmartScreen blocks the file:
 Unblock-File .\ya-windows-x64.exe
 ```
 
+### Native desktop GUI
+
+The GUI defaults to English. Select Chinese in **Settings > Language**; Ya
+remembers this choice locally. It provides questions, streaming simple answers,
+memory review and approval, ToA confirmation, and model settings without
+starting a local web server.
+
+Download the matching GUI asset from the latest release:
+
+```sh
+# macOS Apple Silicon (use ya-gui-macos-x64.zip on Intel Macs)
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-macos-arm64.zip
+unzip ya-gui-macos-arm64.zip
+open Ya.app
+
+# Linux x64
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-linux-x64
+chmod +x ya-gui-linux-x64
+./ya-gui-linux-x64
+```
+
+```powershell
+# Windows x64
+Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-windows-x64.exe -OutFile ya-gui-windows-x64.exe
+.\ya-gui-windows-x64.exe
+```
+
+macOS and Windows GUI binaries are unsigned. Verify their SHA-256 value against
+`checksums.txt` before responding to a system warning. On macOS, use
+`xattr -d com.apple.quarantine ./Ya.app` only after verification; on Windows,
+use `Unblock-File .\ya-gui-windows-x64.exe` only after verification.
+
 ### Python package and development
 
 For development, clone the repository and install it in editable mode:
@@ -127,8 +159,8 @@ local state directory.
 
 ## Run Ya
 
-Ya is a terminal command-line program. It does not start a web server or GUI.
-After downloading a standalone file, run that file from its download directory:
+Use either interface; neither starts a local web server. After downloading a
+standalone CLI file, run it from its download directory:
 
 ```sh
 ./ya-macos-arm64 ask "Explain Graph Engineering in plain language"
@@ -145,6 +177,12 @@ console-script PATH entry:
 
 ```sh
 python3 -m ya ask "Explain Graph Engineering in plain language"
+```
+
+For the native app from a Python checkout, use:
+
+```sh
+python3 -m ya.gui
 ```
 
 Interactive terminals render Ya's common Markdown output automatically. When
@@ -164,6 +202,12 @@ complete answer.
 This is an illustrative terminal-style rendering based on a real Ya CLI answer.
 
 ![Ya CLI example output](assets/ya-cli-example-en.png)
+
+## Native GUI
+
+The native GUI is English by default and persists a complete Chinese switch in
+Settings. Simple requests stream into the rendered answer pane; web research and
+ToA remain buffered so their tool and confirmation steps stay reliable.
 
 ## Execution flow
 

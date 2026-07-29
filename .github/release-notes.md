@@ -1,3 +1,14 @@
+## Native desktop GUI
+
+- Ya now ships with a zero-runtime-dependency native Tk desktop GUI alongside
+  the CLI on macOS Apple Silicon, macOS Intel, Windows x64, and Linux x64.
+- The app includes streamed simple answers, rendered Markdown, ToA preflight,
+  local memory review, approval and pruning, and model configuration.
+- The GUI defaults to English. A complete Chinese interface is available in
+  Settings and the selection persists locally.
+- macOS GUI credentials use the existing Keychain integration. Windows and
+  Linux accept `DEEPSEEK_API_KEY` or a session-only key, never plaintext storage.
+
 ## Markdown rendering resilience
 
 - Terminal rendering now recovers when a model leaves a fenced code block
@@ -49,6 +60,13 @@ Ya 现提供 macOS Apple Silicon、macOS Intel、Windows x64 和 Linux x64 的�
 
 macOS 和 Windows 文件当前未签名。在绕过系统提示前，请先校验 `checksums.txt`。
 `ya auth deepseek` 仍仅支持 macOS；Linux 和 Windows 请使用 `DEEPSEEK_API_KEY`。
+
+### 原生桌面 GUI
+
+- Ya 现在会与 CLI 一同发行零运行时依赖的原生 Tk 桌面 GUI，覆盖 macOS Apple Silicon、macOS Intel、Windows x64 和 Linux x64。
+- GUI 提供简单任务流式回答、Markdown 渲染、ToA 预检、本地记忆审核/批准/清理和模型设置。
+- GUI 默认英文；可在 Settings 中完整切换中文，选择会在本地持久化。
+- macOS GUI 使用现有钥匙串集成；Windows 和 Linux 可使用 `DEEPSEEK_API_KEY` 或仅当前会话的密钥，绝不明文保存。
 
 ### 更快、更可靠的回答
 

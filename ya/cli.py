@@ -140,7 +140,6 @@ def _ask(args: argparse.Namespace) -> int:
     api_key = load_api_key()
     if not api_key:
         raise ValueError("No DeepSeek API key found. Run: ya auth deepseek")
-    client = DeepSeekClient(api_key)
     if args.show_memory:
         _show_memory(args.task)
     can_stream = (
@@ -160,6 +159,7 @@ def _ask(args: argparse.Namespace) -> int:
 
     if renderer is not None:
         print("\n[Ya single result]\n")
+    client = DeepSeekClient(api_key)
     if args.toa and _toa_confirm(args, config):
         result = toa_agent(client, args.task, config, args.toa_workers)
     else:

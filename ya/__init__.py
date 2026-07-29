@@ -1,3 +1,3 @@
-"""Ya: a consent-first personal research CLI agent."""
+"""Ya: a personal research agent with CLI and native desktop GUI."""
 
-__version__ = "0.1.6"
+__version__ = "0.2.0"

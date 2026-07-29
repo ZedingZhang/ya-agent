@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Agent 名称为 **Ya**，含义为“萌芽慢慢成长”，也可以叫她“丫丫”。它是一个以 CLI 为唯一界面的个人研究与决策
+Agent 名称为 **Ya**，含义为“萌芽慢慢成长”，也可以叫她“丫丫”。它是一个提供 CLI 与原生桌面 GUI 两种界面的个人研究与决策
 Agent：在用户许可下积累偏好、经验与来源化知识，不会无边界地改写自身。它使用 DeepSeek V4 API，
 在本地保存长期记忆，并且仅会在用户明确请求和确认后，才启动受限的 Tree of Agents（ToA）模式。
 
@@ -20,13 +20,13 @@ Ya 的设计目标不是静态问答，而是在用户掌控下持续递归改�
 
 ## 操作系统支持
 
-Ya 是纯终端 CLI。Release 中的独立可执行文件无需 Python、pip 或修改 PATH。
+Release 会同时发行 CLI 与原生 Tk 桌面 GUI；独立可执行文件无需 Python、pip 或修改 PATH。
 
-| 操作系统 | 安装与运行 | API Key 存储 |
+| 操作系统 | CLI 与 GUI 支持 | API Key 存储 |
 | --- | --- | --- |
-| macOS | 提供 Apple Silicon 和 Intel 独立可执行文件。 | `ya auth deepseek` 会将密钥保存至 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
-| Linux | 提供基于 Ubuntu 22.04 构建的 x64 glibc 可执行文件。 | 在 shell 中设置 `DEEPSEEK_API_KEY`。 |
-| Windows | 提供适用于 PowerShell 的 x64 独立可执行文件。 | 在 PowerShell 中设置 `DEEPSEEK_API_KEY`。 |
+| macOS | 提供 Apple Silicon 和 Intel CLI 二进制及原生 `.app`。 | CLI 与 GUI 均保存到 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
+| Linux | 提供基于 Ubuntu 22.04 构建的 x64 glibc CLI 与原生 GUI。 | 设置 `DEEPSEEK_API_KEY`，或在 GUI 中仅本次运行输入。 |
+| Windows | 提供 x64 CLI 与原生 GUI 可执行文件。 | 设置 `DEEPSEEK_API_KEY`，或在 GUI 中仅本次运行输入。 |
 
 `ya auth deepseek` 仅支持 macOS，因为它使用了 macOS 的 `security` 命令。
 请勿在 Linux 或 Windows 上运行该命令；应改用环境变量。
@@ -95,6 +95,32 @@ xattr -d com.apple.quarantine ./ya-macos-arm64
 Unblock-File .\ya-windows-x64.exe
 ```
 
+### 原生桌面 GUI
+
+GUI 默认使用英文。可在 **Settings > Language** 切换到完整中文界面，Ya 会在本地记住选择。GUI 提供提问、简单回答流式输出、记忆审核与批准、ToA 预检和模型设置，且不启动本地 Web 服务。
+
+从最新 Release 下载对应 GUI 文件：
+
+```sh
+# macOS Apple Silicon（Intel Mac 请使用 ya-gui-macos-x64.zip）
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-macos-arm64.zip
+unzip ya-gui-macos-arm64.zip
+open Ya.app
+
+# Linux x64
+curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-linux-x64
+chmod +x ya-gui-linux-x64
+./ya-gui-linux-x64
+```
+
+```powershell
+# Windows x64
+Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-windows-x64.exe -OutFile ya-gui-windows-x64.exe
+.\ya-gui-windows-x64.exe
+```
+
+macOS 和 Windows GUI 当前未签名。处理系统警告前请先核对 `checksums.txt` 的 SHA-256。校验后若 macOS 阻止运行，可按需使用 `xattr -d com.apple.quarantine ./Ya.app`；若 Windows 阻止运行，可按需使用 `Unblock-File .\ya-gui-windows-x64.exe`。
+
 ### Python 包与开发
 
 如需开发，请克隆仓库并以可编辑模式安装：
@@ -112,8 +138,7 @@ python3 -m unittest discover -s tests -q
 
 ## 运行 Ya
 
-Ya 是一个终端命令行程序，不需要启动 Web 服务或图形界面。下载独立可执行文件后，在其
-下载目录中运行：
+Ya 可使用 CLI 或原生 GUI，二者都不需要启动 Web 服务。下载 CLI 独立可执行文件后，在其下载目录中运行：
 
 ```sh
 ./ya-macos-arm64 ask "用通俗语言解释 Graph Engineering"
@@ -131,6 +156,12 @@ Ya 是一个终端命令行程序，不需要启动 Web 服务或图形界面。
 python3 -m ya ask "用通俗语言解释 Graph Engineering"
 ```
 
+在检出的项目目录中启动原生 GUI：
+
+```sh
+python3 -m ya.gui
+```
+
 交互式终端会自动渲染 Ya 常见的 Markdown 输出。重定向或通过管道输出时，Ya 会保留原始
 Markdown，便于脚本和文件使用。使用 `--format terminal` 可强制终端排版，使用
 `--format markdown` 可始终保留源 Markdown。设置 `NO_COLOR=1` 可关闭 ANSI 样式。
@@ -144,6 +175,10 @@ Markdown，便于脚本和文件使用。使用 `--format terminal` 可强制终
 这是一张基于真实 Ya CLI 回答制作的终端风格渲染示意图。
 
 ![Ya CLI 使用示例输出](assets/ya-cli-example.png)
+
+## 原生 GUI
+
+GUI 默认英文，并可在设置中完整切换中文且持久化保存。简单任务会流式写入渲染后的回答区域；网页检索与 ToA 会保持缓冲，以确保工具调用和预检确认可靠。
 
 ## 执行流程
 
