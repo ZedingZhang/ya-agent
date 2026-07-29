@@ -121,6 +121,8 @@ Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/downlo
 
 macOS 和 Windows GUI 当前未签名。处理系统警告前请先核对 `checksums.txt` 的 SHA-256。校验后若 macOS 阻止运行，可按需使用 `xattr -d com.apple.quarantine ./Ya.app`；若 Windows 阻止运行，可按需使用 `Unblock-File .\ya-gui-windows-x64.exe`。
 
+在 macOS 上，冻结 GUI 会使用系统证书包，因此本地代理或安全软件存在时会与 CLI 使用相同的受信任证书链。不要关闭 TLS 校验；仅在需要显式指定受信任 CA 包时设置 `SSL_CERT_FILE`。
+
 ### Python 包与开发
 
 如需开发，请克隆仓库并以可编辑模式安装：

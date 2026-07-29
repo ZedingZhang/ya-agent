@@ -141,6 +141,11 @@ macOS and Windows GUI binaries are unsigned. Verify their SHA-256 value against
 `xattr -d com.apple.quarantine ./Ya.app` only after verification; on Windows,
 use `Unblock-File .\ya-gui-windows-x64.exe` only after verification.
 
+On macOS, the frozen GUI uses the system certificate bundle so it follows the
+same trusted certificate chain as the CLI when a local proxy or security tool
+is present. Keep TLS verification enabled; use `SSL_CERT_FILE` only when you
+need to explicitly provide a trusted CA bundle.
+
 ### Python package and development
 
 For development, clone the repository and install it in editable mode:
