@@ -4,11 +4,13 @@ import argparse
 import getpass
 import json
 import os
+from pathlib import Path
 import sys
 
 from .config import ModelConfig, load_config, model_id, save_config
 from .deepseek import DeepSeekClient, DeepSeekError
 from .keychain import load_api_key, save_api_key
+from .local import LocalAction, LocalWorkspace
 from .memory import (
     DuplicateMemoryError,
     MemoryLimitError,
@@ -42,6 +44,9 @@ def _parser() -> argparse.ArgumentParser:
     ask.add_argument("--web", choices=("auto", "on", "off"), default="auto")
     ask.add_argument("--stream", choices=("auto", "off"), default="auto")
     ask.add_argument("--show-memory", action="store_true", help="Show approved memory selected for this task")
+    ask.add_argument("--local", action="store_true", help="Allow workspace file tools for this task")
+    ask.add_argument("--workspace", metavar="PATH", help="Workspace root for --local (default: current directory)")
+    ask.add_argument("--approve", action="store_true", help="Allow local file changes in a non-interactive shell")
 
     auth = commands.add_parser("auth", help="Store credentials")
     auth.add_argument("provider", choices=("deepseek",))
@@ -135,16 +140,40 @@ def _show_memory(task: str) -> None:
         print(f"  {match.card.id}  score {match.score:<2} {match.card.kind:10} {match.card.text}")
 
 
+def _local_confirm(action: LocalAction, approve_noninteractive: bool) -> bool:
+    print(f"\n[Ya local action]\n  {action.summary}")
+    if action.diff:
+        print("\n" + action.diff, end="" if action.diff.endswith("\n") else "\n")
+    if not sys.stdin.isatty():
+        if approve_noninteractive:
+            print("  Approved by --approve for this non-interactive task.")
+            return True
+        print("  Denied: non-interactive local changes require --approve.")
+        return False
+    return input("Apply this file change? [y/N] ").strip().lower() in {"y", "yes"}
+
+
 def _ask(args: argparse.Namespace) -> int:
+    if args.local and args.toa:
+        raise ValueError("--local and --toa cannot be used together.")
+    if args.workspace and not args.local:
+        raise ValueError("--workspace requires --local.")
+    if args.approve and not args.local:
+        raise ValueError("--approve requires --local.")
     config = _resolve_config(args)
     api_key = load_api_key()
     if not api_key:
         raise ValueError("No DeepSeek API key found. Run: ya auth deepseek")
     if args.show_memory:
         _show_memory(args.task)
+    workspace = None
+    if args.local:
+        root = Path(args.workspace).expanduser() if args.workspace else Path.cwd()
+        workspace = LocalWorkspace(root, lambda action: _local_confirm(action, args.approve))
     can_stream = (
         args.stream == "auto"
         and not args.toa
+        and not args.local
         and not should_use_web(args.task, args.web)
         and args.format != "markdown"
         and sys.stdout.isatty()
@@ -163,7 +192,10 @@ def _ask(args: argparse.Namespace) -> int:
     if args.toa and _toa_confirm(args, config):
         result = toa_agent(client, args.task, config, args.toa_workers)
     else:
-        result = single_agent(client, args.task, config, web_mode=args.web, on_content=emit if renderer else None)
+        kwargs = {"web_mode": args.web, "on_content": emit if renderer else None}
+        if workspace is not None:
+            kwargs["local_workspace"] = workspace
+        result = single_agent(client, args.task, config, **kwargs)
     if renderer is not None:
         tail = renderer.finish()
         if tail:

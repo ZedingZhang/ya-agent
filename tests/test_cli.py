@@ -4,10 +4,12 @@ import sys
 import tempfile
 import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from ya import cli
 from ya.memory import create_candidate, list_cards, set_status
+from ya.local import LocalAction
 from ya.orchestrator import RunResult
 
 
@@ -124,6 +126,33 @@ class CliTests(unittest.TestCase):
         ), patch("ya.cli.sys.stdout", stream):
             self.assertEqual(cli.main(["ask", "latest weather"]), 0)
         self.assertIsNone(agent.call_args.kwargs["on_content"])
+
+    def test_local_mode_disables_streaming_and_passes_workspace(self):
+        stream = _TtyStringIO()
+        result = RunResult(content="answer", mode="single", usage={})
+        with patch("ya.cli.load_api_key", return_value="key"), patch("ya.cli.single_agent", return_value=result) as agent, patch(
+            "ya.cli._collect_feedback"
+        ), patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["ask", "create a folder", "--local", "--workspace", self.temp.name]), 0)
+        self.assertIsNone(agent.call_args.kwargs["on_content"])
+        self.assertEqual(agent.call_args.kwargs["local_workspace"].root, Path(self.temp.name).resolve())
+
+    def test_local_and_toa_are_mutually_exclusive(self):
+        self.assertEqual(cli.main(["ask", "test", "--local", "--toa"]), 2)
+
+    def test_approve_requires_local(self):
+        self.assertEqual(cli.main(["ask", "test", "--approve"]), 2)
+
+    def test_workspace_requires_local(self):
+        self.assertEqual(cli.main(["ask", "test", "--workspace", self.temp.name]), 2)
+
+    def test_noninteractive_local_confirmation_requires_approve(self):
+        action = LocalAction("mkdir", (Path(self.temp.name),), "Create directory")
+        stream = StringIO()
+        with patch("ya.cli.sys.stdin.isatty", return_value=False), patch("ya.cli.sys.stdout", stream):
+            self.assertFalse(cli._local_confirm(action, approve_noninteractive=False))
+            self.assertTrue(cli._local_confirm(action, approve_noninteractive=True))
+        self.assertIn("require --approve", stream.getvalue())
 
     def test_show_memory_displays_selected_cards_before_answer(self):
         card = create_candidate("Use PostgreSQL indexes", "evidence")
