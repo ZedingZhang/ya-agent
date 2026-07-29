@@ -70,27 +70,27 @@ jobs:
         run: python -m pip install PyInstaller==6.21.0
 
       - name: Build CLI executable
-        run: python -m PyInstaller --clean --noconfirm --onefile --name ya ya/__main__.py
+        run: python -m PyInstaller --clean --noconfirm --onefile --name ya --distpath dist/cli --workpath build/cli --specpath build/spec-cli ya/__main__.py
 
       - name: Build GUI application on macOS
         if: runner.os == 'macOS'
-        run: python -m PyInstaller --clean --noconfirm --windowed --name Ya ya/__gui__.py
+        run: python -m PyInstaller --clean --noconfirm --windowed --name Ya --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
 
       - name: Build GUI executable on Windows and Linux
         if: runner.os != 'macOS'
-        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name ya-gui ya/__gui__.py
+        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name ya-gui --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
 
       - name: Smoke test frozen apps on Unix
         if: runner.os != 'Windows'
         shell: bash
         run: |
           export YA_HOME="$RUNNER_TEMP/ya-home"
-          ./dist/ya --help
-          ./dist/ya config set thinking off
+          ./dist/cli/ya --help
+          ./dist/cli/ya config set thinking off
           if [ "$RUNNER_OS" = "macOS" ]; then
-            ./dist/Ya.app/Contents/MacOS/Ya --smoke-test
+            ./dist/gui/Ya.app/Contents/MacOS/Ya --smoke-test
           else
-            ./dist/ya-gui --smoke-test
+            ./dist/gui/ya-gui --smoke-test
           fi
 
       - name: Smoke test frozen apps on Windows
@@ -98,9 +98,9 @@ jobs:
         shell: pwsh
         run: |
           $env:YA_HOME = Join-Path $env:RUNNER_TEMP "ya-home"
-          & .\dist\ya.exe --help
-          & .\dist\ya.exe config set thinking off
-          & .\dist\ya-gui.exe --smoke-test
+          & .\dist\cli\ya.exe --help
+          & .\dist\cli\ya.exe config set thinking off
+          & .\dist\gui\ya-gui.exe --smoke-test
 
       - name: Stage release assets
         shell: bash
@@ -110,14 +110,14 @@ jobs:
         run: |
           mkdir release
           if [ "$RUNNER_OS" = "Windows" ]; then
-            cp dist/ya.exe "release/$CLI_ASSET"
-            cp dist/ya-gui.exe "release/$GUI_ASSET"
+            cp dist/cli/ya.exe "release/$CLI_ASSET"
+            cp dist/gui/ya-gui.exe "release/$GUI_ASSET"
           elif [ "$RUNNER_OS" = "macOS" ]; then
-            cp dist/ya "release/$CLI_ASSET"
-            ditto -c -k --sequesterRsrc --keepParent dist/Ya.app "release/$GUI_ASSET"
+            cp dist/cli/ya "release/$CLI_ASSET"
+            ditto -c -k --sequesterRsrc --keepParent dist/gui/Ya.app "release/$GUI_ASSET"
           else
-            cp dist/ya "release/$CLI_ASSET"
-            cp dist/ya-gui "release/$GUI_ASSET"
+            cp dist/cli/ya "release/$CLI_ASSET"
+            cp dist/gui/ya-gui "release/$GUI_ASSET"
           fi
 
       - uses: actions/upload-artifact@v4
