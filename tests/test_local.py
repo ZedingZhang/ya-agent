@@ -29,7 +29,8 @@ class LocalWorkspaceTests(unittest.TestCase):
         return True
 
     def test_list_read_and_search_text_and_filename(self):
-        (self.root / "notes.txt").write_text("Hello Ya\nFind this line\n", encoding="utf-8")
+        with (self.root / "notes.txt").open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write("Hello Ya\nFind this line\n")
         listing = json.loads(self.workspace.list({}))
         self.assertEqual(listing["entries"][0]["path"], "notes.txt")
         self.assertEqual(json.loads(self.workspace.read({"path": "notes.txt"}))["content"], "Hello Ya\nFind this line\n")
