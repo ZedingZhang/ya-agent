@@ -209,6 +209,8 @@ The native GUI is English by default and persists a complete Chinese switch in
 Settings. Simple requests stream into the rendered answer pane; web research and
 ToA remain buffered so their tool and confirmation steps stay reliable.
 
+![Ya native GUI in English](assets/ya-gui-example-en.png)
+
 ## Execution flow
 
 The loop is deliberate: task-relevant approved memory informs the answer; ICM
