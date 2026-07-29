@@ -9,6 +9,13 @@
 - macOS GUI credentials use the existing Keychain integration. Windows and
   Linux accept `DEEPSEEK_API_KEY` or a session-only key, never plaintext storage.
 
+## macOS TLS compatibility
+
+- The frozen macOS GUI now uses the system certificate bundle when no
+  `SSL_CERT_FILE` override is supplied. This keeps the GUI aligned with the CLI
+  on networks that install a locally trusted proxy certificate, without
+  weakening TLS verification.
+
 ## Markdown rendering resilience
 
 - Terminal rendering now recovers when a model leaves a fenced code block
@@ -67,6 +74,10 @@ macOS 和 Windows 文件当前未签名。在绕过系统提示前，请先校�
 - GUI 提供简单任务流式回答、Markdown 渲染、ToA 预检、本地记忆审核/批准/清理和模型设置。
 - GUI 默认英文；可在 Settings 中完整切换中文，选择会在本地持久化。
 - macOS GUI 使用现有钥匙串集成；Windows 和 Linux 可使用 `DEEPSEEK_API_KEY` 或仅当前会话的密钥，绝不明文保存。
+
+### macOS TLS 兼容性
+
+- 冻结 macOS GUI 在未设置 `SSL_CERT_FILE` 覆盖时会使用系统证书包。对于安装本地受信任代理证书的网络，这使 GUI 与 CLI 使用相同的证书链，且不会降低 TLS 校验强度。
 
 ### 更快、更可靠的回答
 
