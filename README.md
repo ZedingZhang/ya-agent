@@ -202,6 +202,35 @@ finished. It buffers output for ToA, web research, pipes, and Markdown output
 to keep those workflows reliable. Use `--stream off` to always wait for the
 complete answer.
 
+### Local workspace actions (CLI only)
+
+`--local` explicitly lets Ya read non-sensitive UTF-8 text in one workspace and
+offer limited file actions. The workspace is the current directory by default;
+use `--workspace` to choose another root:
+
+```sh
+ya ask --local --workspace /Users/zzd "Create a folder named notes"
+```
+
+Local mode can list directories, read and search text, create directories,
+create or replace text files, and move or rename files. It cannot run shell
+commands, scripts, Git, package managers, or delete files. Every change is
+shown with its absolute path and requires confirmation; replacements include a
+maximum 200-line unified diff. In a pipe or other non-interactive shell, writes
+are denied unless the current task explicitly includes `--approve`:
+
+```sh
+ya ask --local --workspace "$PWD" --approve "Create todo.txt with three tasks"
+```
+
+`--local` authorizes only reads inside that workspace. Read text is sent to the
+configured DeepSeek API, while `.env`, private keys, credentials, binary files,
+and files over 1 MiB are blocked from model reads. Ya records change metadata
+(not file content or diffs) in `~/.ya/actions.jsonl`. Local mode can be combined
+with web research but not `--toa`, and it deliberately buffers answers so tool
+calls cannot bypass the confirmation flow. The GUI does not have local action
+capabilities yet.
+
 ## Example output
 
 This is an illustrative terminal-style rendering based on a real Ya CLI answer.

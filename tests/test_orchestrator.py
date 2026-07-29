@@ -1,9 +1,12 @@
 import unittest
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from ya.config import ModelConfig
+from ya.deepseek import ModelReply
+from ya.local import LocalWorkspace
 from ya.memory import create_candidate, set_status
 from ya.orchestrator import _messages, should_use_web, single_agent
 
@@ -17,6 +20,16 @@ class _Client:
 
         on_content("answer")
         self.streamed.append(True)
+        return ModelReply("answer", None, [], {}, {"role": "assistant", "content": "answer"})
+
+
+class _ToolClient(_Client):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def run_with_tools(self, messages, config, max_tokens, tools=None, tool_handlers=None):
+        self.calls.append((messages, tools, tool_handlers))
         return ModelReply("answer", None, [], {}, {"role": "assistant", "content": "answer"})
 
 
@@ -57,3 +70,16 @@ class OrchestratorTests(unittest.TestCase):
 
         self.assertIn(matching.text, messages[0]["content"])
         self.assertNotIn(unrelated.text, messages[0]["content"])
+
+    def test_local_mode_buffers_and_combines_local_and_web_tools(self):
+        root = os.path.join(self.temp.name, "workspace")
+        os.mkdir(root)
+        workspace = LocalWorkspace(Path(root), lambda action: False)
+        client = _ToolClient()
+        result = single_agent(client, "latest weather in notes", ModelConfig(), web_mode="on", on_content=lambda text: None, local_workspace=workspace)
+        self.assertEqual(result.content, "answer")
+        self.assertEqual(client.streamed, [])
+        names = {tool["function"]["name"] for tool in client.calls[0][1]}
+        self.assertIn("web_search", names)
+        self.assertIn("local_read", names)
+        self.assertIn("Local workspace tools are available", client.calls[0][0][0]["content"])

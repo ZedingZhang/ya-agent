@@ -1,3 +1,19 @@
+## CLI local workspace agent
+
+- `ya ask --local [--workspace PATH]` now gives the CLI a deliberately limited
+  local file workspace. It can list, read, search, create directories, write
+  text files, and move or rename paths; it cannot execute commands or delete.
+- Every filesystem change requires an interactive confirmation and shows an
+  absolute path; replacements show a capped unified diff. Non-interactive
+  writes require `--approve` for that task.
+- Reads remain bounded to non-sensitive UTF-8 text inside the workspace.
+  `.env`, credentials, private keys, binary files, and files larger than 1 MiB
+  are blocked from model reads. Change metadata is audited locally without
+  content or diffs.
+- Local mode can use web research but is incompatible with `--toa` and buffers
+  output. This release adds local action capability to the CLI only; the GUI
+  remains unchanged.
+
 ## Native desktop GUI
 
 - Ya now ships with a zero-runtime-dependency native Tk desktop GUI alongside
@@ -59,6 +75,17 @@ The universal wheel and source distribution remain available for Python users
 and contributors.
 
 ## 中文说明
+
+### CLI 本地工作区 Agent
+
+- `ya ask --local [--workspace PATH]` 现在让 CLI 在一个明确授权的受限本地工作区内操作：可列举、读取、
+  搜索、新建目录、写入文本，以及移动或重命名；不能执行命令，也不支持删除。
+- 每项文件变更都会显示绝对路径并要求交互确认；覆盖文本会展示截断的统一 diff。非交互写入必须为本次
+  任务显式传入 `--approve`。
+- 读取严格限定于工作区内的非敏感 UTF-8 文本。`.env`、凭据、私钥、二进制文件和超过 1 MiB 的文件不会
+  发送给模型。审计仅记录操作元数据，不记录内容或 diff。
+- 本地模式可使用网页检索，但不能与 `--toa` 同时使用，且会缓冲输出。本版本仅为 CLI 增加本地行动能力；
+  GUI 保持不变。
 
 ### 独立可执行文件
 
