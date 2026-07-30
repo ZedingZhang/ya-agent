@@ -235,25 +235,29 @@ class YaApp(ttk.Frame):
 
     def _build_settings(self) -> None:
         page = self.settings_page
-        page.columnconfigure(1, weight=1)
+        page.columnconfigure(0, weight=1)
         row = 0
         fields = [
-            ("language", ttk.Combobox(page, textvariable=self.language_var, values=tuple(self._language_label(code) for code in ("en", "zh-CN")), state="readonly", width=16)),
-            ("model", ttk.Combobox(page, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=16)),
-            ("thinking", ttk.Checkbutton(page, variable=self.thinking_var)),
-            ("reasoning", ttk.Combobox(page, textvariable=self.reasoning_var, values=("high", "max"), state="readonly", width=16)),
-            ("budget", ttk.Entry(page, textvariable=self.budget_var, width=18)),
-            ("timeout", ttk.Entry(page, textvariable=self.timeout_var, width=18)),
+            ("language", lambda parent: ttk.Combobox(parent, textvariable=self.language_var, values=tuple(self._language_label(code) for code in ("en", "zh-CN")), state="readonly", width=16)),
+            ("model", lambda parent: ttk.Combobox(parent, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=16)),
+            ("thinking", lambda parent: ttk.Checkbutton(parent, variable=self.thinking_var)),
+            ("reasoning", lambda parent: ttk.Combobox(parent, textvariable=self.reasoning_var, values=("high", "max"), state="readonly", width=16)),
+            ("budget", lambda parent: ttk.Entry(parent, textvariable=self.budget_var, width=18)),
+            ("timeout", lambda parent: ttk.Entry(parent, textvariable=self.timeout_var, width=18)),
         ]
-        for key, widget in fields:
-            ttk.Label(page, text=self.t(key)).grid(row=row, column=0, sticky="w", pady=5)
-            widget.grid(row=row, column=1, sticky="w", pady=5)
+        for key, create_widget in fields:
+            field = ttk.Frame(page)
+            field.grid(row=row, column=0, sticky="w", pady=5)
+            ttk.Label(field, text=self.t(key)).pack(side="left")
+            create_widget(field).pack(side="left", padx=(12, 0))
             row += 1
-        ttk.Separator(page).grid(row=row, column=0, columnspan=2, sticky="ew", pady=12); row += 1
-        ttk.Label(page, text=self.t("api_key")).grid(row=row, column=0, sticky="w", pady=5)
-        ttk.Entry(page, textvariable=self.key_var, show="•", width=38).grid(row=row, column=1, sticky="ew", pady=5); row += 1
-        ttk.Label(page, text=self.t("key_help_macos") if sys.platform == "darwin" else self.t("key_help_other"), wraplength=500).grid(row=row, column=1, sticky="w"); row += 1
-        buttons = ttk.Frame(page); buttons.grid(row=row, column=1, sticky="w", pady=(12, 0))
+        ttk.Separator(page).grid(row=row, column=0, sticky="ew", pady=12); row += 1
+        api_key = ttk.Frame(page)
+        api_key.grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(api_key, text=self.t("api_key")).pack(side="left")
+        ttk.Entry(api_key, textvariable=self.key_var, show="•", width=38).pack(side="left", padx=(12, 0)); row += 1
+        ttk.Label(page, text=self.t("key_help_macos") if sys.platform == "darwin" else self.t("key_help_other"), wraplength=500).grid(row=row, column=0, sticky="w"); row += 1
+        buttons = ttk.Frame(page); buttons.grid(row=row, column=0, sticky="w", pady=(12, 0))
         ttk.Button(buttons, text=self.t("save_settings"), command=self._save_settings).pack(side="left")
         ttk.Button(buttons, text=self.t("save_key") if sys.platform == "darwin" else self.t("session_key"), command=self._save_key).pack(side="left", padx=8)
         ttk.Button(buttons, text=self.t("clear_audit"), command=self._clear_audit).pack(side="left")
