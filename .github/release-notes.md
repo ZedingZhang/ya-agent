@@ -1,3 +1,9 @@
+## First-run task space
+
+The default workbench now gives the task column more room so all bottom controls, including **Learn from this answer**, remain visible on wide desktop windows.
+
+默认工作台进一步扩大了任务栏，宽屏桌面上底部的“从此回答中学习”等控件会完整显示。
+
 ## First-run workbench layout
 
 - The first GUI launch now opens a centered, display-relative workspace window

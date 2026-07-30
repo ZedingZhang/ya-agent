@@ -108,6 +108,18 @@ def initial_window_geometry(screen_width: int, screen_height: int) -> tuple[int,
     return width, height, max(0, (screen_width - width) // 2), max(0, (screen_height - height) // 2)
 
 
+def initial_workbench_sashes(width: int) -> tuple[int, int]:
+    """Reserve enough center space for the task controls on first launch."""
+    left = max(190, min(260, round(width * 0.12)))
+    right_start = max(left + 620, min(width - 300, round(width * 0.75)))
+    return left, right_start
+
+
+def task_controls_wrap_required(width: int) -> bool:
+    """Keep the learning command reachable when a smaller display limits the center pane."""
+    return width < 820
+
+
 @dataclass
 class LocalActionRequest:
     action: LocalAction
@@ -135,6 +147,7 @@ class YaApp(ttk.Frame):
         self.active_task: SessionTask | None = None
         self.pending_action: LocalActionRequest | None = None
         self._initial_sashes_applied = False
+        self._task_controls_wrapped = False
         self._link_urls: dict[str, str] = {}
         self._set_vars()
         self._build()
@@ -239,8 +252,7 @@ class YaApp(ttk.Frame):
         if width < 900:
             self.root.after(60, self._set_initial_workbench_sashes)
             return
-        left = max(220, min(300, round(width * 0.14)))
-        right_start = max(left + 620, min(width - 330, round(width * 0.71)))
+        left, right_start = initial_workbench_sashes(width)
         self.workbench.sashpos(0, left)
         self.workbench.sashpos(1, right_start)
         self._initial_sashes_applied = True
@@ -278,6 +290,7 @@ class YaApp(ttk.Frame):
         self.task_entry.grid(row=1, column=0, sticky="ew", pady=(4, 6))
         controls = ttk.Frame(composer)
         controls.grid(row=2, column=0, sticky="ew")
+        self.task_controls = controls
         ttk.Label(controls, text=self.t("model")).grid(row=0, column=0, sticky="w")
         ttk.Combobox(controls, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(4, 14))
         ttk.Checkbutton(controls, text=self.t("thinking"), variable=self.thinking_var).grid(row=0, column=2, padx=(0, 14))
@@ -291,7 +304,19 @@ class YaApp(ttk.Frame):
         self.send_button.grid(row=0, column=7, padx=(14, 0))
         self.learn_button = ttk.Button(controls, text=self.t("learn"), command=self._learn, state="disabled")
         self.learn_button.grid(row=0, column=8, padx=(6, 0))
+        controls.bind("<Configure>", self._reflow_task_controls)
         self._render_timeline()
+
+    def _reflow_task_controls(self, _event: tk.Event | None = None) -> None:
+        """Wrap only the optional learning button when the task pane becomes narrow."""
+        should_wrap = task_controls_wrap_required(self.task_controls.winfo_width())
+        if should_wrap == self._task_controls_wrapped:
+            return
+        self._task_controls_wrapped = should_wrap
+        if should_wrap:
+            self.learn_button.grid_configure(row=1, column=0, columnspan=9, sticky="e", padx=0, pady=(6, 0))
+        else:
+            self.learn_button.grid_configure(row=0, column=8, columnspan=1, sticky="", padx=(6, 0), pady=0)
 
     def _build_context_panel(self, panel: ttk.Frame) -> None:
         panel.columnconfigure(0, weight=1)
