@@ -149,6 +149,7 @@ class YaApp(ttk.Frame):
         self._initial_sashes_applied = False
         self._task_controls_wrapped = False
         self._link_urls: dict[str, str] = {}
+        self._prompt_bubbles: list[tk.Label] = []
         self._set_vars()
         self._build()
         self.pack(fill="both", expand=True)
@@ -356,8 +357,8 @@ class YaApp(ttk.Frame):
         self.apply_action_button.pack(side="right", padx=(0, 6))
 
     def _configure_markdown_tags(self, text: tk.Text) -> None:
-        text.tag_configure("task_title", font=("TkDefaultFont", 12, "bold"), foreground="#286090")
-        text.tag_configure("task_prompt", foreground="#555555")
+        text.tag_configure("task_title", font=("TkDefaultFont", 12, "bold"), foreground="#286090", justify="right", rmargin=12)
+        text.tag_configure("task_prompt", justify="right", rmargin=12, spacing3=8)
         text.tag_configure("answer_title", font=("TkDefaultFont", 11, "bold"))
         text.tag_configure("task_separator", foreground="#9aa0a6", spacing1=14, spacing3=14)
         text.tag_configure("heading", font=("TkDefaultFont", 14, "bold"))
@@ -383,9 +384,32 @@ class YaApp(ttk.Frame):
                 text.insert("end", span.text, tags)
             text.insert("end", "\n")
 
+    def _insert_task_prompt(self, text: tk.Text, prompt: str) -> None:
+        """Embed a right-aligned prompt bubble while leaving Ya's output in the text flow."""
+        wraplength = max(260, int(max(text.winfo_width(), 720) * 0.62))
+        bubble = tk.Label(
+            text,
+            text=prompt,
+            anchor="e",
+            justify="left",
+            wraplength=wraplength,
+            background="#dbeafe",
+            foreground="#174ea6",
+            padx=10,
+            pady=6,
+        )
+        self._prompt_bubbles.append(bubble)
+        text.insert("end", "\u200b", ("task_prompt",))
+        text.window_create("end", window=bubble, align="center")
+        text.insert("end", "\n\n", ("task_prompt",))
+
     def _render_timeline(self) -> None:
         text = self.timeline_text
         text.configure(state="normal")
+        for bubble in self._prompt_bubbles:
+            if bubble.winfo_exists():
+                bubble.destroy()
+        self._prompt_bubbles.clear()
         text.delete("1.0", "end")
         self._link_urls.clear()
         if not self.session_tasks:
@@ -394,7 +418,7 @@ class YaApp(ttk.Frame):
             if index > 1:
                 text.insert("end", "\n" + "─" * 72 + "\n\n", ("task_separator",))
             text.insert("end", f"{self.t('task')} {index} - {task.status}\n", ("task_title",))
-            text.insert("end", task.prompt + "\n\n", ("task_prompt",))
+            self._insert_task_prompt(text, task.prompt)
             text.insert("end", self.t("answer") + "\n", ("answer_title",))
             self._insert_markdown(text, task.content or (self.t("status_working") if task.status == "working" else ""))
         text.configure(state="disabled")
