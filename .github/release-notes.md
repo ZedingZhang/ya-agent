@@ -1,3 +1,12 @@
+## Ask-page model alignment
+
+- The Model selector on the Ask page now stays left-aligned beside its label
+  when the workspace control expands across the row below.
+
+### 中文说明
+
+- 问答页的模型选择框现在会始终左对齐在“模型”标签旁，不再因为下方工作区控件扩张而被推远。
+
 ## Compact settings layout
 
 - The native GUI settings form now keeps labels and their controls together in
