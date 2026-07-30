@@ -1,3 +1,9 @@
+## Clearer task boundaries
+
+The workspace timeline now places a dedicated divider and breathing room between consecutive tasks, making task history easier to scan.
+
+工作区时间线现在会在相邻任务之间显示独立分隔线和留白，任务历史更容易浏览。
+
 ## First-run task space
 
 The default workbench now gives the task column more room so all bottom controls, including **Learn from this answer**, remain visible on wide desktop windows.

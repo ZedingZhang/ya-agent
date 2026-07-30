@@ -359,6 +359,7 @@ class YaApp(ttk.Frame):
         text.tag_configure("task_title", font=("TkDefaultFont", 12, "bold"), foreground="#286090")
         text.tag_configure("task_prompt", foreground="#555555")
         text.tag_configure("answer_title", font=("TkDefaultFont", 11, "bold"))
+        text.tag_configure("task_separator", foreground="#9aa0a6", spacing1=14, spacing3=14)
         text.tag_configure("heading", font=("TkDefaultFont", 14, "bold"))
         text.tag_configure("bold", font=("TkDefaultFont", 12, "bold"))
         text.tag_configure("italic", font=("TkDefaultFont", 12, "italic"))
@@ -391,7 +392,7 @@ class YaApp(ttk.Frame):
             text.insert("end", self.t("no_answer"))
         for index, task in enumerate(self.session_tasks, start=1):
             if index > 1:
-                text.insert("end", "\n")
+                text.insert("end", "\n" + "─" * 72 + "\n\n", ("task_separator",))
             text.insert("end", f"{self.t('task')} {index} - {task.status}\n", ("task_title",))
             text.insert("end", task.prompt + "\n\n", ("task_prompt",))
             text.insert("end", self.t("answer") + "\n", ("answer_title",))
