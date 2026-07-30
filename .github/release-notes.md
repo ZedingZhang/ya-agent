@@ -1,3 +1,12 @@
+## Compact settings layout
+
+- The native GUI settings form now keeps labels and their controls together in
+  compact rows, including the Model selector, regardless of window width.
+
+### 中文说明
+
+- 原生 GUI 的设置页现在使用紧凑行布局；包括模型选择在内的标签与控件会保持相邻，不会随窗口宽度拉开。
+
 ## Audit log management and GUI metadata
 
 - Local workspace action audit logs now rotate at 1 MiB and retain three
