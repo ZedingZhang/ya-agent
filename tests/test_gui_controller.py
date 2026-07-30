@@ -165,7 +165,7 @@ class GuiControllerTests(unittest.TestCase):
     def test_initial_workbench_geometry_is_spacious_and_centered(self):
         self.assertEqual(initial_window_geometry(2048, 1280), (1884, 1152, 82, 64))
         self.assertEqual(initial_window_geometry(1280, 800), (1178, 720, 51, 40))
-        self.assertEqual(initial_workbench_sashes(1720), (206, 1290))
+        self.assertEqual(initial_workbench_sashes(1720), (206, 1376))
         self.assertEqual(initial_workbench_sashes(1020), (190, 810))
         self.assertFalse(task_controls_wrap_required(1020))
         self.assertTrue(task_controls_wrap_required(620))
