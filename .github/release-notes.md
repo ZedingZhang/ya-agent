@@ -1,3 +1,12 @@
+## Balanced ask-page controls
+
+- The Thinking control now occupies the flexible space between Model and Web on
+  the Ask page, instead of being grouped against Web.
+
+### 中文说明
+
+- 问答页的“思考”控件现在位于模型与网页之间的弹性区域中，不再贴近网页控件。
+
 ## Ask-page model alignment
 
 - The Model selector on the Ask page now stays left-aligned beside its label
