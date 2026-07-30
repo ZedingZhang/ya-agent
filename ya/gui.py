@@ -23,7 +23,7 @@ from .memory import DuplicateMemoryError, MemoryLimitError
 TEXT = {
     "en": {
         "title": "Ya", "workspace": "Workspace", "memory": "Memory", "settings": "Settings",
-        "files": "Files", "activity": "Activity", "task": "Task", "send": "Ask Ya",
+        "files": "Files", "activity": "Activity", "task": "Task", "send": "Send",
         "model": "Model", "thinking": "Thinking", "web": "Web", "toa": "Tree of Agents",
         "stream": "Stream simple answers", "auto": "Auto", "on": "On", "off": "Off",
         "local": "Enable local tools", "choose": "Choose...", "refresh": "Refresh",
@@ -62,7 +62,7 @@ TEXT = {
     },
     "zh-CN": {
         "title": "Ya", "workspace": "工作区", "memory": "记忆", "settings": "设置",
-        "files": "文件", "activity": "活动", "task": "任务", "send": "询问 Ya",
+        "files": "文件", "activity": "活动", "task": "任务", "send": "发送",
         "model": "模型", "thinking": "思考", "web": "网页", "toa": "Tree of Agents",
         "stream": "简单回答使用流式输出", "auto": "自动", "on": "开启", "off": "关闭",
         "local": "启用本地工具", "choose": "选择...", "refresh": "刷新",
@@ -178,8 +178,8 @@ class YaApp(ttk.Frame):
         self.web_var = tk.StringVar(value=self._web_label("auto"))
         self.toa_var = tk.BooleanVar(value=False)
         self.stream_var = tk.BooleanVar(value=self.controller.stream)
-        # Local access must be newly and explicitly granted every launch.
-        self.local_var = tk.BooleanVar(value=False)
+        # A workspace still bounds access; without one, Ya cannot read local files.
+        self.local_var = tk.BooleanVar(value=True)
         self.workspace_var = tk.StringVar(value=self.controller.workspace or "")
         self.workers_var = tk.StringVar(value="2")
         self.status_var = tk.StringVar(value=self.t("status_ready"))
@@ -302,7 +302,7 @@ class YaApp(ttk.Frame):
         self.workers_box = ttk.Combobox(controls, textvariable=self.workers_var, values=("1", "2"), state="disabled", width=3)
         self.workers_box.grid(row=0, column=6, padx=(4, 14))
         self.send_button = ttk.Button(controls, text=self.t("send"), command=self._ask)
-        self.send_button.grid(row=0, column=7, padx=(14, 0))
+        self.send_button.grid(row=0, column=7, padx=(10, 0))
         self.learn_button = ttk.Button(controls, text=self.t("learn"), command=self._learn, state="disabled")
         self.learn_button.grid(row=0, column=8, padx=(6, 0))
         controls.bind("<Configure>", self._reflow_task_controls)
