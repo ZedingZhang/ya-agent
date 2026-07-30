@@ -1,3 +1,25 @@
+## Workspace-first GUI
+
+- The desktop GUI is now a workspace-first workbench rather than a separate
+  chat page. Its resizable three-column layout combines a navigation-only file
+  tree, a session-only task timeline, and an activity and approval panel.
+- Ordinary questions still work from the workbench. Local tools remain off at
+  launch and require an explicit toggle; their directory, read, and search
+  events expose metadata only, never file contents.
+- File changes now pause for an inline default-deny decision in the activity
+  panel, with absolute paths and a capped diff where applicable. The existing
+  workspace boundary, sensitive-file protection, audit, no-shell, and no-delete
+  guarantees remain unchanged.
+
+### 中文说明
+
+- 原生 GUI 现在以工作区工作台为唯一主界面，不再保留独立聊天页。可拖动的三栏布局整合了仅用于导航的文件树、
+  仅本次会话保留的任务时间线，以及活动和确认面板。
+- 普通问答仍可直接在工作台完成。本地工具在每次启动时保持关闭，必须显式开启；目录、读取和搜索活动只显示
+  元数据，不显示文件内容。
+- 文件变更现在会在活动面板内暂停，等待默认拒绝的批准或拒绝；适用时显示绝对路径和受限 diff。既有工作区边界、
+  敏感文件保护、审计、禁止 shell 与禁止删除的保证均保持不变。
+
 ## Balanced ask-page controls
 
 - The Thinking control now occupies the flexible space between Model and Web on

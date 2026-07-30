@@ -10,7 +10,7 @@ from typing import Callable
 
 from .config import ModelConfig, data_home, load_config, save_config
 from .keychain import load_api_key, save_api_key
-from .local import LocalAction, LocalWorkspace, audit_log_files, audit_log_total_bytes, clear_audit_logs
+from .local import LocalAction, LocalActivity, LocalWorkspace, audit_log_files, audit_log_total_bytes, clear_audit_logs
 from .memory import MemoryCard, cards_to_prune, create_candidate, list_cards, prune_cards, select_relevant_cards, set_status
 from .orchestrator import should_use_web
 from .service import run_task
@@ -119,6 +119,7 @@ class GuiController:
         options: GuiTaskOptions,
         on_content=None,
         on_local_action: Callable[[LocalAction], bool] | None = None,
+        on_local_activity: Callable[[LocalActivity], None] | None = None,
     ):
         api_key = self.api_key()
         if not api_key:
@@ -130,7 +131,11 @@ class GuiController:
             workspace = options.workspace or self.valid_workspace()
             if not workspace:
                 raise ValueError("Choose an existing local workspace before running this task.")
-            local_workspace = LocalWorkspace(Path(workspace), on_local_action or (lambda _action: False))
+            local_workspace = LocalWorkspace(
+                Path(workspace),
+                on_local_action or (lambda _action: False),
+                on_activity=on_local_activity,
+            )
         return run_task(
             api_key,
             options.task,
@@ -147,6 +152,14 @@ class GuiController:
 
     def relevant_cards(self, task: str):
         return select_relevant_cards(task)
+
+    def workspace_entries(self, path: str = ".") -> list[dict[str, object]]:
+        """List an authorized workspace directory for the GUI file tree only."""
+        workspace = self.valid_workspace()
+        if not workspace:
+            return []
+        value = LocalWorkspace(Path(workspace), lambda _action: False).list({"path": path})
+        return list(json.loads(value)["entries"])
 
     def create_memory(self, text: str, evidence: str, kind: str) -> MemoryCard:
         return create_candidate(text, evidence, kind)

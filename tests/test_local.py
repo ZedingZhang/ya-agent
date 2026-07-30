@@ -49,6 +49,19 @@ class LocalWorkspaceTests(unittest.TestCase):
         self.assertEqual(results[0]["line"], 2)
         self.assertEqual(json.loads(self.workspace.search({"query": "notes"}))["results"][0]["match"], "filename")
 
+    def test_activity_observer_exposes_metadata_without_file_contents(self):
+        (self.root / "notes.txt").write_text("very private local text", encoding="utf-8")
+        observed = []
+        workspace = LocalWorkspace(self.root, self._approve, observed.append)
+        workspace.list({})
+        workspace.read({"path": "notes.txt"})
+        workspace.search({"query": "private"})
+        self.assertEqual(
+            [(event.operation, event.paths, event.status) for event in observed],
+            [("list", (".",), "success"), ("read", ("notes.txt",), "success"), ("search", (".",), "success")],
+        )
+        self.assertNotIn("very private local text", repr(observed))
+
     def test_blocks_escape_symlink_binary_large_and_sensitive_reads(self):
         outside = Path(self.temp.name) / "outside.txt"
         outside.write_text("outside", encoding="utf-8")
