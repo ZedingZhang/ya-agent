@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from ya import __version__
 from ya.config import ModelConfig, load_config
-from ya.gui import TEXT, YaApp
+from ya.gui import TEXT, YaApp, initial_window_geometry
 from ya.gui_controller import GuiController, GuiTaskOptions, load_preferences
 from ya.memory import create_candidate, set_status
 from ya.local import LocalAction
@@ -159,6 +159,10 @@ class GuiControllerTests(unittest.TestCase):
     def test_workspace_is_the_only_primary_gui_page_label(self):
         self.assertEqual(TEXT["en"]["workspace"], "Workspace")
         self.assertNotIn("ask", TEXT["en"])
+
+    def test_initial_workbench_geometry_is_spacious_and_centered(self):
+        self.assertEqual(initial_window_geometry(2048, 1280), (1884, 1152, 82, 64))
+        self.assertEqual(initial_window_geometry(1280, 800), (1178, 720, 51, 40))
 
     def test_memory_actions_and_relevant_cards(self):
         controller = GuiController()

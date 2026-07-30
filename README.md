@@ -257,6 +257,8 @@ application session. Simple requests stream into the rendered task timeline;
 web research, ToA, and local workspace tasks remain buffered so their tool and
 confirmation steps stay reliable. Choose **Stream simple answers** in
 **Settings** to keep or disable streaming; Ya saves that GUI preference locally.
+On first launch, the workbench opens centered at a spacious display-relative
+size with dedicated file, task, and activity columns; all panes remain draggable.
 
 ![Ya workspace workbench in English](assets/ya-gui-workspace-en.png)
 
