@@ -1,3 +1,9 @@
+## Wider default task timeline
+
+On wide screens, the first-run workbench now starts at approximately 12% files, 68% task timeline, and 20% activity panel.
+
+在宽屏上，首次启动的工作台现在采用约 12% 文件栏、68% 任务时间线和 20% 活动栏的比例。
+
 ## Default local workspace tools
 
 GUI local tools now start enabled. Ya still requires a chosen workspace before it can access any local file, and every file change remains individually confirmed. The primary task button is now **Send** / **发送**.
