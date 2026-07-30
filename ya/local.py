@@ -150,15 +150,39 @@ class LocalAction:
     diff: str | None = None
 
 
+@dataclass(frozen=True)
+class LocalActivity:
+    """Metadata about one local tool operation, safe to show in a GUI."""
+
+    operation: str
+    paths: tuple[str, ...]
+    status: str
+
+
 class LocalWorkspace:
     """A deliberately small, workspace-confined filesystem tool set."""
 
-    def __init__(self, root: Path, confirm: Callable[[LocalAction], bool]):
+    def __init__(
+        self,
+        root: Path,
+        confirm: Callable[[LocalAction], bool],
+        on_activity: Callable[[LocalActivity], None] | None = None,
+    ):
         resolved = root.expanduser().resolve(strict=True)
         if not resolved.is_dir():
             raise ValueError(f"Workspace is not a directory: {resolved}")
         self.root = resolved
         self.confirm = confirm
+        self.on_activity = on_activity
+
+    def _activity(self, operation: str, paths: tuple[Path, ...], status: str) -> None:
+        if self.on_activity is None:
+            return
+        try:
+            self.on_activity(LocalActivity(operation, tuple(self._relative(path) for path in paths), status))
+        except Exception:
+            # Observers are presentation-only and must never affect the agent.
+            pass
 
     @property
     def tool_handlers(self) -> dict[str, Callable[[dict], str]]:
@@ -225,6 +249,7 @@ class LocalWorkspace:
         if self.confirm(action):
             return True
         self._audit(action.operation, action.paths, "denied")
+        self._activity(action.operation, action.paths, "denied")
         return False
 
     def list(self, args: dict) -> str:
@@ -235,11 +260,14 @@ class LocalWorkspace:
         for child in sorted(path.iterdir(), key=lambda item: item.name.casefold())[:MAX_LIST_ENTRIES]:
             kind = "symlink" if child.is_symlink() else "directory" if child.is_dir() else "file"
             entries.append({"path": self._relative(child), "type": kind})
+        self._activity("list", (path,), "success")
         return json.dumps({"path": self._relative(path), "entries": entries, "limited": len(entries) == MAX_LIST_ENTRIES})
 
     def read(self, args: dict) -> str:
         path = self._resolve(args.get("path"))
-        return json.dumps({"path": self._relative(path), "content": self._read_text(path)}, ensure_ascii=False)
+        content = self._read_text(path)
+        self._activity("read", (path,), "success")
+        return json.dumps({"path": self._relative(path), "content": content}, ensure_ascii=False)
 
     def search(self, args: dict) -> str:
         query = args.get("query")
@@ -269,6 +297,7 @@ class LocalWorkspace:
                     results.append({"path": relative, "match": "text", "line": line_number, "text": line[:400]})
                     if len(results) >= MAX_SEARCH_RESULTS:
                         break
+        self._activity("search", (root,), "success")
         return json.dumps({"query": query, "results": results, "limited": len(results) == MAX_SEARCH_RESULTS}, ensure_ascii=False)
 
     def mkdir(self, args: dict) -> str:
@@ -283,9 +312,11 @@ class LocalWorkspace:
                 return json.dumps({"status": "denied", "operation": "mkdir", "path": self._relative(path), "reason": "User declined this action."})
             path.mkdir()
             self._audit("mkdir", (path,), "success")
+            self._activity("mkdir", (path,), "success")
             return json.dumps({"status": "ok", "operation": "mkdir", "path": self._relative(path)})
         except Exception as error:
             self._audit("mkdir", (path,), "error", str(error))
+            self._activity("mkdir", (path,), "error")
             raise
 
     def write(self, args: dict) -> str:
@@ -316,9 +347,11 @@ class LocalWorkspace:
                 return json.dumps({"status": "denied", "operation": "write", "path": self._relative(path), "reason": "User declined this action."})
             path.write_text(content, encoding="utf-8")
             self._audit("write", (path,), "success")
+            self._activity("write", (path,), "success")
             return json.dumps({"status": "ok", "operation": "write", "path": self._relative(path)})
         except Exception as error:
             self._audit("write", (path,), "error", str(error))
+            self._activity("write", (path,), "error")
             raise
 
     def move(self, args: dict) -> str:
@@ -338,7 +371,9 @@ class LocalWorkspace:
                 return json.dumps({"status": "denied", "operation": "move", "path": self._relative(source), "reason": "User declined this action."})
             source.rename(destination)
             self._audit("move", (source, destination), "success")
+            self._activity("move", (source, destination), "success")
             return json.dumps({"status": "ok", "operation": "move", "source": self._relative(source), "destination": self._relative(destination)})
         except Exception as error:
             self._audit("move", (source, destination), "error", str(error))
+            self._activity("move", (source, destination), "error")
             raise
