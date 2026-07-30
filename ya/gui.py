@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 import webbrowser
 
+from . import __version__
 from .config import ModelConfig, VALID_MODELS
 from .gui_controller import GuiController, GuiTaskOptions
 from .gui_markdown import markdown_lines
@@ -42,7 +43,10 @@ TEXT = {
         "api_missing": "No DeepSeek API key found. Add one in Settings.", "source": "Explicit user feedback after Ya task",
         "workspace_required": "Choose an existing folder before enabling local workspace mode.",
         "local_action": "Confirm local file action", "action_paths": "Absolute path", "apply": "Approve", "deny": "Deny",
-        "language_en": "English", "language_zh": "Chinese", "response_partial": "Some ToA worker results were unavailable.",
+        "language_en": "English", "language_zh": "简体中文", "response_partial": "Some ToA worker results were unavailable.",
+        "help": "Help", "about": "About Ya", "about_text": "Ya\n\nVersion {version}",
+        "clear_audit": "Clear audit history", "confirm_clear_audit": "Permanently delete {count} audit log file(s) ({size} bytes)?",
+        "nothing_audit": "No audit logs to delete.", "audit_cleared": "Deleted {count} audit log file(s).",
         "id": "ID", "status": "Status", "kind": "Kind", "text": "Text", "candidate_status": "Candidate",
         "approved_status": "Approved", "rejected_status": "Rejected", "revoked_status": "Revoked",
         "preference_kind": "Preference", "procedure_kind": "Procedure", "knowledge_kind": "Knowledge",
@@ -64,7 +68,10 @@ TEXT = {
         "saved": "已保存。", "error": "Ya 错误", "api_missing": "未找到 DeepSeek API 密钥。请在设置中添加。", "source": "Ya 任务后的显式用户反馈",
         "workspace_required": "启用本地工作区模式前，请选择一个存在的文件夹。",
         "local_action": "确认本地文件操作", "action_paths": "绝对路径", "apply": "批准", "deny": "拒绝",
-        "language_en": "English", "language_zh": "中文", "response_partial": "部分 ToA 工作 Agent 未返回结果。",
+        "language_en": "English", "language_zh": "简体中文", "response_partial": "部分 ToA 工作 Agent 未返回结果。",
+        "help": "帮助", "about": "关于 Ya", "about_text": "Ya\n\n版本 {version}",
+        "clear_audit": "清除操作审计", "confirm_clear_audit": "永久删除 {count} 个操作审计日志文件（{size} 字节）？",
+        "nothing_audit": "没有可删除的操作审计日志。", "audit_cleared": "已删除 {count} 个操作审计日志文件。",
         "id": "ID", "status": "状态", "kind": "类别", "text": "内容", "candidate_status": "候选",
         "approved_status": "已批准", "rejected_status": "已拒绝", "revoked_status": "已撤销",
         "preference_kind": "偏好", "procedure_kind": "流程", "knowledge_kind": "知识",
@@ -102,6 +109,12 @@ class YaApp(ttk.Frame):
     def _web_mode(self) -> str:
         return next((value for value in ("auto", "on", "off") if self._web_label(value) == self.web_var.get()), "auto")
 
+    def _language_label(self, code: str) -> str:
+        return self.t("language_en" if code == "en" else "language_zh")
+
+    def _language_code(self) -> str:
+        return next((code for code in ("en", "zh-CN") if self._language_label(code) == self.language_var.get()), "en")
+
     def _set_vars(self) -> None:
         config = self.controller.config
         self.task_var = tk.StringVar()
@@ -114,7 +127,7 @@ class YaApp(ttk.Frame):
         self.workspace_var = tk.StringVar(value=self.controller.workspace or "")
         self.workers_var = tk.StringVar(value="2")
         self.status_var = tk.StringVar(value=self.t("status_ready"))
-        self.language_var = tk.StringVar(value=self.controller.language)
+        self.language_var = tk.StringVar(value=self._language_label(self.controller.language))
         self.reasoning_var = tk.StringVar(value=config.reasoning_effort)
         self.budget_var = tk.StringVar(value=str(config.toa_token_budget))
         self.timeout_var = tk.StringVar(value=str(config.toa_timeout))
@@ -126,6 +139,7 @@ class YaApp(ttk.Frame):
         self.root.minsize(840, 620)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        self._build_menu()
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
         self.ask_page = ttk.Frame(self.notebook, padding=12)
@@ -137,6 +151,13 @@ class YaApp(ttk.Frame):
         self._build_ask()
         self._build_memory()
         self._build_settings()
+
+    def _build_menu(self) -> None:
+        menu = tk.Menu(self.root)
+        help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label=self.t("about"), command=self._show_about)
+        menu.add_cascade(label=self.t("help"), menu=help_menu)
+        self.root.configure(menu=menu)
 
     def _build_ask(self) -> None:
         page = self.ask_page
@@ -217,7 +238,7 @@ class YaApp(ttk.Frame):
         page.columnconfigure(1, weight=1)
         row = 0
         fields = [
-            ("language", ttk.Combobox(page, textvariable=self.language_var, values=("en", "zh-CN"), state="readonly", width=16)),
+            ("language", ttk.Combobox(page, textvariable=self.language_var, values=tuple(self._language_label(code) for code in ("en", "zh-CN")), state="readonly", width=16)),
             ("model", ttk.Combobox(page, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=16)),
             ("thinking", ttk.Checkbutton(page, variable=self.thinking_var)),
             ("reasoning", ttk.Combobox(page, textvariable=self.reasoning_var, values=("high", "max"), state="readonly", width=16)),
@@ -235,6 +256,7 @@ class YaApp(ttk.Frame):
         buttons = ttk.Frame(page); buttons.grid(row=row, column=1, sticky="w", pady=(12, 0))
         ttk.Button(buttons, text=self.t("save_settings"), command=self._save_settings).pack(side="left")
         ttk.Button(buttons, text=self.t("save_key") if sys.platform == "darwin" else self.t("session_key"), command=self._save_key).pack(side="left", padx=8)
+        ttk.Button(buttons, text=self.t("clear_audit"), command=self._clear_audit).pack(side="left")
 
     def _toggle_toa(self) -> None:
         if self.toa_var.get():
@@ -446,8 +468,9 @@ class YaApp(ttk.Frame):
                 reasoning_effort=self.reasoning_var.get(), toa_token_budget=int(self.budget_var.get()), toa_timeout=int(self.timeout_var.get()),
             )
             self.controller.save_config(config)
-            changed = self.language_var.get() != self.controller.language
-            self.controller.set_language(self.language_var.get())
+            language = self._language_code()
+            changed = language != self.controller.language
+            self.controller.set_language(language)
             if changed:
                 self._rebuild_for_language()
             else:
@@ -462,6 +485,22 @@ class YaApp(ttk.Frame):
             self.key_var.set(""); messagebox.showinfo(self.t("settings"), self.t("saved"), parent=self.root)
         except ValueError as error:
             messagebox.showerror(self.t("error"), str(error), parent=self.root)
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(self.t("about"), self.t("about_text").format(version=__version__), parent=self.root)
+
+    def _clear_audit(self) -> None:
+        logs = self.controller.audit_logs()
+        if not logs:
+            messagebox.showinfo(self.t("settings"), self.t("nothing_audit"), parent=self.root)
+            return
+        size = self.controller.audit_log_total_bytes()
+        details = "\n".join(f"{path.name} ({path.stat().st_size} bytes)" for path in logs)
+        prompt = self.t("confirm_clear_audit").format(count=len(logs), size=size)
+        if not messagebox.askyesno(self.t("clear_audit"), f"{prompt}\n\n{details}", parent=self.root):
+            return
+        removed = self.controller.clear_audit_logs()
+        messagebox.showinfo(self.t("settings"), self.t("audit_cleared").format(count=len(removed)), parent=self.root)
 
     def _rebuild_for_language(self) -> None:
         task, answer = self.task_entry.get("1.0", "end").strip(), self.answer

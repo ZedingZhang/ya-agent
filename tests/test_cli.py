@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from ya import cli
 from ya.memory import create_candidate, list_cards, set_status
-from ya.local import LocalAction
+from ya.local import LocalAction, append_audit_record, audit_log_files
 from ya.orchestrator import RunResult
 
 
@@ -250,3 +250,35 @@ class CliTests(unittest.TestCase):
         set_status(approved.id, "approved")
         self.assertEqual(cli.main(["memory", "prune", "--include-candidates", "--yes"]), 0)
         self.assertEqual([existing.id for existing in list_cards()], [approved.id])
+
+    def test_audit_clear_requires_yes_when_noninteractive(self):
+        append_audit_record({"record": 1})
+        with patch("ya.cli.sys.stdin.isatty", return_value=False):
+            self.assertEqual(cli.main(["audit", "clear"]), 2)
+        self.assertTrue(audit_log_files())
+
+    def test_audit_clear_can_be_declined_interactively(self):
+        append_audit_record({"record": 1})
+        stream = StringIO()
+        with patch("ya.cli.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="n"), patch(
+            "ya.cli.sys.stdout", stream
+        ):
+            self.assertEqual(cli.main(["audit", "clear"]), 0)
+        self.assertIn("actions.jsonl", stream.getvalue())
+        self.assertIn("No audit logs deleted.", stream.getvalue())
+        self.assertTrue(audit_log_files())
+
+    def test_audit_clear_with_yes_deletes_all_logs(self):
+        append_audit_record({"record": 1})
+        (Path(self.temp.name) / "actions.1.jsonl").write_text('{"record": 0}\n', encoding="utf-8")
+        stream = StringIO()
+        with patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["audit", "clear", "--yes"]), 0)
+        self.assertIn("Deleted 2 audit log file(s).", stream.getvalue())
+        self.assertEqual(audit_log_files(), [])
+
+    def test_audit_clear_reports_when_no_logs_exist(self):
+        stream = StringIO()
+        with patch("ya.cli.sys.stdout", stream):
+            self.assertEqual(cli.main(["audit", "clear", "--yes"]), 0)
+        self.assertIn("No audit logs to delete.", stream.getvalue())

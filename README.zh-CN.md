@@ -97,7 +97,7 @@ Unblock-File .\ya-windows-x64.exe
 
 ### 原生桌面 GUI
 
-GUI 默认使用英文。可在 **Settings > Language** 切换到完整中文界面，Ya 会在本地记住选择。GUI 提供提问、记忆审核与批准、ToA 预检、模型设置和可选本地工作区模式，且不启动本地 Web 服务。
+GUI 默认使用英文。可在 **Settings > Language** 选择 **English** 或 **简体中文**，Ya 会在本地记住选择。GUI 提供提问、记忆审核与批准、ToA 预检、模型设置和可选本地工作区模式，且不启动本地 Web 服务。
 
 从最新 Release 下载对应 GUI 文件：
 
@@ -192,7 +192,9 @@ ya ask --local --workspace "$PWD" --approve "创建 todo.txt，并写入三项�
 
 `--local` 只授权读取该工作区内的内容，读取到的文本会发送给配置的 DeepSeek API；`.env`、私钥、凭据、
 二进制文件和超过 1 MiB 的文件不会发送给模型。Ya 会将操作元数据（不含文件内容或 diff）记录到
-`~/.ya/actions.jsonl`。本地模式可与网页检索组合，但不能与 `--toa` 同时使用；为防止工具调用绕过确认，
+`~/.ya/actions.jsonl`。活动日志达到 1 MiB 会自动轮转，并保留三份归档，总量约 4 MiB。使用
+`ya audit clear` 可手动清除全部审计日志；非交互环境必须额外传入 `--yes`。GUI 的
+**Settings > 清除操作审计** 提供同样的确认清理操作。本地模式可与网页检索组合，但不能与 `--toa` 同时使用；为防止工具调用绕过确认，
 本地模式始终缓冲回答。
 
 原生 GUI 提供相同的受限操作。在问答页开启 **本地工作区**，选择文件夹后即可提交任务。Ya 会在本地记住
@@ -207,7 +209,7 @@ ya ask --local --workspace "$PWD" --approve "创建 todo.txt，并写入三项�
 
 ## 原生 GUI
 
-GUI 默认英文，并可在设置中完整切换中文且持久化保存。简单任务会流式写入渲染后的回答区域；网页检索、ToA 与本地工作区任务会保持缓冲，以确保工具调用和预检确认可靠。
+GUI 默认英文，可在设置中选择 English 或 简体中文，并持久化保存。简单任务会流式写入渲染后的回答区域；网页检索、ToA 与本地工作区任务会保持缓冲，以确保工具调用和预检确认可靠。
 
 ![Ya 原生 GUI 中文界面](assets/ya-gui-example-zh-CN.png)
 

@@ -10,7 +10,7 @@ import sys
 from .config import ModelConfig, load_config, model_id, save_config
 from .deepseek import DeepSeekClient, DeepSeekError
 from .keychain import load_api_key, save_api_key
-from .local import LocalAction, LocalWorkspace
+from .local import LocalAction, LocalWorkspace, audit_log_files, audit_log_total_bytes, clear_audit_logs
 from .memory import (
     DuplicateMemoryError,
     MemoryLimitError,
@@ -66,6 +66,11 @@ def _parser() -> argparse.ArgumentParser:
     prune = memory_subcommands.add_parser("prune", help="Delete rejected and revoked memory cards")
     prune.add_argument("--include-candidates", action="store_true")
     prune.add_argument("--yes", action="store_true", help="Confirm deletion without an interactive prompt")
+
+    audit = commands.add_parser("audit", help="Manage local action audit logs")
+    audit_subcommands = audit.add_subparsers(dest="audit_command", required=True)
+    clear = audit_subcommands.add_parser("clear", help="Permanently delete local action audit logs")
+    clear.add_argument("--yes", action="store_true", help="Confirm deletion without an interactive prompt")
     return parser
 
 
@@ -259,6 +264,29 @@ def _memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def _audit(args: argparse.Namespace) -> int:
+    if args.audit_command != "clear":
+        raise ValueError(f"Unsupported audit command: {args.audit_command}")
+    logs = audit_log_files()
+    if not logs:
+        print("No audit logs to delete.")
+        return 0
+    total = audit_log_total_bytes()
+    print(f"Audit log files to delete ({len(logs)}, {total} bytes):")
+    for path in logs:
+        print(f"  {path} ({path.stat().st_size} bytes)")
+    if not args.yes:
+        if not sys.stdin.isatty():
+            raise ValueError("ya audit clear requires --yes in a non-interactive shell.")
+        answer = input("Permanently delete these audit logs? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("No audit logs deleted.")
+            return 0
+    removed = clear_audit_logs()
+    print(f"Deleted {len(removed)} audit log file(s).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -272,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
             return _config_set(args)
         if args.command == "memory":
             return _memory(args)
+        if args.command == "audit":
+            return _audit(args)
         return _ask(args)
     except (ValueError, DeepSeekError) as error:
         print(f"Ya error: {error}", file=sys.stderr)
