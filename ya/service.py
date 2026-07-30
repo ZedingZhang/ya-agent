@@ -6,6 +6,7 @@ from typing import Callable
 
 from .config import ModelConfig
 from .deepseek import DeepSeekClient
+from .local import LocalWorkspace
 from .orchestrator import RunResult, single_agent, toa_agent
 
 
@@ -18,9 +19,10 @@ def run_task(
     toa: bool = False,
     toa_workers: int = 2,
     on_content: Callable[[str], None] | None = None,
+    local_workspace: LocalWorkspace | None = None,
 ) -> RunResult:
     """Run one Ya task without choosing a presentation or credential mechanism."""
     client = DeepSeekClient(api_key)
     if toa:
         return toa_agent(client, task, config, toa_workers)
-    return single_agent(client, task, config, web_mode=web_mode, on_content=on_content)
+    return single_agent(client, task, config, web_mode=web_mode, on_content=on_content, local_workspace=local_workspace)

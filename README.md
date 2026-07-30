@@ -112,9 +112,9 @@ Unblock-File .\ya-windows-x64.exe
 ### Native desktop GUI
 
 The GUI defaults to English. Select Chinese in **Settings > Language**; Ya
-remembers this choice locally. It provides questions, streaming simple answers,
-memory review and approval, ToA confirmation, and model settings without
-starting a local web server.
+remembers this choice locally. It provides questions, memory review and
+approval, ToA confirmation, model settings, and an optional local workspace
+mode without starting a local web server.
 
 Download the matching GUI asset from the latest release:
 
@@ -202,7 +202,7 @@ finished. It buffers output for ToA, web research, pipes, and Markdown output
 to keep those workflows reliable. Use `--stream off` to always wait for the
 complete answer.
 
-### Local workspace actions (CLI only)
+### Local workspace actions
 
 `--local` explicitly lets Ya read non-sensitive UTF-8 text in one workspace and
 offer limited file actions. The workspace is the current directory by default;
@@ -228,8 +228,14 @@ configured DeepSeek API, while `.env`, private keys, credentials, binary files,
 and files over 1 MiB are blocked from model reads. Ya records change metadata
 (not file content or diffs) in `~/.ya/actions.jsonl`. Local mode can be combined
 with web research but not `--toa`, and it deliberately buffers answers so tool
-calls cannot bypass the confirmation flow. The GUI does not have local action
-capabilities yet.
+calls cannot bypass the confirmation flow.
+
+The native GUI offers the same constrained actions. Turn on **Local workspace**
+on the Ask page, choose a folder, then submit the task. Ya remembers the last
+folder path locally but leaves local mode off on every launch. Each change opens
+a default-deny confirmation window with absolute paths and a scrollable diff;
+the GUI cannot run shell commands, scripts, Git, package managers, or delete
+files.
 
 ## Example output
 
@@ -240,8 +246,9 @@ This is an illustrative terminal-style rendering based on a real Ya CLI answer.
 ## Native GUI
 
 The native GUI is English by default and persists a complete Chinese switch in
-Settings. Simple requests stream into the rendered answer pane; web research and
-ToA remain buffered so their tool and confirmation steps stay reliable.
+Settings. Simple requests stream into the rendered answer pane; web research,
+ToA, and local workspace tasks remain buffered so their tool and confirmation
+steps stay reliable.
 
 ![Ya native GUI in English](assets/ya-gui-example-en.png)
 
