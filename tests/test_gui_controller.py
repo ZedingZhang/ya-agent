@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ya import __version__
 from ya.config import ModelConfig, load_config
-from ya.gui import YaApp
+from ya.gui import TEXT, YaApp
 from ya.gui_controller import GuiController, GuiTaskOptions, load_preferences
 from ya.memory import create_candidate, set_status
 from ya.local import LocalAction
@@ -33,6 +34,21 @@ class GuiControllerTests(unittest.TestCase):
         controller.set_language("zh-CN")
         self.assertEqual(load_preferences()["language"], "zh-CN")
         self.assertEqual(GuiController().language, "zh-CN")
+
+    def test_language_labels_and_about_copy_are_user_facing(self):
+        self.assertEqual(TEXT["en"]["language_en"], "English")
+        self.assertEqual(TEXT["en"]["language_zh"], "简体中文")
+        self.assertEqual(TEXT["zh-CN"]["language_en"], "English")
+        self.assertEqual(TEXT["zh-CN"]["language_zh"], "简体中文")
+        self.assertIn(__version__, TEXT["en"]["about_text"].format(version=__version__))
+        self.assertIn(__version__, TEXT["zh-CN"]["about_text"].format(version=__version__))
+
+    def test_about_dialog_uses_current_version(self):
+        app = type("AboutApp", (), {"root": object(), "t": lambda _self, key: TEXT["en"][key]})()
+        with patch("ya.gui.messagebox.showinfo") as show:
+            YaApp._show_about(app)
+        self.assertEqual(show.call_args.args[0], "About Ya")
+        self.assertIn(__version__, show.call_args.args[1])
 
     def test_workspace_persists_but_invalid_saved_workspace_is_not_usable(self):
         workspace = Path(self.temp.name) / "workspace"
@@ -113,3 +129,27 @@ class GuiControllerTests(unittest.TestCase):
         controller.set_memory_status(card.id, "revoked")
         self.assertEqual([item.id for item in controller.prune_preview()], [card.id])
         self.assertEqual([item.id for item in controller.prune()], [card.id])
+
+    def test_audit_actions_are_available_to_gui(self):
+        controller = GuiController()
+        from ya.local import append_audit_record
+
+        append_audit_record({"record": 1})
+        self.assertEqual([path.name for path in controller.audit_logs()], ["actions.jsonl"])
+        self.assertGreater(controller.audit_log_total_bytes(), 0)
+        self.assertEqual([path.name for path in controller.clear_audit_logs()], ["actions.jsonl"])
+        self.assertEqual(controller.audit_logs(), [])
+
+    def test_gui_audit_clear_requires_confirmation(self):
+        controller = GuiController()
+        from ya.local import append_audit_record
+
+        append_audit_record({"record": 1})
+        app = type("AuditApp", (), {"controller": controller, "root": object(), "t": lambda _self, key: TEXT["en"][key]})()
+        with patch("ya.gui.messagebox.askyesno", return_value=False), patch("ya.gui.messagebox.showinfo"):
+            YaApp._clear_audit(app)
+        self.assertTrue(controller.audit_logs())
+        with patch("ya.gui.messagebox.askyesno", return_value=True), patch("ya.gui.messagebox.showinfo") as show:
+            YaApp._clear_audit(app)
+        self.assertEqual(controller.audit_logs(), [])
+        self.assertIn("Deleted 1 audit log file(s).", show.call_args.args[1])

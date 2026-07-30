@@ -3,8 +3,18 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from ya.local import LocalWorkspace, MAX_DIFF_LINES, MAX_TEXT_BYTES
+from ya.local import (
+    MAX_AUDIT_ARCHIVES,
+    LocalWorkspace,
+    MAX_DIFF_LINES,
+    MAX_TEXT_BYTES,
+    append_audit_record,
+    audit_log_files,
+    audit_log_total_bytes,
+    clear_audit_logs,
+)
 
 
 class LocalWorkspaceTests(unittest.TestCase):
@@ -97,3 +107,36 @@ class LocalWorkspaceTests(unittest.TestCase):
         self.workspace.write({"path": "large-diff.txt", "content": "".join(f"new {number}\n" for number in range(300))})
         self.assertIn("diff truncated", self.actions[-1].diff)
         self.assertLessEqual(len(self.actions[-1].diff.splitlines()), MAX_DIFF_LINES + 1)
+
+    def test_audit_logs_rotate_and_evict_oldest_records(self):
+        with patch("ya.local.AUDIT_LOG_MAX_BYTES", 120):
+            for number in range(10):
+                append_audit_record({"record": number, "value": "x" * 20})
+        logs = audit_log_files()
+        self.assertEqual([path.name for path in logs], ["actions.jsonl", "actions.1.jsonl", "actions.2.jsonl", "actions.3.jsonl"])
+        self.assertLessEqual(audit_log_total_bytes(), 120 * (MAX_AUDIT_ARCHIVES + 1))
+        records = []
+        for path in logs:
+            records.extend(json.loads(line)["record"] for line in path.read_text(encoding="utf-8").splitlines())
+        self.assertNotIn(0, records)
+        self.assertNotIn(1, records)
+        self.assertEqual(sorted(records), list(range(2, 10)))
+
+    def test_audit_rotation_keeps_complete_records_from_a_legacy_large_log(self):
+        active = Path(self.temp.name) / "actions.jsonl"
+        active.write_text("".join(json.dumps({"record": number, "value": "x" * 20}) + "\n" for number in range(6)), encoding="utf-8")
+        with patch("ya.local.AUDIT_LOG_MAX_BYTES", 120):
+            append_audit_record({"record": 6, "value": "x" * 20})
+        archive = Path(self.temp.name) / "actions.1.jsonl"
+        self.assertLessEqual(archive.stat().st_size, 120)
+        self.assertTrue(archive.read_text(encoding="utf-8").endswith("\n"))
+        for line in archive.read_text(encoding="utf-8").splitlines():
+            json.loads(line)
+
+    def test_clear_audit_logs_removes_active_and_archived_files(self):
+        append_audit_record({"record": 1})
+        archive = Path(self.temp.name) / "actions.1.jsonl"
+        archive.write_text('{"record": 0}\n', encoding="utf-8")
+        removed = clear_audit_logs()
+        self.assertEqual([path.name for path in removed], ["actions.jsonl", "actions.1.jsonl"])
+        self.assertEqual(audit_log_files(), [])

@@ -111,8 +111,8 @@ Unblock-File .\ya-windows-x64.exe
 
 ### Native desktop GUI
 
-The GUI defaults to English. Select Chinese in **Settings > Language**; Ya
-remembers this choice locally. It provides questions, memory review and
+The GUI defaults to English. Select **English** or **简体中文** in
+**Settings > Language**; Ya remembers this choice locally. It provides questions, memory review and
 approval, ToA confirmation, model settings, and an optional local workspace
 mode without starting a local web server.
 
@@ -226,7 +226,10 @@ ya ask --local --workspace "$PWD" --approve "Create todo.txt with three tasks"
 `--local` authorizes only reads inside that workspace. Read text is sent to the
 configured DeepSeek API, while `.env`, private keys, credentials, binary files,
 and files over 1 MiB are blocked from model reads. Ya records change metadata
-(not file content or diffs) in `~/.ya/actions.jsonl`. Local mode can be combined
+(not file content or diffs) in `~/.ya/actions.jsonl`. The active log rotates at
+1 MiB and keeps three archives (about 4 MiB total). Clear all audit history with
+`ya audit clear`; non-interactive use requires `--yes`. The GUI offers the same
+confirmed action in **Settings > Clear audit history**. Local mode can be combined
 with web research but not `--toa`, and it deliberately buffers answers so tool
 calls cannot bypass the confirmation flow.
 

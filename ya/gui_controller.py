@@ -10,7 +10,7 @@ from typing import Callable
 
 from .config import ModelConfig, data_home, load_config, save_config
 from .keychain import load_api_key, save_api_key
-from .local import LocalAction, LocalWorkspace
+from .local import LocalAction, LocalWorkspace, audit_log_files, audit_log_total_bytes, clear_audit_logs
 from .memory import MemoryCard, cards_to_prune, create_candidate, list_cards, prune_cards, select_relevant_cards, set_status
 from .orchestrator import should_use_web
 from .service import run_task
@@ -159,3 +159,12 @@ class GuiController:
 
     def prune(self, include_candidates: bool = False) -> list[MemoryCard]:
         return prune_cards(include_candidates)
+
+    def audit_logs(self) -> list[Path]:
+        return audit_log_files()
+
+    def audit_log_total_bytes(self) -> int:
+        return audit_log_total_bytes()
+
+    def clear_audit_logs(self) -> list[Path]:
+        return clear_audit_logs()

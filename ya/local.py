@@ -14,6 +14,68 @@ MAX_TEXT_BYTES = 1024 * 1024
 MAX_LIST_ENTRIES = 200
 MAX_SEARCH_RESULTS = 100
 MAX_DIFF_LINES = 200
+AUDIT_LOG_MAX_BYTES = 1024 * 1024
+MAX_AUDIT_ARCHIVES = 3
+
+
+def _audit_log_path(index: int = 0) -> Path:
+    suffix = "" if index == 0 else f".{index}"
+    return data_home() / f"actions{suffix}.jsonl"
+
+
+def audit_log_files() -> list[Path]:
+    """Return existing audit logs from newest to oldest."""
+    return [path for index in range(MAX_AUDIT_ARCHIVES + 1) if (path := _audit_log_path(index)).is_file()]
+
+
+def audit_log_total_bytes() -> int:
+    return sum(path.stat().st_size for path in audit_log_files())
+
+
+def clear_audit_logs() -> list[Path]:
+    """Permanently remove the active audit log and its rotated archives."""
+    removed = audit_log_files()
+    for path in removed:
+        path.unlink()
+    return removed
+
+
+def _tail_complete_lines(data: bytes, limit: int) -> bytes:
+    """Keep recent complete JSONL records when rotating a pre-existing large log."""
+    if len(data) <= limit:
+        return data
+    tail = data[-limit:]
+    newline = tail.find(b"\n")
+    return tail[newline + 1 :] if newline >= 0 else b""
+
+
+def _rotate_audit_logs() -> None:
+    for index in range(MAX_AUDIT_ARCHIVES, 0, -1):
+        source = _audit_log_path(index - 1)
+        destination = _audit_log_path(index)
+        if not source.is_file():
+            continue
+        if index == MAX_AUDIT_ARCHIVES:
+            destination.unlink(missing_ok=True)
+        if index == 1 and source.stat().st_size > AUDIT_LOG_MAX_BYTES:
+            data = _tail_complete_lines(source.read_bytes(), AUDIT_LOG_MAX_BYTES)
+            temporary = destination.with_suffix(destination.suffix + ".tmp")
+            temporary.write_bytes(data)
+            temporary.replace(destination)
+            source.unlink()
+        else:
+            source.replace(destination)
+
+
+def append_audit_record(record: dict[str, object]) -> None:
+    """Append an audit record while keeping the local audit history bounded."""
+    encoded = (json.dumps(record, ensure_ascii=True) + "\n").encode("utf-8")
+    active = _audit_log_path()
+    active.parent.mkdir(parents=True, exist_ok=True)
+    if active.is_file() and active.stat().st_size + len(encoded) > AUDIT_LOG_MAX_BYTES:
+        _rotate_audit_logs()
+    with active.open("ab") as handle:
+        handle.write(encoded)
 
 
 LOCAL_TOOLS = [
@@ -157,10 +219,7 @@ class LocalWorkspace:
         }
         if error:
             record["error"] = error
-        path = data_home() / "actions.jsonl"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+        append_audit_record(record)
 
     def _confirm(self, action: LocalAction) -> bool:
         if self.confirm(action):

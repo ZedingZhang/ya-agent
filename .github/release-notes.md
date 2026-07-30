@@ -1,3 +1,24 @@
+## Audit log management and GUI metadata
+
+- Local workspace action audit logs now rotate at 1 MiB and retain three
+  archives, bounding local storage to about 4 MiB without recording file
+  content, diffs, or credentials.
+- Run `ya audit clear` to review and permanently clear local audit history;
+  non-interactive use requires `--yes`. The GUI offers the same confirmed action
+  in Settings.
+- GUI language choices now display as `English` and `简体中文`. Help > About Ya
+  shows the application version, and macOS app bundles now carry the release
+  version in their native About panel.
+
+### 中文说明
+
+- 本地工作区操作审计日志现在会在达到 1 MiB 时自动轮转，并保留三份归档，将本地占用限制在约
+  4 MiB；日志不会记录文件内容、diff 或凭据。
+- 使用 `ya audit clear` 可查看并永久清除本地审计历史；非交互环境必须传入 `--yes`。GUI 设置页
+  提供同样需要确认的清理操作。
+- GUI 语言选项现显示为 `English` 和 `简体中文`。帮助菜单中的“关于 Ya”会显示应用版本，macOS
+  应用包的系统“About Ya”也会显示实际 Release 版本。
+
 ## GUI local workspace agent
 
 - The native GUI now provides the same constrained local workspace mode as the
