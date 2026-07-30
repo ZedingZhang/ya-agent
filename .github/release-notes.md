@@ -1,3 +1,9 @@
+## Conversation layout
+
+Workspace task prompts now appear in right-aligned blue bubbles, while Ya responses stay left-aligned for faster visual scanning.
+
+工作区任务提示现在会显示在右侧的蓝色气泡中，Ya 的回答保持左侧对齐，更符合对话阅读习惯。
+
 ## Clearer task boundaries
 
 The workspace timeline now places a dedicated divider and breathing room between consecutive tasks, making task history easier to scan.
