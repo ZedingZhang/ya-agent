@@ -155,7 +155,7 @@ class YaApp(ttk.Frame):
         self.thinking_var = tk.BooleanVar(value=config.thinking_enabled)
         self.web_var = tk.StringVar(value=self._web_label("auto"))
         self.toa_var = tk.BooleanVar(value=False)
-        self.stream_var = tk.BooleanVar(value=True)
+        self.stream_var = tk.BooleanVar(value=self.controller.stream)
         # Local access must be newly and explicitly granted every launch.
         self.local_var = tk.BooleanVar(value=False)
         self.workspace_var = tk.StringVar(value=self.controller.workspace or "")
@@ -262,11 +262,10 @@ class YaApp(ttk.Frame):
         self.toa_check.grid(row=0, column=5)
         self.workers_box = ttk.Combobox(controls, textvariable=self.workers_var, values=("1", "2"), state="disabled", width=3)
         self.workers_box.grid(row=0, column=6, padx=(4, 14))
-        ttk.Checkbutton(controls, text=self.t("stream"), variable=self.stream_var).grid(row=0, column=7, sticky="w")
         self.send_button = ttk.Button(controls, text=self.t("send"), command=self._ask)
-        self.send_button.grid(row=0, column=8, padx=(14, 0))
+        self.send_button.grid(row=0, column=7, padx=(14, 0))
         self.learn_button = ttk.Button(controls, text=self.t("learn"), command=self._learn, state="disabled")
-        self.learn_button.grid(row=0, column=9, padx=(6, 0))
+        self.learn_button.grid(row=0, column=8, padx=(6, 0))
         self._render_timeline()
 
     def _build_context_panel(self, panel: ttk.Frame) -> None:
@@ -634,6 +633,7 @@ class YaApp(ttk.Frame):
             ("language", lambda parent: ttk.Combobox(parent, textvariable=self.language_var, values=tuple(self._language_label(code) for code in ("en", "zh-CN")), state="readonly", width=16)),
             ("model", lambda parent: ttk.Combobox(parent, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=16)),
             ("thinking", lambda parent: ttk.Checkbutton(parent, variable=self.thinking_var)),
+            ("stream", lambda parent: ttk.Checkbutton(parent, variable=self.stream_var)),
             ("reasoning", lambda parent: ttk.Combobox(parent, textvariable=self.reasoning_var, values=("high", "max"), state="readonly", width=16)),
             ("budget", lambda parent: ttk.Entry(parent, textvariable=self.budget_var, width=18)),
             ("timeout", lambda parent: ttk.Entry(parent, textvariable=self.timeout_var, width=18)),
@@ -666,6 +666,7 @@ class YaApp(ttk.Frame):
                 reasoning_effort=self.reasoning_var.get(), toa_token_budget=int(self.budget_var.get()), toa_timeout=int(self.timeout_var.get()),
             )
             self.controller.save_config(config)
+            self.controller.set_stream(self.stream_var.get())
             language = self._language_code()
             changed = language != self.controller.language
             self.controller.set_language(language)

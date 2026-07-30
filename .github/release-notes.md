@@ -1,3 +1,14 @@
+## GUI streaming preference
+
+- **Stream simple answers** has moved from the workspace task bar to Settings.
+  The selection now persists in the local GUI preference file and defaults to
+  enabled for existing installations that do not yet have a saved value.
+
+### 中文说明
+
+- **简单回答使用流式输出** 已从工作区任务栏移动到设置页。该选择会持久化保存到本地 GUI 偏好文件；旧安装没有
+  保存值时仍默认开启。
+
 ## Workspace-first GUI
 
 - The desktop GUI is now a workspace-first workbench rather than a separate
