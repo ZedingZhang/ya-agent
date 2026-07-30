@@ -23,25 +23,30 @@ def preferences_path() -> Path:
     return data_home() / "gui.json"
 
 
-def load_preferences() -> dict[str, str | None]:
+def load_preferences() -> dict[str, object]:
     path = preferences_path()
     if not path.exists():
-        return {"language": "en", "workspace": None}
+        return {"language": "en", "workspace": None, "stream": True}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"language": "en", "workspace": None}
+        return {"language": "en", "workspace": None, "stream": True}
     language = value.get("language") if isinstance(value, dict) else None
     workspace = value.get("workspace") if isinstance(value, dict) else None
-    return {"language": language if language in LANGUAGES else "en", "workspace": workspace if isinstance(workspace, str) else None}
+    stream = value.get("stream") if isinstance(value, dict) else None
+    return {
+        "language": language if language in LANGUAGES else "en",
+        "workspace": workspace if isinstance(workspace, str) else None,
+        "stream": stream if isinstance(stream, bool) else True,
+    }
 
 
-def save_preferences(language: str, workspace: str | None) -> None:
+def save_preferences(language: str, workspace: str | None, stream: bool = True) -> None:
     if language not in LANGUAGES:
         raise ValueError("GUI language must be en or zh-CN.")
     path = preferences_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"language": language, "workspace": workspace}, indent=2), encoding="utf-8")
+    path.write_text(json.dumps({"language": language, "workspace": workspace, "stream": stream}, indent=2), encoding="utf-8")
 
 
 @dataclass
@@ -63,10 +68,11 @@ class GuiController:
         preferences = load_preferences()
         self.language = str(preferences["language"])
         self.workspace = preferences["workspace"]
+        self.stream = bool(preferences["stream"])
         self._session_api_key: str | None = None
 
     def _save_preferences(self) -> None:
-        save_preferences(self.language, self.workspace)
+        save_preferences(self.language, self.workspace, self.stream)
 
     def set_language(self, language: str) -> None:
         if language not in LANGUAGES:
@@ -84,6 +90,10 @@ class GuiController:
         self.workspace = str(workspace)
         self._save_preferences()
         return self.workspace
+
+    def set_stream(self, enabled: bool) -> None:
+        self.stream = bool(enabled)
+        self._save_preferences()
 
     def valid_workspace(self) -> str | None:
         if not self.workspace:

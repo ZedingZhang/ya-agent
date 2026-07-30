@@ -35,6 +35,13 @@ class GuiControllerTests(unittest.TestCase):
         self.assertEqual(load_preferences()["language"], "zh-CN")
         self.assertEqual(GuiController().language, "zh-CN")
 
+    def test_stream_preference_defaults_on_and_persists(self):
+        controller = GuiController()
+        self.assertTrue(controller.stream)
+        controller.set_stream(False)
+        self.assertFalse(GuiController().stream)
+        self.assertFalse(load_preferences()["stream"])
+
     def test_language_labels_and_about_copy_are_user_facing(self):
         self.assertEqual(TEXT["en"]["language_en"], "English")
         self.assertEqual(TEXT["en"]["language_zh"], "简体中文")

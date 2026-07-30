@@ -255,7 +255,8 @@ The native GUI is English by default and persists a complete Chinese switch in
 Settings. Its single workspace workbench keeps task history only for the open
 application session. Simple requests stream into the rendered task timeline;
 web research, ToA, and local workspace tasks remain buffered so their tool and
-confirmation steps stay reliable.
+confirmation steps stay reliable. Choose **Stream simple answers** in
+**Settings** to keep or disable streaming; Ya saves that GUI preference locally.
 
 ![Ya workspace workbench in English](assets/ya-gui-workspace-en.png)
 
