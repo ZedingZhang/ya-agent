@@ -1,3 +1,14 @@
+## GUI local workspace agent
+
+- The native GUI now provides the same constrained local workspace mode as the
+  CLI. Select a folder on the Ask page; Ya remembers its path locally while
+  keeping local mode off at every launch.
+- File changes pause for a default-deny GUI confirmation showing absolute paths
+  and a scrollable capped diff. The existing sensitive-file protections, action
+  audit, no-shell policy, and no-delete policy are unchanged.
+- Local workspace tasks can use web research, are buffered, and cannot be
+  combined with ToA.
+
 ## CLI local workspace agent
 
 - `ya ask --local [--workspace PATH]` now gives the CLI a deliberately limited
@@ -11,8 +22,7 @@
   are blocked from model reads. Change metadata is audited locally without
   content or diffs.
 - Local mode can use web research but is incompatible with `--toa` and buffers
-  output. This release adds local action capability to the CLI only; the GUI
-  remains unchanged.
+  output.
 
 ## Native desktop GUI
 
@@ -76,6 +86,14 @@ and contributors.
 
 ## 中文说明
 
+### GUI 本地工作区 Agent
+
+- 原生 GUI 现在提供与 CLI 相同的受限本地工作区模式。在问答页选择文件夹后，Ya 会在本地记住路径，
+  但每次启动时本地模式保持关闭。
+- 文件变更会暂停并显示默认拒绝的确认窗口，其中包含绝对路径和可滚动的截断 diff。敏感文件保护、操作审计、
+  禁止 shell 与禁止删除策略维持不变。
+- 本地工作区任务可使用网页检索，会保持缓冲，且不能与 ToA 同时使用。
+
 ### CLI 本地工作区 Agent
 
 - `ya ask --local [--workspace PATH]` 现在让 CLI 在一个明确授权的受限本地工作区内操作：可列举、读取、
@@ -84,8 +102,7 @@ and contributors.
   任务显式传入 `--approve`。
 - 读取严格限定于工作区内的非敏感 UTF-8 文本。`.env`、凭据、私钥、二进制文件和超过 1 MiB 的文件不会
   发送给模型。审计仅记录操作元数据，不记录内容或 diff。
-- 本地模式可使用网页检索，但不能与 `--toa` 同时使用，且会缓冲输出。本版本仅为 CLI 增加本地行动能力；
-  GUI 保持不变。
+- 本地模式可使用网页检索，但不能与 `--toa` 同时使用，且会缓冲输出。
 
 ### 独立可执行文件
 
