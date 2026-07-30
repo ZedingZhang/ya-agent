@@ -169,7 +169,7 @@ class YaApp(ttk.Frame):
         controls = ttk.Frame(page)
         controls.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         for col in range(8): controls.columnconfigure(col, weight=0)
-        controls.columnconfigure(1, weight=1)
+        controls.columnconfigure(2, weight=1)
         ttk.Label(controls, text=self.t("model")).grid(row=0, column=0, sticky="w")
         ttk.Combobox(controls, textvariable=self.model_var, values=("flash", "pro"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(4, 12))
         ttk.Checkbutton(controls, text=self.t("thinking"), variable=self.thinking_var).grid(row=0, column=2, padx=(0, 12))
