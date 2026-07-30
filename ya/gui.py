@@ -101,6 +101,13 @@ TEXT = {
 }
 
 
+def initial_window_geometry(screen_width: int, screen_height: int) -> tuple[int, int, int, int]:
+    """Choose a spacious, centered first-run workbench without exceeding a display."""
+    width = max(1020, min(1900, round(screen_width * 0.92)))
+    height = max(680, min(1180, round(screen_height * 0.90)))
+    return width, height, max(0, (screen_width - width) // 2), max(0, (screen_height - height) // 2)
+
+
 @dataclass
 class LocalActionRequest:
     action: LocalAction
@@ -127,6 +134,7 @@ class YaApp(ttk.Frame):
         self.activities: list[LocalActivity] = []
         self.active_task: SessionTask | None = None
         self.pending_action: LocalActionRequest | None = None
+        self._initial_sashes_applied = False
         self._link_urls: dict[str, str] = {}
         self._set_vars()
         self._build()
@@ -171,6 +179,8 @@ class YaApp(ttk.Frame):
     def _build(self) -> None:
         self.root.title(self.t("title"))
         self.root.minsize(1020, 680)
+        width, height, x, y = initial_window_geometry(self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         self._build_menu()
@@ -185,6 +195,7 @@ class YaApp(ttk.Frame):
         self._build_workspace()
         self._build_memory()
         self._build_settings()
+        self.root.after(100, self._set_initial_workbench_sashes)
 
     def _build_menu(self) -> None:
         menu = tk.Menu(self.root)
@@ -219,6 +230,20 @@ class YaApp(ttk.Frame):
         self._build_file_panel(files)
         self._build_task_panel(center)
         self._build_context_panel(right)
+
+    def _set_initial_workbench_sashes(self) -> None:
+        """Use the workbench proportions once; later user drags remain authoritative."""
+        if self._initial_sashes_applied:
+            return
+        width = self.workbench.winfo_width()
+        if width < 900:
+            self.root.after(60, self._set_initial_workbench_sashes)
+            return
+        left = max(220, min(300, round(width * 0.14)))
+        right_start = max(left + 620, min(width - 330, round(width * 0.71)))
+        self.workbench.sashpos(0, left)
+        self.workbench.sashpos(1, right_start)
+        self._initial_sashes_applied = True
 
     def _build_file_panel(self, panel: ttk.Labelframe) -> None:
         panel.columnconfigure(0, weight=1)

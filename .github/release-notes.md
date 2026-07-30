@@ -1,3 +1,15 @@
+## First-run workbench layout
+
+- The first GUI launch now opens a centered, display-relative workspace window
+  with a roomier three-column split: files, task timeline, and activity. The
+  initial sash positions are applied only once, so later manual adjustments are
+  never reset.
+
+### 中文说明
+
+- GUI 首次启动时会以居中的屏幕相对尺寸打开，并采用更宽松的三栏比例：文件、任务时间线和活动区。初始分栏位置
+  只会设置一次，用户之后手动拖动的布局不会被重置。
+
 ## GUI streaming preference
 
 - **Stream simple answers** has moved from the workspace task bar to Settings.
