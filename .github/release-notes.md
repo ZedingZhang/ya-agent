@@ -1,3 +1,9 @@
+## Default local workspace tools
+
+GUI local tools now start enabled. Ya still requires a chosen workspace before it can access any local file, and every file change remains individually confirmed. The primary task button is now **Send** / **发送**.
+
+GUI 本地工具现在默认开启。Ya 仍需先选择工作区才可访问本地文件，每项文件变更依然需要逐项确认。主任务按钮现为 **Send** / **发送**。
+
 ## Conversation layout
 
 Workspace task prompts now appear in right-aligned blue bubbles, while Ya responses stay left-aligned for faster visual scanning.
@@ -56,7 +62,7 @@ The default workbench now gives the task column more room so all bottom controls
 
 - 原生 GUI 现在以工作区工作台为唯一主界面，不再保留独立聊天页。可拖动的三栏布局整合了仅用于导航的文件树、
   仅本次会话保留的任务时间线，以及活动和确认面板。
-- 普通问答仍可直接在工作台完成。本地工具在每次启动时保持关闭，必须显式开启；目录、读取和搜索活动只显示
+- 普通问答仍可直接在工作台完成。本地工具默认开启；未选择工作区时不会读取本地文件。目录、读取和搜索活动只显示
   元数据，不显示文件内容。
 - 文件变更现在会在活动面板内暂停，等待默认拒绝的批准或拒绝；适用时显示绝对路径和受限 diff。既有工作区边界、
   敏感文件保护、审计、禁止 shell 与禁止删除的保证均保持不变。

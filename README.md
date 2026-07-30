@@ -235,9 +235,10 @@ with web research but not `--toa`, and it deliberately buffers answers so tool
 calls cannot bypass the confirmation flow.
 
 The native GUI uses the workspace workbench for both ordinary questions and
-local tasks. Choose a folder, then explicitly turn on **Enable local tools**
-before submitting a task; local mode remains off on every launch. The file tree
-is for navigation only and does not send file contents to the model. Agent
+local tasks. **Enable local tools** is on by default. On the first task, choose
+a workspace folder before Ya can access any local file; no workspace means no
+local file is read or sent to the model. The file tree is for navigation only
+and does not send file contents to the model. Agent
 directory, read, and search activity appears in the right panel without file
 contents. Each change pauses in that panel for a default-deny decision with
 absolute paths and a scrollable diff; the GUI cannot run shell commands,

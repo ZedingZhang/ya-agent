@@ -159,6 +159,8 @@ class GuiControllerTests(unittest.TestCase):
     def test_workspace_is_the_only_primary_gui_page_label(self):
         self.assertEqual(TEXT["en"]["workspace"], "Workspace")
         self.assertNotIn("ask", TEXT["en"])
+        self.assertEqual(TEXT["en"]["send"], "Send")
+        self.assertEqual(TEXT["zh-CN"]["send"], "发送")
 
     def test_initial_workbench_geometry_is_spacious_and_centered(self):
         self.assertEqual(initial_window_geometry(2048, 1280), (1884, 1152, 82, 64))
