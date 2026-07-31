@@ -74,7 +74,7 @@ jobs:
 
       - name: Build GUI application on macOS
         if: runner.os == 'macOS'
-        run: python -m PyInstaller --clean --noconfirm --windowed --name Ya --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
+        run: python -m PyInstaller --clean --noconfirm --windowed --name Ya --osx-bundle-identifier com.zedingzhang.ya --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
 
       - name: Stamp macOS GUI version
         if: runner.os == 'macOS'
