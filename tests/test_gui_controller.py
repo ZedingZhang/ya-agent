@@ -168,7 +168,7 @@ class GuiControllerTests(unittest.TestCase):
         self.assertEqual(initial_workbench_sashes(1720), (172, 1462))
         self.assertEqual(initial_workbench_sashes(1020), (190, 810))
         self.assertFalse(task_controls_wrap_required(1020))
-        self.assertTrue(task_controls_wrap_required(620))
+        self.assertFalse(task_controls_wrap_required(620))
 
     def test_memory_actions_and_relevant_cards(self):
         controller = GuiController()

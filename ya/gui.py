@@ -120,8 +120,8 @@ def initial_workbench_sashes(width: int) -> tuple[int, int]:
 
 
 def task_controls_wrap_required(width: int) -> bool:
-    """Keep the learning command reachable when a smaller display limits the center pane."""
-    return width < 820
+    """The task controls stay on one row at every supported window width."""
+    return False
 
 
 @dataclass
@@ -151,7 +151,6 @@ class YaApp(ttk.Frame):
         self.active_task: SessionTask | None = None
         self.pending_action: LocalActionRequest | None = None
         self._initial_sashes_applied = False
-        self._task_controls_wrapped = False
         self._link_urls: dict[str, str] = {}
         self._prompt_bubbles: list[tk.Label] = []
         self._set_vars()
@@ -309,19 +308,7 @@ class YaApp(ttk.Frame):
         self.send_button.grid(row=0, column=7, padx=(10, 0))
         self.learn_button = ttk.Button(controls, text=self.t("learn"), command=self._learn, state="disabled")
         self.learn_button.grid(row=0, column=8, padx=(6, 0))
-        controls.bind("<Configure>", self._reflow_task_controls)
         self._render_timeline()
-
-    def _reflow_task_controls(self, _event: tk.Event | None = None) -> None:
-        """Wrap only the optional learning button when the task pane becomes narrow."""
-        should_wrap = task_controls_wrap_required(self.task_controls.winfo_width())
-        if should_wrap == self._task_controls_wrapped:
-            return
-        self._task_controls_wrapped = should_wrap
-        if should_wrap:
-            self.learn_button.grid_configure(row=1, column=0, columnspan=9, sticky="e", padx=0, pady=(6, 0))
-        else:
-            self.learn_button.grid_configure(row=0, column=8, columnspan=1, sticky="", padx=(6, 0), pady=0)
 
     def _build_context_panel(self, panel: ttk.Frame) -> None:
         panel.columnconfigure(0, weight=1)
