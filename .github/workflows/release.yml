@@ -86,6 +86,7 @@ jobs:
           INFO_PLIST="dist/gui/Ya.app/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$INFO_PLIST"
           /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$INFO_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :LSUIElement bool false" "$INFO_PLIST"
           codesign --force --deep --sign - dist/gui/Ya.app
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")" = "$VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")" = "$VERSION"
