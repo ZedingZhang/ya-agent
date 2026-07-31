@@ -157,6 +157,7 @@ class YaApp(ttk.Frame):
         self._build()
         self.pack(fill="both", expand=True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.root.bind_all("<Command-q>", self._handle_quit_key)
         if sys.platform == "darwin":
             self.root.createcommand("::tk::mac::Quit", self._on_close)
         self.root.after(40, self._drain_events)
@@ -785,6 +786,10 @@ class YaApp(ttk.Frame):
     def _on_close(self) -> None:
         self._resolve_local_action(False)
         self.root.destroy()
+
+    def _handle_quit_key(self, _event: tk.Event | None = None) -> str:
+        self._on_close()
+        return "break"
 
 
 def main(argv: list[str] | None = None) -> int:
