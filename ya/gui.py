@@ -151,6 +151,7 @@ class YaApp(ttk.Frame):
         self.active_task: SessionTask | None = None
         self.pending_action: LocalActionRequest | None = None
         self._initial_sashes_applied = False
+        self._closing = False
         self._link_urls: dict[str, str] = {}
         self._prompt_bubbles: list[tk.Label] = []
         self._set_vars()
@@ -784,7 +785,11 @@ class YaApp(ttk.Frame):
         self._render_activities()
 
     def _on_close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
         self._resolve_local_action(False)
+        self.root.quit()
         self.root.destroy()
 
     def _handle_quit_key(self, _event: tk.Event | None = None) -> str:
