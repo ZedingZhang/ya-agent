@@ -109,9 +109,13 @@ def initial_window_geometry(screen_width: int, screen_height: int) -> tuple[int,
 
 
 def initial_workbench_sashes(width: int) -> tuple[int, int]:
-    """Reserve enough center space for the task controls on first launch."""
-    left = max(190, min(260, round(width * 0.12)))
-    right_start = max(left + 620, min(width - 300, round(width * 0.80)))
+    """Use a 10/75/15 workbench split on the first wide-screen launch."""
+    if width >= 1400:
+        left = round(width * 0.10)
+        right_start = round(width * 0.85)
+    else:
+        left = max(190, min(260, round(width * 0.10)))
+        right_start = max(left + 620, min(width - 300, round(width * 0.85)))
     return left, right_start
 
 
