@@ -306,10 +306,8 @@ class YaApp(ttk.Frame):
         self.workers_box.grid(row=0, column=6, padx=(4, 14))
         self.send_button = ttk.Button(controls, text=self.t("send"), command=self._ask)
         self.send_button.grid(row=0, column=7, padx=(10, 0))
-        # Keep the action label on one line even when the center pane is narrow.
-        self.learn_button = ttk.Button(
-            controls, text=self.t("learn"), command=self._learn, state="disabled", width=20
-        )
+        # Let the button size itself to the localized action label.
+        self.learn_button = ttk.Button(controls, text=self.t("learn"), command=self._learn, state="disabled")
         self.learn_button.grid(row=0, column=8, padx=(6, 0))
         self._render_timeline()
 
