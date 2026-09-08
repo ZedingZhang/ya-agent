@@ -1,272 +1,92 @@
-## Wider default task timeline
-
-On wide screens, the first-run workbench now starts at approximately 12% files, 68% task timeline, and 20% activity panel.
-
-在宽屏上，首次启动的工作台现在采用约 12% 文件栏、68% 任务时间线和 20% 活动栏的比例。
-
-## Default local workspace tools
-
-GUI local tools now start enabled. Ya still requires a chosen workspace before it can access any local file, and every file change remains individually confirmed. The primary task button is now **Send** / **发送**.
-
-GUI 本地工具现在默认开启。Ya 仍需先选择工作区才可访问本地文件，每项文件变更依然需要逐项确认。主任务按钮现为 **Send** / **发送**。
-
-## Conversation layout
-
-Workspace task prompts now appear in right-aligned blue bubbles, while Ya responses stay left-aligned for faster visual scanning.
-
-工作区任务提示现在会显示在右侧的蓝色气泡中，Ya 的回答保持左侧对齐，更符合对话阅读习惯。
-
-## Clearer task boundaries
-
-The workspace timeline now places a dedicated divider and breathing room between consecutive tasks, making task history easier to scan.
-
-工作区时间线现在会在相邻任务之间显示独立分隔线和留白，任务历史更容易浏览。
-
-## First-run task space
-
-The default workbench now gives the task column more room so all bottom controls, including **Learn from this answer**, remain visible on wide desktop windows.
-
-默认工作台进一步扩大了任务栏，宽屏桌面上底部的“从此回答中学习”等控件会完整显示。
-
-## First-run workbench layout
-
-- The first GUI launch now opens a centered, display-relative workspace window
-  with a roomier three-column split: files, task timeline, and activity. The
-  initial sash positions are applied only once, so later manual adjustments are
-  never reset.
-
-### 中文说明
-
-- GUI 首次启动时会以居中的屏幕相对尺寸打开，并采用更宽松的三栏比例：文件、任务时间线和活动区。初始分栏位置
-  只会设置一次，用户之后手动拖动的布局不会被重置。
-
-## GUI streaming preference
-
-- **Stream simple answers** has moved from the workspace task bar to Settings.
-  The selection now persists in the local GUI preference file and defaults to
-  enabled for existing installations that do not yet have a saved value.
-
-### 中文说明
-
-- **简单回答使用流式输出** 已从工作区任务栏移动到设置页。该选择会持久化保存到本地 GUI 偏好文件；旧安装没有
-  保存值时仍默认开启。
-
-## Workspace-first GUI
-
-- The desktop GUI is now a workspace-first workbench rather than a separate
-  chat page. Its resizable three-column layout combines a navigation-only file
-  tree, a session-only task timeline, and an activity and approval panel.
-- Ordinary questions still work from the workbench. Local tools remain off at
-  launch and require an explicit toggle; their directory, read, and search
-  events expose metadata only, never file contents.
-- File changes now pause for an inline default-deny decision in the activity
-  panel, with absolute paths and a capped diff where applicable. The existing
-  workspace boundary, sensitive-file protection, audit, no-shell, and no-delete
-  guarantees remain unchanged.
-
-### 中文说明
-
-- 原生 GUI 现在以工作区工作台为唯一主界面，不再保留独立聊天页。可拖动的三栏布局整合了仅用于导航的文件树、
-  仅本次会话保留的任务时间线，以及活动和确认面板。
-- 普通问答仍可直接在工作台完成。本地工具默认开启；未选择工作区时不会读取本地文件。目录、读取和搜索活动只显示
-  元数据，不显示文件内容。
-- 文件变更现在会在活动面板内暂停，等待默认拒绝的批准或拒绝；适用时显示绝对路径和受限 diff。既有工作区边界、
-  敏感文件保护、审计、禁止 shell 与禁止删除的保证均保持不变。
-
-## Balanced ask-page controls
-
-- The Thinking control now occupies the flexible space between Model and Web on
-  the Ask page, instead of being grouped against Web.
-
-### 中文说明
-
-- 问答页的“思考”控件现在位于模型与网页之间的弹性区域中，不再贴近网页控件。
-
-## Ask-page model alignment
-
-- The Model selector on the Ask page now stays left-aligned beside its label
-  when the workspace control expands across the row below.
-
-### 中文说明
-
-- 问答页的模型选择框现在会始终左对齐在“模型”标签旁，不再因为下方工作区控件扩张而被推远。
-
-## Compact settings layout
-
-- The native GUI settings form now keeps labels and their controls together in
-  compact rows, including the Model selector, regardless of window width.
-
-### 中文说明
-
-- 原生 GUI 的设置页现在使用紧凑行布局；包括模型选择在内的标签与控件会保持相邻，不会随窗口宽度拉开。
-
-## Audit log management and GUI metadata
-
-- Local workspace action audit logs now rotate at 1 MiB and retain three
-  archives, bounding local storage to about 4 MiB without recording file
-  content, diffs, or credentials.
-- Run `ya audit clear` to review and permanently clear local audit history;
-  non-interactive use requires `--yes`. The GUI offers the same confirmed action
-  in Settings.
-- GUI language choices now display as `English` and `简体中文`. Help > About Ya
-  shows the application version, and macOS app bundles now carry the release
-  version in their native About panel.
-
-### 中文说明
-
-- 本地工作区操作审计日志现在会在达到 1 MiB 时自动轮转，并保留三份归档，将本地占用限制在约
-  4 MiB；日志不会记录文件内容、diff 或凭据。
-- 使用 `ya audit clear` 可查看并永久清除本地审计历史；非交互环境必须传入 `--yes`。GUI 设置页
-  提供同样需要确认的清理操作。
-- GUI 语言选项现显示为 `English` 和 `简体中文`。帮助菜单中的“关于 Ya”会显示应用版本，macOS
-  应用包的系统“About Ya”也会显示实际 Release 版本。
-
-## GUI local workspace agent
-
-- The native GUI now provides the same constrained local workspace mode as the
-  CLI. Select a folder on the Ask page; Ya remembers its path locally while
-  keeping local mode off at every launch.
-- File changes pause for a default-deny GUI confirmation showing absolute paths
-  and a scrollable capped diff. The existing sensitive-file protections, action
-  audit, no-shell policy, and no-delete policy are unchanged.
-- Local workspace tasks can use web research, are buffered, and cannot be
-  combined with ToA.
-
-## CLI local workspace agent
-
-- `ya ask --local [--workspace PATH]` now gives the CLI a deliberately limited
-  local file workspace. It can list, read, search, create directories, write
-  text files, and move or rename paths; it cannot execute commands or delete.
-- Every filesystem change requires an interactive confirmation and shows an
-  absolute path; replacements show a capped unified diff. Non-interactive
-  writes require `--approve` for that task.
-- Reads remain bounded to non-sensitive UTF-8 text inside the workspace.
-  `.env`, credentials, private keys, binary files, and files larger than 1 MiB
-  are blocked from model reads. Change metadata is audited locally without
-  content or diffs.
-- Local mode can use web research but is incompatible with `--toa` and buffers
-  output.
-
-## Native desktop GUI
-
-- Ya now ships with a zero-runtime-dependency native Tk desktop GUI alongside
-  the CLI on macOS Apple Silicon, macOS Intel, Windows x64, and Linux x64.
-- The app includes streamed simple answers, rendered Markdown, ToA preflight,
-  local memory review, approval and pruning, and model configuration.
-- The GUI defaults to English. A complete Chinese interface is available in
-  Settings and the selection persists locally.
-- macOS GUI credentials use the existing Keychain integration. Windows and
-  Linux accept `DEEPSEEK_API_KEY` or a session-only key, never plaintext storage.
-
-## macOS TLS compatibility
-
-- The frozen macOS GUI now uses the system certificate bundle when no
-  `SSL_CERT_FILE` override is supplied. This keeps the GUI aligned with the CLI
-  on networks that install a locally trusted proxy certificate, without
-  weakening TLS verification.
-
-## Markdown rendering resilience
-
-- Terminal rendering now recovers when a model leaves a fenced code block
-  unclosed before a subsequent Markdown heading, so later headings, lists, and
-  emphasis do not appear as raw Markdown.
-
-## Relevant local memory
-
-- Ya now ranks approved memory for each task instead of always injecting the
-  oldest three cards.
-- Ranking is local and dependency-free: exact phrases and meaningful English
-  keywords rank before Chinese character n-gram overlap; ties prefer newer
-  cards, and low-scoring cards stay out of the model context.
-- `ya ask --show-memory` displays the cards and scores selected for a task.
-  It is opt-in because it can print personal memory text.
-
-## Faster, more reliable answers
-
-- Interactive single-agent answers now stream line-by-line with readable
-  Markdown terminal rendering.
-- `ya ask --web auto|on|off` selects an intelligent default, requires web
-  search, or disables web access for a faster direct answer.
-- `ya ask --stream auto|off` controls interactive streaming. ToA, web research,
-  pipes, and Markdown output remain buffered for reliable tool handling.
-- DeepSeek and web-search requests retry transient failures before output is
-  shown, without duplicating a partial answer.
-
-## Standalone executables
-
-Ya now ships as standalone executables for macOS Apple Silicon, macOS Intel,
-Windows x64, and Linux x64. Download the matching asset and run it directly;
-Python, pip, and a PATH change are not required.
-
-The macOS and Windows files are currently unsigned. Verify `checksums.txt`
-before overriding a system warning. `ya auth deepseek` remains macOS-only;
-Linux and Windows use `DEEPSEEK_API_KEY`.
-
-## Python packages
-
-The universal wheel and source distribution remain available for Python users
-and contributors.
-
-## 中文说明
-
-### GUI 本地工作区 Agent
-
-- 原生 GUI 现在提供与 CLI 相同的受限本地工作区模式。在问答页选择文件夹后，Ya 会在本地记住路径，
-  但每次启动时本地模式保持关闭。
-- 文件变更会暂停并显示默认拒绝的确认窗口，其中包含绝对路径和可滚动的截断 diff。敏感文件保护、操作审计、
-  禁止 shell 与禁止删除策略维持不变。
-- 本地工作区任务可使用网页检索，会保持缓冲，且不能与 ToA 同时使用。
-
-### CLI 本地工作区 Agent
-
-- `ya ask --local [--workspace PATH]` 现在让 CLI 在一个明确授权的受限本地工作区内操作：可列举、读取、
-  搜索、新建目录、写入文本，以及移动或重命名；不能执行命令，也不支持删除。
-- 每项文件变更都会显示绝对路径并要求交互确认；覆盖文本会展示截断的统一 diff。非交互写入必须为本次
-  任务显式传入 `--approve`。
-- 读取严格限定于工作区内的非敏感 UTF-8 文本。`.env`、凭据、私钥、二进制文件和超过 1 MiB 的文件不会
-  发送给模型。审计仅记录操作元数据，不记录内容或 diff。
-- 本地模式可使用网页检索，但不能与 `--toa` 同时使用，且会缓冲输出。
-
-### 独立可执行文件
-
-Ya 现提供 macOS Apple Silicon、macOS Intel、Windows x64 和 Linux x64 的独立
-可执行文件。下载对应附件后即可直接运行，无需安装 Python、pip 或修改 PATH。
-
-macOS 和 Windows 文件当前未签名。在绕过系统提示前，请先校验 `checksums.txt`。
-`ya auth deepseek` 仍仅支持 macOS；Linux 和 Windows 请使用 `DEEPSEEK_API_KEY`。
-
-### 原生桌面 GUI
-
-- Ya 现在会与 CLI 一同发行零运行时依赖的原生 Tk 桌面 GUI，覆盖 macOS Apple Silicon、macOS Intel、Windows x64 和 Linux x64。
-- GUI 提供简单任务流式回答、Markdown 渲染、ToA 预检、本地记忆审核/批准/清理和模型设置。
-- GUI 默认英文；可在 Settings 中完整切换中文，选择会在本地持久化。
-- macOS GUI 使用现有钥匙串集成；Windows 和 Linux 可使用 `DEEPSEEK_API_KEY` 或仅当前会话的密钥，绝不明文保存。
-
-### macOS TLS 兼容性
-
-- 冻结 macOS GUI 在未设置 `SSL_CERT_FILE` 覆盖时会使用系统证书包。对于安装本地受信任代理证书的网络，这使 GUI 与 CLI 使用相同的证书链，且不会降低 TLS 校验强度。
-
-### 更快、更可靠的回答
-
-- 交互式终端中的单 Agent 回答现在会逐行流式输出，并保持易读的 Markdown 渲染。
-- `ya ask --web auto|on|off` 分别提供智能默认策略、强制网页检索和关闭网页访问以加快直接回答。
-- `ya ask --stream auto|off` 控制交互式流式输出。ToA、网页检索、管道和 Markdown 输出会保持缓冲，
-  以保证工具处理可靠。
-- DeepSeek 和网页检索在输出前遇到瞬时故障时会重试，且不会重复已经显示的部分回答。
-
-### 相关本地记忆
-
-- Ya 现在会为每个任务排序已批准记忆，不再固定注入最早的三张卡片。
-- 排序完全在本地、零依赖完成：精确短语和有意义的英文关键词优先于中文字符 n-gram 重合；
-  同分时优先较新的卡片，低分卡片不会进入模型上下文。
-- `ya ask --show-memory` 可显示本次任务实际选用的卡片和分数。该选项需要显式传入，因为它可能
-  打印个人记忆文本。
-
-### Markdown 渲染恢复能力
-
-- 当模型漏掉围栏代码块的结束标记、随后输出 Markdown 标题时，终端渲染现在会自动恢复，后续的
-  标题、列表和强调文本不会再原样显示 Markdown 标记。
-
-### Python 包
-
-仍保留通用 wheel 与源码包，供 Python 用户和贡献者使用。
+# Ya TypeScript rewrite
+
+Ya has been rebuilt in strict TypeScript on Node.js. The command-line client and
+the new Electron desktop application share one typed service layer for DeepSeek
+requests, orchestration, memory, web research, and constrained local-workspace
+tools.
+
+## What changed
+
+- Replaced the Python package and Tk GUI with a strict TypeScript codebase and an
+  Electron desktop application.
+- Preserved the existing CLI workflows for questions, bounded Tree of Agents
+  (ToA), local workspace access, memory review, configuration, authentication,
+  and audit-log management.
+- Added typed DeepSeek JSON/SSE handling, bounded retry behavior, tool-call
+  limits, and dependency-injected network adapters.
+- Kept SEA candidate-memory approval, deterministic relevance ranking, and the
+  single bounded ICM evidence follow-up.
+- Added a bilingual English/简体中文 workspace-first desktop UI with task history,
+  relevant memory, local activity metadata, inline file-change approval, memory
+  review, model settings, and audit management.
+
+## Security and compatibility
+
+- Existing `~/.ya/config.json`, `memory.json`, `gui.json`, and audit JSONL files
+  remain compatible with the earlier Python implementation.
+- Local tools remain confined to one physically resolved workspace. Symlink
+  escapes, sensitive-file reads, binary or invalid UTF-8 input, files over
+  1 MiB, shell execution, and deletion are blocked.
+- Every directory creation, text write, and move still requires explicit user
+  approval. Replacement previews use a bounded unified diff, while audit logs
+  contain metadata only and rotate at 1 MiB with three archives.
+- The Electron renderer runs sandboxed with context isolation and no Node.js
+  integration. Its narrow preload bridge reaches only validated IPC handlers;
+  IPC and navigation are restricted to the packaged renderer document.
+- Desktop DeepSeek and web-search traffic use Electron's Chromium network stack
+  so operating-system proxy and trust settings are honored. The CLI uses Node's
+  verified TLS stack.
+- macOS can store the DeepSeek key in Keychain. Linux and Windows use
+  `DEEPSEEK_API_KEY` or a session-only desktop key; plaintext key persistence was
+  not added.
+
+## Development and distribution
+
+- Source development now requires Node.js 22 or newer and npm. Python is no
+  longer required, and the old Python package entry points have been removed.
+- CI type-checks, tests, and builds on Node.js 22/24 across Linux, macOS, and
+  Windows. A renderer smoke test loads IPC, preload, and the browser UI and
+  verifies page navigation.
+- Releases include standalone CLI executables, macOS Electron ZIPs, a Windows
+  portable executable, a Linux AppImage, an npm tarball, and SHA-256 checksums.
+- macOS and Windows applications remain unsigned; verify the published checksum
+  before overriding an operating-system warning.
+
+---
+
+# Ya TypeScript 重构
+
+Ya 已使用 Node.js 上的严格 TypeScript 完成重构。命令行与新的 Electron 桌面端共享同一套带类型的
+服务层，包括 DeepSeek 请求、任务编排、记忆、网页研究和受限本地工作区工具。
+
+## 主要变化
+
+- 以严格 TypeScript 代码库和 Electron 桌面应用替换 Python 包与 Tk GUI。
+- 保留问答、受限 Tree of Agents（ToA）、本地工作区、记忆审查、配置、认证和审计管理等 CLI 流程。
+- 新增带类型的 DeepSeek JSON/SSE 处理、受限重试、工具调用轮数限制，以及可注入的网络适配层。
+- 保留 SEA 候选记忆审批、确定性相关度排序，以及最多一次的受限 ICM 证据补充。
+- 新增 English/简体中文双语的工作区优先桌面界面，包含任务历史、相关记忆、本地活动元数据、行内文件
+  变更审批、记忆审查、模型设置和审计管理。
+
+## 安全与兼容
+
+- 现有 `~/.ya/config.json`、`memory.json`、`gui.json` 和审计 JSONL 文件继续兼容旧 Python 实现。
+- 本地工具仍被限制在一个经过物理路径解析的工作区内；符号链接逃逸、敏感文件读取、二进制或非法
+  UTF-8、超过 1 MiB 的文件、shell 执行和删除均会被阻止。
+- 创建目录、写入文本和移动路径仍需逐项获得用户批准。替换预览使用有上限的统一 diff；审计只记录
+  元数据，并在 1 MiB 时轮转、保留三份归档。
+- Electron renderer 启用沙箱和上下文隔离，并关闭 Node.js 集成。窄化的 preload 桥只能访问经过校验的
+  IPC；IPC 来源与页面导航均限制为应用包内唯一的 renderer 文档。
+- 桌面端的 DeepSeek 与网页搜索均使用 Electron Chromium 网络栈，从而遵循操作系统的代理和信任设置；
+  CLI 使用 Node 的证书校验网络栈。
+- macOS 可将 DeepSeek 密钥保存到钥匙串；Linux 与 Windows 使用 `DEEPSEEK_API_KEY` 或仅本次桌面会话
+  有效的密钥，没有新增明文持久化。
+
+## 开发与发行
+
+- 源码开发现要求 Node.js 22 或更高版本及 npm；不再需要 Python，旧 Python 包入口已移除。
+- CI 在 Linux、macOS、Windows 上使用 Node.js 22/24 执行类型检查、测试和构建。renderer 烟测会真正
+  加载 IPC、preload 与浏览器界面，并验证页面导航。
+- Release 包含独立 CLI、macOS Electron ZIP、Windows 便携程序、Linux AppImage、npm 压缩包和
+  SHA-256 校验文件。
+- macOS 与 Windows 应用目前仍未签名；绕过操作系统警告前请核对已发布的校验值。
