@@ -18,129 +18,107 @@ jobs:
         include:
           - os: macos-15
             platform: macOS ARM64
+            pkg_target: node22-macos-arm64
+            electron_args: --mac zip --arm64
             cli_asset: ya-macos-arm64
             gui_asset: ya-gui-macos-arm64.zip
+            gui_kind: mac
           - os: macos-15-intel
             platform: macOS x64
+            pkg_target: node22-macos-x64
+            electron_args: --mac zip --x64
             cli_asset: ya-macos-x64
             gui_asset: ya-gui-macos-x64.zip
+            gui_kind: mac
           - os: windows-2022
             platform: Windows x64
+            pkg_target: node22-win-x64
+            electron_args: --win portable --x64
             cli_asset: ya-windows-x64.exe
             gui_asset: ya-gui-windows-x64.exe
+            gui_kind: win
           - os: ubuntu-22.04
             platform: Linux x64
+            pkg_target: node22-linux-x64
+            electron_args: --linux AppImage --x64
             cli_asset: ya-linux-x64
             gui_asset: ya-gui-linux-x64
+            gui_kind: linux
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check types, tests, and production build
+        run: npm run check
 
       - name: Validate release version
         shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python - <<'PY'
-          import ast
-          import os
-          from pathlib import Path
-          import re
+        run: node dist/typescript/scripts/validate-version.js "$RELEASE_TAG"
 
-          expected = os.environ["RELEASE_TAG"].removeprefix("v")
-          project = re.search(r'^version = "([^"]+)"$', Path("pyproject.toml").read_text(), re.MULTILINE)
-          module = ast.parse(Path("ya/__init__.py").read_text())
-          version = next((node.value.value for node in module.body if isinstance(node, ast.Assign)
-              and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
-              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)), None)
-          if not project or project.group(1) != expected or version != expected:
-              raise SystemExit("Release tag, project version, and ya.__version__ must match.")
-          PY
+      - name: Smoke test desktop application on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke:gui
 
-      - name: Verify Tkinter is available
-        run: python -c "import tkinter; print(tkinter.TkVersion)"
-
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -q
-
-      - name: Install PyInstaller
-        run: python -m pip install PyInstaller==6.21.0
+      - name: Smoke test desktop application
+        if: runner.os != 'Linux'
+        run: npm run smoke:gui
 
       - name: Build CLI executable
-        run: python -m PyInstaller --clean --noconfirm --onefile --name ya --distpath dist/cli --workpath build/cli --specpath build/spec-cli ya/__main__.py
-
-      - name: Build GUI application on macOS
-        if: runner.os == 'macOS'
-        run: python -m PyInstaller --clean --noconfirm --windowed --name Ya --osx-bundle-identifier com.zedingzhang.ya.gui --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
-
-      - name: Stamp macOS GUI version
-        if: runner.os == 'macOS'
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          INFO_PLIST="dist/gui/Ya.app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $VERSION" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Add :LSUIElement bool false" "$INFO_PLIST"
-          codesign --force --deep --sign - dist/gui/Ya.app
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")" = "$VERSION"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")" = "$VERSION"
+          PKG_TARGET: ${{ matrix.pkg_target }}
+          CLI_ASSET: ${{ matrix.cli_asset }}
+        run: npx pkg --compress GZip --targets "$PKG_TARGET" --output "release-cli/$CLI_ASSET" dist/typescript/cli.js
 
-      - name: Build GUI executable on Windows and Linux
-        if: runner.os != 'macOS'
-        run: python -m PyInstaller --clean --noconfirm --onefile --windowed --name ya-gui --distpath dist/gui --workpath build/gui --specpath build/spec-gui ya/__gui__.py
+      - name: Build desktop application
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          ELECTRON_ARGS: ${{ matrix.electron_args }}
+        run: npx electron-builder $ELECTRON_ARGS --publish never
 
-      - name: Smoke test frozen apps on Unix
+      - name: Smoke test CLI on Unix
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          export YA_HOME="$RUNNER_TEMP/ya-home"
-          ./dist/cli/ya --help
-          ./dist/cli/ya ask --help | grep -- --local
-          ./dist/cli/ya config set thinking off
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            ./dist/gui/Ya.app/Contents/MacOS/Ya --smoke-test
-          else
-            ./dist/gui/ya-gui --smoke-test
-          fi
+        run: ./release-cli/${{ matrix.cli_asset }} --help
 
-      - name: Smoke test frozen apps on Windows
+      - name: Smoke test CLI on Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $env:YA_HOME = Join-Path $env:RUNNER_TEMP "ya-home"
-          & .\dist\cli\ya.exe --help
-          & .\dist\cli\ya.exe ask --help | Select-String -Pattern '--local'
-          & .\dist\cli\ya.exe config set thinking off
-          & .\dist\gui\ya-gui.exe --smoke-test
+        run: '& ".\release-cli\${{ matrix.cli_asset }}" --help'
 
       - name: Stage release assets
         shell: bash
         env:
           CLI_ASSET: ${{ matrix.cli_asset }}
           GUI_ASSET: ${{ matrix.gui_asset }}
+          GUI_KIND: ${{ matrix.gui_kind }}
         run: |
-          mkdir release
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cp dist/cli/ya.exe "release/$CLI_ASSET"
-            cp dist/gui/ya-gui.exe "release/$GUI_ASSET"
-          elif [ "$RUNNER_OS" = "macOS" ]; then
-            cp dist/cli/ya "release/$CLI_ASSET"
-            ditto -c -k --sequesterRsrc --keepParent dist/gui/Ya.app "release/$GUI_ASSET"
+          mkdir -p release-assets
+          cp "release-cli/$CLI_ASSET" "release-assets/$CLI_ASSET"
+          if [ "$GUI_KIND" = "mac" ]; then
+            cp release/electron/*.zip "release-assets/$GUI_ASSET"
+          elif [ "$GUI_KIND" = "win" ]; then
+            cp release/electron/*.exe "release-assets/$GUI_ASSET"
           else
-            cp dist/cli/ya "release/$CLI_ASSET"
-            cp dist/gui/ya-gui "release/$GUI_ASSET"
+            cp release/electron/*.AppImage "release-assets/$GUI_ASSET"
           fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.cli_asset }}
-          path: release/*
+          path: release-assets/*
           if-no-files-found: error
 
   publish:
@@ -151,9 +129,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies and build
+        run: npm ci && npm run build
 
       - name: Download standalone apps
         uses: actions/download-artifact@v4
@@ -162,14 +145,12 @@ jobs:
           path: release
           merge-multiple: true
 
-      - name: Build Python packages
-        run: |
-          python -m pip install build
-          python -m build --outdir release
+      - name: Build npm package tarball
+        run: npm pack --pack-destination release
 
       - name: Generate checksums
         working-directory: release
-        run: sha256sum ya-* > checksums.txt
+        run: sha256sum * > checksums.txt
 
       - name: Create GitHub Release
         env:
