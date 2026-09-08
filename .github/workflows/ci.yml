@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test ${{ matrix.os }} / Node.js ${{ matrix.node-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            node-version: "22"
+          - os: ubuntu-22.04
+            node-version: "24"
+          - os: macos-15
+            node-version: "24"
+          - os: windows-2022
+            node-version: "24"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check types, tests, and production build
+        run: npm run check
+
+      - name: Check CLI entry point
+        run: node dist/typescript/cli.js --help
+
+      - name: Smoke test desktop application on Linux
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run smoke:gui
+
+      - name: Smoke test desktop application
+        if: runner.os != 'Linux'
+        run: npm run smoke:gui
+
+      - name: Check package contents
+        run: npm pack --dry-run

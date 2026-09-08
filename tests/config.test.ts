@@ -1,0 +1,57 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ModelConfig, configPath, loadConfig, modelId, saveConfig } from "../src/config";
+import { tempHome, type TempHome } from "./helpers";
+
+describe("configuration", () => {
+  let home: TempHome;
+  beforeEach(() => { home = tempHome(); });
+  afterEach(() => home.cleanup());
+
+  it("defaults to flash without thinking", () => {
+    const config = loadConfig();
+    expect(config.model).toBe("deepseek-v4-flash");
+    expect(config.thinkingEnabled).toBe(false);
+    expect(config.reasoningEffort).toBe("high");
+    expect(config.toaTokenBudget).toBe(8_000);
+    expect(config.toaTimeout).toBe(90);
+  });
+
+  it("round-trips through the Python-compatible storage schema", () => {
+    const config = new ModelConfig({ model: modelId("pro"), reasoningEffort: "max" });
+    saveConfig(config);
+    expect(loadConfig()).toEqual(config);
+    const stored = JSON.parse(readFileSync(configPath(), "utf8")) as Record<string, unknown>;
+    expect(stored).toMatchObject({
+      model: "deepseek-v4-pro",
+      thinking_enabled: false,
+      reasoning_effort: "max",
+      toa_token_budget: 8_000,
+      toa_timeout: 90,
+    });
+  });
+
+  it("loads the existing snake-case Python configuration", () => {
+    writeFileSync(configPath(), JSON.stringify({
+      model: "deepseek-v4-pro",
+      thinking_enabled: true,
+      reasoning_effort: "max",
+      toa_token_budget: 12_000,
+      toa_timeout: 120,
+    }));
+    expect(loadConfig()).toEqual(new ModelConfig({
+      model: "deepseek-v4-pro",
+      thinkingEnabled: true,
+      reasoningEffort: "max",
+      toaTokenBudget: 12_000,
+      toaTimeout: 120,
+    }));
+  });
+
+  it("rejects unsupported models and invalid budgets", () => {
+    expect(() => new ModelConfig({ model: "deepseek-chat" as never }).validate()).toThrow(/Only deepseek/u);
+    expect(() => new ModelConfig({ toaTokenBudget: 999 }).validate()).toThrow(/between 1000 and 16000/u);
+    expect(() => new ModelConfig({ toaTimeout: 181 }).validate()).toThrow(/between 30 and 180/u);
+    expect(() => modelId("legacy")).toThrow(/flash.*pro/u);
+  });
+});

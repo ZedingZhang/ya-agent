@@ -2,45 +2,57 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Agent 名称为 **Ya**，含义为“萌芽慢慢成长”，也可以叫她“丫丫”。它是一个提供 CLI 与原生桌面 GUI 两种界面的个人研究与决策
-Agent：在用户许可下积累偏好、经验与来源化知识，不会无边界地改写自身。它使用 DeepSeek V4 API，
-在本地保存长期记忆，并且仅会在用户明确请求和确认后，才启动受限的 Tree of Agents（ToA）模式。
+Ya（也可以叫“丫丫”）是一个“用户授权优先”的个人研究与决策 Agent，同时提供命令行与原生桌面应用。项目已使用 Node.js 上的严格 TypeScript 重构；桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
 
-## 核心特色：受控递归改进
+Ya 使用 DeepSeek V4 API，在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
 
-Ya 的设计目标不是静态问答，而是在用户掌控下持续递归改进：
+## 架构
 
-- **SEA 持续学习与自我进化**：显式用户反馈会先成为候选经验卡；只有用户批准后，卡片才会更新
-  Ya 后续任务可用的本地偏好、流程或来源化知识。这是用户授权的递归改进，而不是 Agent 自主改写
-  自身规则。
-- **ICM 好奇心循环**：当回答发现一个重要且可由来源补足的信息缺口时，Ya 最多执行一次受限的定向
-  探索，并返回证据补充，而不是静默猜测。
-- **受限 ToA 多 Agent 架构**：`--toa` 会启动根协调者与最多两个临时的证据、风险工作 Agent。Ya 会
-  先展示预检信息，并要求用户显式确认后才启动这一更高成本的研究模式。
+- **SEA 受控学习**：显式用户反馈先成为候选记忆卡；只有已批准的卡片才会影响后续任务。
+- **ICM 好奇心循环**：回答标记出一个重要证据缺口时，Ya 最多执行一次受限的来源探索。
+- **受限 ToA**：一个根协调 Agent 最多使用两个临时工作 Agent，并受 Token 与超时预算约束。
+- **共享类型核心**：CLI 和桌面端复用配置、记忆、编排、API、网页检索和本地工作区模块。
+- **隔离桌面渲染器**：Electron 渲染进程没有 Node.js 或直接文件系统权限；特权操作通过窄化的 preload 桥接进入主进程。
 
-## 操作系统支持
+## 平台支持
 
-Release 会同时发行 CLI 与原生 Tk 桌面 GUI；独立可执行文件无需 Python、pip 或修改 PATH。
+Release 产物是自包含文件，不要求安装 Node.js。只有源码开发或 npm 安装需要 Node.js 22 或更高版本。
 
-| 操作系统 | CLI 与 GUI 支持 | API Key 存储 |
-| --- | --- | --- |
-| macOS | 提供 Apple Silicon 和 Intel CLI 二进制及原生 `.app`。 | CLI 与 GUI 均保存到 macOS 钥匙串；也可使用 `DEEPSEEK_API_KEY`。 |
-| Linux | 提供基于 Ubuntu 22.04 构建的 x64 glibc CLI 与原生 GUI。 | 设置 `DEEPSEEK_API_KEY`，或在 GUI 中仅本次运行输入。 |
-| Windows | 提供 x64 CLI 与原生 GUI 可执行文件。 | 设置 `DEEPSEEK_API_KEY`，或在 GUI 中仅本次运行输入。 |
+| 操作系统 | CLI | 桌面 GUI | API 密钥存储 |
+| --- | --- | --- | --- |
+| macOS Apple Silicon / Intel | 独立可执行文件 | 原生 `.app` | macOS 钥匙串或 `DEEPSEEK_API_KEY` |
+| Linux x64（glibc） | 独立可执行文件 | AppImage | `DEEPSEEK_API_KEY` 或 GUI 会话密钥 |
+| Windows x64 | 独立 `.exe` | 便携 `.exe` | `DEEPSEEK_API_KEY` 或 GUI 会话密钥 |
 
-`ya auth deepseek` 仅支持 macOS，因为它使用了 macOS 的 `security` 命令。
-请勿在 Linux 或 Windows 上运行该命令；应改用环境变量。
+`ya auth deepseek` 仅支持 macOS，因为它调用系统的 `security` 工具。Linux 和 Windows 请使用 `DEEPSEEK_API_KEY`，或在设置页输入仅本次会话使用的密钥。
 
-## 安装
+## 从源码安装
 
-Ya 需要一个 DeepSeek API Key。仅在源码开发或选择 Python 包安装时才需要 Python。
+```sh
+git clone https://github.com/ZedingZhang/ya-agent.git
+cd ya-agent
+npm ci
+npm run check
+npm link
+```
 
-### 独立可执行文件（推荐）
+执行 `npm link` 后，当前 Node.js 环境会提供 `ya` 命令。也可以不链接，直接运行：
 
-从[最新 GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest)下载对应文件。
-在下载目录中直接运行即可，无需管理员权限或修改 PATH。
+```sh
+npm start -- ask "用通俗语言解释 Graph Engineering"
+```
 
-#### macOS Apple Silicon
+从源码启动桌面端：
+
+```sh
+npm run gui
+```
+
+## 独立 Release
+
+从[最新 GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest)下载对应文件。CLI 与 GUI 分别构建。
+
+### macOS Apple Silicon
 
 ```sh
 curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-macos-arm64
@@ -48,9 +60,9 @@ chmod +x ya-macos-arm64
 ./ya-macos-arm64 ask "用通俗语言解释 Graph Engineering"
 ```
 
-Intel Mac 请改用 `ya-macos-x64`。
+Intel Mac 使用 `ya-macos-x64`。GUI 压缩包名称分别为 `ya-gui-macos-arm64.zip` 和 `ya-gui-macos-x64.zip`。
 
-#### Linux x64
+### Linux x64
 
 ```sh
 curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-linux-x64
@@ -58,301 +70,174 @@ chmod +x ya-linux-x64
 ./ya-linux-x64 ask "用通俗语言解释 Graph Engineering"
 ```
 
-Linux 二进制面向使用 glibc 的 x64 系统，例如 Ubuntu 22.04 或更高版本。Alpine Linux
-及其他基于 musl 的系统不支持该二进制文件。
+桌面 AppImage 发布为 `ya-gui-linux-x64`，运行前需要添加可执行权限。Linux 产物面向 Ubuntu 22.04 等 x64 glibc 系统，不面向 Alpine Linux 等 musl 系统。
 
-#### Windows x64（PowerShell）
+### Windows x64（PowerShell）
 
 ```powershell
 Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-windows-x64.exe -OutFile ya-windows-x64.exe
 .\ya-windows-x64.exe ask "用通俗语言解释 Graph Engineering"
 ```
 
-### 校验未签名下载文件
+便携桌面端文件名为 `ya-gui-windows-x64.exe`。
 
-macOS 和 Windows 二进制文件当前未签名。若系统给出警告，请先下载
-[`checksums.txt`](https://github.com/ZedingZhang/ya-agent/releases/latest/download/checksums.txt)，
-并将其中对应的 SHA-256 与下载文件进行比对：
+### 校验未签名下载
+
+macOS 与 Windows 产物目前未签名。绕过操作系统警告前，请从同一 Release 下载 `checksums.txt` 并核对 SHA-256：
 
 ```sh
 shasum -a 256 ya-macos-arm64
-# Linux: sha256sum ya-linux-x64
+# Linux：sha256sum ya-linux-x64
 ```
 
 ```powershell
 Get-FileHash .\ya-windows-x64.exe -Algorithm SHA256
 ```
 
-在 macOS 上，仅在校验哈希后且系统阻止运行时，才移除下载隔离标记：
+## CLI 使用
 
 ```sh
-xattr -d com.apple.quarantine ./ya-macos-arm64
+ya --help
+ya ask --help
+ya ask "解释递归"
+ya ask --web on "比较两种方案的最新证据"
+ya ask --thinking on --reasoning-effort max "分析这个决策"
 ```
 
-在 Windows 上，仅在校验哈希后且 SmartScreen 阻止文件时，才移除下载文件标记：
-
-```powershell
-Unblock-File .\ya-windows-x64.exe
-```
-
-### 原生桌面 GUI
-
-GUI 默认使用英文。可在 **Settings > Language** 选择 **English** 或 **简体中文**，Ya 会在本地记住选择。主界面是工作区工作台，提供文件树、仅本次会话保留的任务时间线、相关记忆、本地 Agent 活动和文件变更确认，且不启动本地 Web 服务。
-
-从最新 Release 下载对应 GUI 文件：
+交互终端会渲染 Ya 常用的 Markdown。重定向时保留原始 Markdown，方便脚本或文件处理：
 
 ```sh
-# macOS Apple Silicon（Intel Mac 请使用 ya-gui-macos-x64.zip）
-curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-macos-arm64.zip
-unzip ya-gui-macos-arm64.zip
-open Ya.app
-
-# Linux x64
-curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-linux-x64
-chmod +x ya-gui-linux-x64
-./ya-gui-linux-x64
+ya ask --format terminal "生成一个简洁表格"
+ya ask --format markdown "生成一个简洁表格" > answer.md
 ```
 
-```powershell
-# Windows x64
-Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-windows-x64.exe -OutFile ya-gui-windows-x64.exe
-.\ya-gui-windows-x64.exe
-```
+简单、无工具的回答在交互终端中默认流式输出。网页研究、ToA、本地工作区任务、管道和 Markdown 输出保持缓冲。使用 `--stream off` 可关闭流式输出。
 
-macOS 和 Windows GUI 当前未签名。处理系统警告前请先核对 `checksums.txt` 的 SHA-256。校验后若 macOS 阻止运行，可按需使用 `xattr -d com.apple.quarantine ./Ya.app`；若 Windows 阻止运行，可按需使用 `Unblock-File .\ya-gui-windows-x64.exe`。
+### Tree of Agents
 
-在 macOS 上，冻结 GUI 会使用系统证书包，因此本地代理或安全软件存在时会与 CLI 使用相同的受信任证书链。不要关闭 TLS 校验；仅在需要显式指定受信任 CA 包时设置 `SSL_CERT_FILE`。
-
-### Python 包与开发
-
-如需开发，请克隆仓库并以可编辑模式安装：
+ToA 由一个根协调 Agent 和一到两个临时证据/风险 Agent 组成，启动前总会展示预检：
 
 ```sh
-git clone https://github.com/ZedingZhang/ya-agent.git
-cd ya-agent
-python3 -m pip install -e .
-python3 -m unittest discover -s tests -q
+ya ask --toa --toa-workers 2 "评估这个战略决策"
 ```
 
-在 macOS 上，`ya auth deepseek` 会将密钥保存至钥匙串。对于非交互式环境，请改为设置
-`DEEPSEEK_API_KEY`。请勿提交 API Key。Ya 会将配置和记忆存储在 `~/.ya` 下；可通过
-设置 `YA_HOME` 使用其他本地状态目录。
-
-## 运行 Ya
-
-Ya 可使用 CLI 或原生 GUI，二者都不需要启动 Web 服务。下载 CLI 独立可执行文件后，在其下载目录中运行：
+非交互环境必须为本次调用显式授权：
 
 ```sh
-./ya-macos-arm64 ask "用通俗语言解释 Graph Engineering"
+ya ask --toa --yes "评估这个战略决策"
 ```
 
-要查看可用选项，请追加 `--help`：
+`--local` 与 `--toa` 不能同时使用。
+
+### 本地工作区工具
+
+本地模式只为单次任务授予一个受限工作区能力：
 
 ```sh
-./ya-macos-arm64 ask --help
+ya ask --local --workspace "$PWD" "根据这里的文本文件创建 notes/summary.md"
 ```
 
-在检出的项目目录中使用 Python 包时，也可不依赖 console-script 的 PATH 直接运行同一 CLI：
+工具可以：
+
+- 列出目录；
+- 读取与搜索有大小上限的 UTF-8 文本；
+- 每次创建一个目录；
+- 创建或替换文本文件；
+- 移动或重命名文件与目录。
+
+工具不能执行 shell、脚本、Git 或包管理器，也不能删除文件。每项变更都会显示绝对路径并等待批准；替换文件时显示最多 200 行的统一 diff。非交互环境默认拒绝写入，只有本次调用带 `--approve` 时才允许。
+
+读取始终限制在解析后的工作区中。符号链接逃逸、`.git`、`.env`、凭据、私钥、二进制文件、非法 UTF-8 和超过 1 MiB 的文件都会被阻止。操作审计只记录元数据，不记录文件内容或 diff；日志达到 1 MiB 后轮转，并保留三份归档。
 
 ```sh
-python3 -m ya ask "用通俗语言解释 Graph Engineering"
+ya audit clear
+ya audit clear --yes  # 非交互环境必须添加
 ```
 
-在检出的项目目录中启动原生 GUI：
+### 配置
 
 ```sh
-python3 -m ya.gui
-```
-
-交互式终端会自动渲染 Ya 常见的 Markdown 输出。重定向或通过管道输出时，Ya 会保留原始
-Markdown，便于脚本和文件使用。使用 `--format terminal` 可强制终端排版，使用
-`--format markdown` 可始终保留源 Markdown。设置 `NO_COLOR=1` 可关闭 ANSI 样式。
-
-对于简单的单 Agent 问题，Ya 默认会在交互式终端中逐行流式输出，因此无需等到完整回答生成后
-才看到内容。ToA、网页检索、管道输出和 Markdown 输出会保持缓冲，以保证这些流程的可靠性。
-使用 `--stream off` 可始终等待完整回答。
-
-### 本地工作区操作
-
-`--local` 会明确授权 Ya 读取一个工作区内的非敏感 UTF-8 文本，并提出受限的文件操作建议。
-未传 `--workspace` 时，工作区默认为启动 Ya 的当前目录；也可明确指定根目录：
-
-```sh
-ya ask --local --workspace /Users/zzd "新建文件夹"
-```
-
-本地模式可列举目录、读取和搜索文本、新建目录、创建或覆盖文本文件，以及移动或重命名文件。它不能执行
-shell 命令、脚本、Git、包管理器，也不支持删除文件。每一项变更都会显示绝对路径并要求确认；覆盖已有
-文本时还会显示最多 200 行统一 diff。管道或其他非交互终端中，写入默认拒绝；只有本次任务显式传入
-`--approve` 才会允许：
-
-```sh
-ya ask --local --workspace "$PWD" --approve "创建 todo.txt，并写入三项任务"
-```
-
-`--local` 只授权读取该工作区内的内容，读取到的文本会发送给配置的 DeepSeek API；`.env`、私钥、凭据、
-二进制文件和超过 1 MiB 的文件不会发送给模型。Ya 会将操作元数据（不含文件内容或 diff）记录到
-`~/.ya/actions.jsonl`。活动日志达到 1 MiB 会自动轮转，并保留三份归档，总量约 4 MiB。使用
-`ya audit clear` 可手动清除全部审计日志；非交互环境必须额外传入 `--yes`。GUI 的
-**Settings > 清除操作审计** 提供同样的确认清理操作。本地模式可与网页检索组合，但不能与 `--toa` 同时使用；为防止工具调用绕过确认，
-本地模式始终缓冲回答。
-
-原生 GUI 在同一个工作区工作台中处理普通问答和本地任务。**启用本地工具** 默认开启；首次提交任务前需要选择
-工作区文件夹，未选择工作区时 Ya 不会读取或发送任何本地文件。文件树仅用于浏览结构，不会把文件内容发送给模型；
-Agent 的列目录、读取和搜索活动会在右栏显示，但不会展示文件内容。每项变更
-都会在右栏暂停，等待默认拒绝的批准或拒绝，界面会显示绝对路径和可滚动 diff；GUI 同样不能执行 shell 命令、
-脚本、Git、包管理器，也不支持删除文件。
-
-## 使用示例输出
-
-这是一张基于真实 Ya CLI 回答制作的终端风格渲染示意图。
-
-![Ya CLI 使用示例输出](assets/ya-cli-example.png)
-
-## 原生 GUI
-
-GUI 默认英文，可在设置中选择 English 或 简体中文，并持久化保存。唯一的工作区工作台只在本次应用运行期间
-保留任务时间线；简单任务会流式写入渲染后的任务结果，网页检索、ToA 与本地工作区任务会保持缓冲，以确保工具
-调用和预检确认可靠。可在 **设置** 中使用 **简单回答使用流式输出** 开关保留或关闭流式输出，Ya 会在本地保存
-该 GUI 偏好。首次启动时，工作台会以宽松的屏幕相对尺寸居中打开，并为文件、任务和活动保留独立列；所有分栏均可
-由用户拖动调整。
-
-![Ya 工作区工作台中文界面](assets/ya-gui-workspace-zh-CN.png)
-
-## 执行流程
-
-这个闭环是刻意受控的：任务相关的已批准记忆帮助形成回答；ICM 最多补足一个证据缺口；显式反馈进入
-SEA 成为候选经验卡；只有用户批准，才会更新之后任务可用的本地记忆。ToA 只在用户明确请求时扩大
-研究广度。
-
-```mermaid
-flowchart TD
-    S["用户输入 Ya CLI 任务"] --> C["加载最小相关上下文"]
-    C --> G["解析模型、思考与预算配置"]
-    G --> O["CLI ToA 选项"]
-    O -->|默认或未传 --toa| X["单 Agent 执行"]
-    O -->|传入 --toa| P["展示 ToA 预检"]
-    P -->|用户确认| T["ToA 根节点协调"]
-    P -->|用户拒绝| X
-    T --> W["最多两个临时工作 Agent"]
-    W --> A["聚合证据包"]
-    X --> V["证据校验"]
-    A --> V
-    V --> I["ICM 定向探索"]
-    I -->|完成或达到预算| R["输出带来源结果"]
-    I -->|补充检索| E["定向检索"]
-    E --> V
-    R --> F["收集显式用户反馈"]
-    F --> L["SEA 候选经验卡"]
-    L --> H["CLI 用户审批"]
-    H -->|批准| M["本地记忆版本更新"]
-    H -->|拒绝或忽略| Z["结束"]
-    M --> Z
-```
-
-## 使用
-
-### 1. 完成认证
-
-在 macOS 上执行一次以下命令，然后按提示粘贴 DeepSeek API Key：
-
-```sh
-ya auth deepseek
-```
-
-在 Linux 上，请改为为当前 shell 提供 API Key：
-
-```sh
-export DEEPSEEK_API_KEY="your-api-key"
-```
-
-在 Windows PowerShell 中，请使用：
-
-```powershell
-$env:DEEPSEEK_API_KEY = "your-api-key"
-```
-
-### 2. 提出问题
-
-将完整任务作为 `ya ask` 的参数传入。Ya 会把任务发送到 DeepSeek，并在
-`[Ya single result]` 标题下输出答案：
-
-```sh
-ya ask "总结关系型数据库的优点与取舍"
-ya ask "总结一个方案" --format markdown > answer.md
-ya ask "总结一个方案" --format terminal
-ya ask "解释递归" --stream off
-ya ask "解释 PostgreSQL 索引" --show-memory
-```
-
-思考模式默认关闭。对于需要更深入推理的任务，可使用 `--thinking on`，并用
-`--reasoning-effort high` 或 `max` 选择推理预算。
-
-网页访问默认使用 `--web auto`：对于明显需要时效信息、研究、来源、比较或推荐的任务，Ya 会
-检索网页；普通解释会直接回答。使用 `--web on` 可要求检索，使用 `--web off` 可关闭网页工具
-以获得更快的回答。网页检索和 ToA 的回答会先缓冲，确保工具结果经过处理后再输出。
-
-交互式回答结束后，Ya 会询问是否从本次回答中学习，并创建记忆候选项。这是可选操作；选择
-`N` 不会改动记忆，候选项仍需审核和批准。
-
-### 常用命令
-
-```sh
-# 为单次请求使用能力更强的模型。
-ya ask "比较两种数据库设计" --model pro --thinking on
-
-# 强制获取最新网页信息，或为本次请求关闭网页访问。
-ya ask "最新数据库价格" --web on
-ya ask "解释数据库索引" --web off
-
-# 保存默认设置，供之后的请求使用。
 ya config set model pro
 ya config set thinking on
 ya config set reasoning-effort max
-
-# 使用受限的 Tree of Agents 模式，并确认显示的预检信息。
-ya ask "评估这个方案" --toa --toa-workers 2
-
-# 在非交互式 shell 中，显式授权本次 ToA 运行。
-ya ask "评估这个方案" --toa --toa-workers 2 --yes
-
-# 查看并显式批准一个记忆候选项。
-ya memory review
-ya memory approve <card-id>
-
-# 预览后删除已拒绝和已撤销的卡片。
-ya memory prune
-
-# 同时包含待审核候选项，并在脚本中显式确认。
-ya memory prune --include-candidates --yes
 ```
 
-`--toa` 默认不会启用。它会在启动前显示模型、工作者数量、Token 预算和超时时间。
-任意请求后均可使用 `--no-feedback` 跳过可选的记忆提示。
+配置继续兼容旧 Python 版本，存储在 `~/.ya/config.json`。可设置 `YA_HOME` 选择其他状态目录。
 
-传入 `--show-memory` 可在回答前显示本次任务选中的已批准卡片、ID 和本地相关性分数。该选项可能
-将个人记忆文本打印到终端或日志，避免在共享日志中使用。
+### 长期记忆
 
-### 记忆上限与清理
+```sh
+ya memory review
+ya memory approve CARD_ID
+ya memory reject CARD_ID
+ya memory revoke CARD_ID
+ya memory prune
+```
 
-Ya 最多保存 100 张本地记忆卡片，包括候选、已批准、已拒绝和已撤销状态。每次任务中，Ya 最多
-选择三张达到本地相关性阈值的已批准卡片：精确短语和有意义的英文关键词优先，其次是中文字符
-n-gram 重合；分数相同则优先较新的卡片。低相关卡片不会发送给模型。该选择完全在本地完成，
-不使用 embedding 或网络服务，也不消耗额外 API Token。对于同一种类的有效卡片，Ya 会在
-Unicode 规范化、大小写折叠和空白整理后进行精确去重。已拒绝或已撤销的卡片不会阻止再次添加
-相同记忆。
+Ya 最多保存 100 张本地记忆卡。候选卡片在批准前不会进入模型上下文。每项任务最多选取三张相关的已批准卡片，排序完全在本地确定，依据包括英文短语/关键词与中文字符 n-gram。`--show-memory` 会在回答前显示本次选取结果。
 
-`ya memory prune` 会先预览，再删除已拒绝和已撤销的卡片。添加 `--include-candidates`
-可同时删除待审核候选项。该命令不会直接删除已批准卡片：请先执行
-`ya memory revoke <card-id>`，再运行 prune。非交互式 shell 中必须传入 `--yes`。
+现有 `~/.ya/memory.json` 格式保持不变，因此从 Python 实现升级不会丢失记忆。
 
-## 安全模型
+## 桌面应用
 
-- 仅接受 `deepseek-v4-flash` 和 `deepseek-v4-pro`。
-- 原始推理内容仅在一次正在进行的工具调用循环中保留。
-- 反馈会先成为候选记忆；只有在明确批准后才会影响未来行为。
-- `YA_HOME` 可覆盖 Ya 的本地状态目录，便于测试或移植。
+桌面端是一个工作区优先的三栏工作台：
+
+- 仅用于导航的文件浏览器；
+- 仅本次会话保留的任务时间线；
+- 相关记忆、本地活动元数据和行内文件变更审批。
+
+应用还提供记忆审查与清理、English/简体中文界面、DeepSeek 配置、ToA 预检、简单回答流式输出和审计管理。它不会启动本地 Web 服务。渲染器不能直接访问 Node.js；API 与文件系统操作在 Electron 主进程内通过校验后的 IPC 处理。
+
+## 开发
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run smoke:gui
+npm run check
+```
+
+生产输出写入 `dist/typescript/`，从而避免 `dist/` 中旧的 Python 构建产物意外进入 npm 或 Electron 包。
+
+常用命令：
+
+```sh
+npm start -- --help        # 构建并运行 CLI
+npm run gui                # 构建并运行 Electron
+npm run smoke:gui          # 加载 IPC/preload/renderer 并验证页面切换
+npm run test:watch         # 监听单元测试
+npm run package:cli        # 为当前平台打包 CLI
+npm run package:gui        # 为当前平台打包 Electron 应用
+```
+
+测试覆盖配置/数据兼容、钥匙串回退、记忆排序、本地工作区边界、审计轮转、DeepSeek 请求/重试/SSE/工具循环、网页结果解析、编排、CLI 语义，以及 GUI 控制器和渲染辅助逻辑。GUI 烟测还会真正加载打包边界内的 renderer，并验证页面导航。
+
+## 项目结构
+
+```text
+src/
+  cli.ts                 CLI 入口与授权流程
+  config.ts              经校验的持久化模型配置
+  deepseek.ts            DeepSeek HTTP、SSE、重试与工具循环
+  local.ts               受限本地文件工具与审计日志
+  memory.ts              候选记忆生命周期与相关性排序
+  orchestrator.ts        单 Agent、ToA、网页、本地与 ICM 编排
+  service.ts             CLI/GUI 共享任务服务
+  terminal.ts            安全终端 Markdown 渲染
+  gui/
+    main.ts              Electron 主进程与校验后的 IPC
+    preload.ts           上下文隔离的窄桥接
+    renderer.ts          桌面交互与安全 DOM 渲染
+    controller.ts        GUI 状态与共享服务门面
+tests/                   Vitest 行为测试
+```
+
+## TLS 与代理
+
+请保持证书校验开启。Electron 桌面端使用操作系统的 Chromium 网络栈。Node.js CLI 位于可信企业代理之后时，请配置 Node 支持的 CA 选项（例如 `NODE_EXTRA_CA_CERTS`），不要关闭 TLS 校验。
 
 ## 许可证
 
-MIT。详见 [LICENSE](LICENSE)。
+[MIT](LICENSE)

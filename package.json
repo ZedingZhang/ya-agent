@@ -1,0 +1,97 @@
+{
+  "name": "ya-agent",
+  "version": "0.5.15",
+  "description": "A consent-first personal research agent with a CLI and desktop GUI",
+  "author": "Zeding Zhang",
+  "license": "MIT",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZedingZhang/ya-agent.git"
+  },
+  "homepage": "https://github.com/ZedingZhang/ya-agent#readme",
+  "bugs": "https://github.com/ZedingZhang/ya-agent/issues",
+  "type": "commonjs",
+  "main": "dist/typescript/index.js",
+  "types": "dist/typescript/index.d.ts",
+  "bin": {
+    "ya": "dist/typescript/cli.js"
+  },
+  "files": [
+    "dist/typescript",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node dist/typescript/scripts/copy-assets.js",
+    "prepack": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:gui": "npm run build && electron dist/typescript/gui/main.js --smoke-test",
+    "check": "npm run typecheck && npm test && npm run build",
+    "start": "npm run build && node dist/typescript/cli.js",
+    "gui": "npm run build && electron dist/typescript/gui/main.js",
+    "package:cli": "npm run build && pkg --compress GZip --output release/ya dist/typescript/cli.js",
+    "package:gui": "npm run build && electron-builder --publish never"
+  },
+  "dependencies": {
+    "commander": "14.0.3",
+    "diff": "9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@yao-pkg/pkg": "6.22.0",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2",
+    "vitest": "5.0.0"
+  },
+  "pkg": {
+    "scripts": [
+      "dist/typescript/**/*.js"
+    ],
+    "assets": [
+      "dist/typescript/gui/index.html",
+      "dist/typescript/gui/styles.css"
+    ]
+  },
+  "build": {
+    "appId": "com.zedingzhang.ya.gui",
+    "productName": "Ya",
+    "extraMetadata": {
+      "main": "dist/typescript/gui/main.js"
+    },
+    "asar": true,
+    "directories": {
+      "output": "release/electron"
+    },
+    "files": [
+      "dist/typescript/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "portable"
+      ]
+    },
+    "linux": {
+      "category": "Utility",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "artifactName": "ya-gui-${os}-${arch}.${ext}"
+  }
+}
