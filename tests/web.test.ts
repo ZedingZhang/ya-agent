@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { VERSION } from "../src/version";
 import { parseSearchResults, search, type FetchLike } from "../src/web";
 
 describe("web search", () => {
@@ -28,7 +29,7 @@ describe("web search", () => {
     };
     const results = JSON.parse(await search({ query: "Ya agent" }, fetcher)) as unknown[];
     expect(requestUrl).toContain("q=Ya+agent");
-    expect(userAgent).toMatch(/^Ya\/0\.5\.15/u);
+    expect(userAgent).toBe(`Ya/${VERSION} research agent`);
     expect(results).toHaveLength(5);
   });
 
