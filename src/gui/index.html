@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Ya</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="renderer.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand" aria-label="Ya"><span class="brand-seed">Y</span><span>a</span></div>
+      <nav class="tabs" role="tablist">
+        <button id="workspace-tab" class="tab active" type="button" role="tab" aria-controls="page-workspace" aria-selected="true" data-page="workspace" data-i18n="workspace">Workspace</button>
+        <button id="memory-tab" class="tab" type="button" role="tab" aria-controls="page-memory" aria-selected="false" data-page="memory" data-i18n="memory">Memory</button>
+        <button id="settings-tab" class="tab" type="button" role="tab" aria-controls="page-settings" aria-selected="false" data-page="settings" data-i18n="settings">Settings</button>
+      </nav>
+      <div id="app-status" class="app-status">Ready</div>
+    </header>
+
+    <main>
+      <section id="page-workspace" class="page active" role="tabpanel" aria-labelledby="workspace-tab">
+        <div class="workspace-ribbon">
+          <div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div>
+          <button id="choose-workspace" class="secondary" type="button" data-i18n="choose">Choose…</button>
+          <button id="refresh-files" class="secondary" type="button" data-i18n="refresh">Refresh</button>
+          <label class="check"><input id="local-enabled" type="checkbox" checked><span data-i18n="local">Enable local tools</span></label>
+        </div>
+
+        <div class="workbench">
+          <aside class="panel files-panel">
+            <div class="panel-heading"><span data-i18n="files">Files</span><span id="file-location" class="muted">.</span></div>
+            <div id="file-list" class="file-list"></div>
+          </aside>
+
+          <section class="center-panel">
+            <div id="timeline" class="timeline">
+              <div id="timeline-empty" class="timeline-empty" data-i18n="noTasks">Ask a question to begin.</div>
+            </div>
+            <div class="composer">
+              <label for="task-input" data-i18n="task">Task</label>
+              <textarea id="task-input" rows="4" data-i18n-placeholder="taskPlaceholder" placeholder="Ask Ya a question or describe a workspace task…"></textarea>
+              <div class="task-controls">
+                <label><span data-i18n="model">Model</span>
+                  <select id="task-model" disabled><option>Saved default</option></select>
+                </label>
+                <label><span data-i18n="web">Web</span>
+                  <select id="web-mode"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select>
+                </label>
+                <label class="check"><input id="toa-enabled" type="checkbox"><span data-i18n="toa">Tree of Agents</span></label>
+                <label><span data-i18n="workers">Workers</span>
+                  <select id="toa-workers" disabled><option value="1">1</option><option value="2" selected>2</option></select>
+                </label>
+                <span class="control-spacer"></span>
+                <button id="learn-button" class="secondary" type="button" disabled data-i18n="learn">Learn from this answer</button>
+                <button id="send-button" class="primary" type="button" data-i18n="send">Send</button>
+              </div>
+            </div>
+          </section>
+
+          <aside class="context-panel">
+            <section class="panel context-section">
+              <h2 data-i18n="relevant">Relevant memory</h2>
+              <div id="relevant-list" class="compact-list empty" data-i18n="noRelevant">No approved memory meets the relevance threshold.</div>
+            </section>
+            <section class="panel context-section grow">
+              <h2 data-i18n="activity">Activity</h2>
+              <div id="activity-list" class="activity-list"><p class="empty" data-i18n="noActivity">No local activity for this task.</p></div>
+            </section>
+            <section class="panel context-section action-panel">
+              <h2 data-i18n="pendingAction">Pending file action</h2>
+              <p id="action-empty" class="empty" data-i18n="noAction">No file change is waiting for approval.</p>
+              <div id="action-content" hidden>
+                <div id="action-summary" class="action-summary"></div>
+                <div id="action-paths" class="action-paths"></div>
+                <pre id="action-diff" class="action-diff"></pre>
+                <div class="button-row">
+                  <button id="action-deny" class="secondary" type="button" data-i18n="deny">Deny</button>
+                  <button id="action-approve" class="primary" type="button" data-i18n="approve">Approve</button>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section id="page-memory" class="page" role="tabpanel" aria-labelledby="memory-tab">
+        <div class="page-column">
+          <section class="panel form-card">
+            <h1 data-i18n="createCandidate">Create candidate</h1>
+            <textarea id="candidate-text" rows="3" data-i18n-placeholder="candidateText" placeholder="What should Ya learn?"></textarea>
+            <div class="form-grid compact">
+              <label><span data-i18n="kind">Kind</span><select id="candidate-kind"><option value="preference">preference</option><option value="procedure" selected>procedure</option><option value="knowledge">knowledge</option></select></label>
+              <label class="span-two"><span data-i18n="evidence">Evidence</span><input id="candidate-evidence" type="text"><small data-i18n="sourceHint">For knowledge, include a source URL in the evidence.</small></label>
+            </div>
+            <button id="memory-create" class="primary align-end" type="button" data-i18n="createCandidate">Create candidate</button>
+          </section>
+          <section class="panel table-card">
+            <div class="section-toolbar">
+              <h1 data-i18n="memory">Memory</h1>
+              <label class="check"><input id="include-candidates" type="checkbox"><span data-i18n="includeCandidates">Include candidates</span></label>
+              <button id="memory-prune" class="danger" type="button" data-i18n="prune">Prune</button>
+            </div>
+            <div id="memory-empty" class="empty">No local memory cards.</div>
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>ID</th><th data-i18n="status">Status</th><th data-i18n="kind">Kind</th><th data-i18n="text">Text</th><th data-i18n="evidence">Evidence</th><th data-i18n="actions">Actions</th></tr></thead>
+                <tbody id="memory-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="page-settings" class="page" role="tabpanel" aria-labelledby="settings-tab">
+        <div class="settings-layout">
+          <section class="panel form-card">
+            <h1 data-i18n="settings">Settings</h1>
+            <div class="form-grid">
+              <label><span data-i18n="language">Language</span><select id="setting-language"><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
+              <label><span data-i18n="model">Model</span><select id="setting-model"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option></select></label>
+              <label class="check setting-check"><input id="setting-thinking" type="checkbox"><span data-i18n="thinking">Thinking</span></label>
+              <label><span data-i18n="reasoning">Reasoning effort</span><select id="setting-reasoning"><option value="high">high</option><option value="max">max</option></select></label>
+              <label><span data-i18n="budget">ToA token budget</span><input id="setting-budget" type="number" min="1000" max="16000" step="100"></label>
+              <label><span data-i18n="timeout">ToA timeout (seconds)</span><input id="setting-timeout" type="number" min="30" max="180"></label>
+              <label class="check setting-check span-two"><input id="setting-stream" type="checkbox"><span data-i18n="stream">Stream simple answers</span></label>
+            </div>
+          </section>
+          <section class="panel form-card">
+            <h1 data-i18n="apiKey">DeepSeek API key</h1>
+            <div id="api-state" class="state-pill">No API key configured</div>
+            <input id="setting-api-key" type="password" autocomplete="off" data-i18n-placeholder="apiPlaceholder" placeholder="Leave blank to keep the current key">
+            <label id="setting-keychain-label" class="check"><input id="setting-keychain" type="checkbox" checked><span data-i18n="keychain">Save in macOS Keychain</span></label>
+          </section>
+          <section class="panel form-card">
+            <h1 data-i18n="clearAudit">Clear audit history</h1>
+            <div id="audit-state" class="muted">0 · 0 bytes</div>
+            <button id="audit-clear" class="danger align-start" type="button" data-i18n="clearAudit">Clear audit history</button>
+          </section>
+          <div class="settings-footer">
+            <span id="about-version" class="muted">Ya</span>
+            <button id="settings-save" class="primary" type="button" data-i18n="saveSettings">Save settings</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -2,55 +2,57 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya is a personal research and decision agent with a CLI and a native desktop GUI.
-With user permission, it accumulates preferences, experience, and source-backed
-knowledge without unbounded self-modification. It uses the DeepSeek V4 API,
-keeps long-term memory locally, and only starts its bounded Tree of Agents
-(ToA) mode when the user explicitly requests and confirms it.
+Ya is a consent-first personal research and decision agent with a command-line interface and a native desktop application. The project is implemented in strict TypeScript on Node.js; the desktop application uses Electron while sharing the same typed service layer as the CLI.
 
-## Distinctive Architecture
+Ya uses the DeepSeek V4 API, stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files.
 
-Ya is designed around controlled recursive improvement rather than a static
-chat loop:
+## Architecture
 
-- **SEA continuous learning and self-evolution**: explicit user feedback becomes
-  a candidate experience card. Only user-approved cards update Ya's local
-  preference, procedure, or source-backed knowledge for later tasks. This is
-  recursive improvement under user authority, not autonomous self-rewriting.
-- **ICM curiosity loop**: when a response identifies one material, source-backed
-  information gap, Ya performs one bounded targeted exploration and returns an
-  evidence supplement instead of silently guessing.
-- **Bounded ToA multi-agent architecture**: `--toa` creates a root coordinator
-  and up to two temporary evidence and risk workers. Ya shows a preflight and
-  requires explicit confirmation before this higher-cost research mode starts.
+- **SEA controlled learning:** explicit user feedback becomes a candidate memory card. Only approved cards can influence later tasks.
+- **ICM curiosity loop:** when a response marks one material evidence gap, Ya performs at most one bounded, source-seeking follow-up.
+- **Bounded ToA:** one root coordinator uses at most two temporary workers with explicit token and timeout limits.
+- **Shared typed core:** the CLI and desktop application use the same configuration, memory, orchestration, API, web-search, and local-workspace modules.
+- **Isolated desktop renderer:** the Electron renderer has no Node.js or direct filesystem access. Privileged operations pass through a narrow preload bridge into the main process.
 
 ## Platform support
 
-Release binaries do not require Python, pip, or a PATH change. The CLI and
-native Tk desktop app are issued together.
+Release assets are self-contained and do not require Node.js. Node.js 22 or newer is required only for source development or npm installation.
 
-| Operating system | CLI and GUI support | API key storage |
-| --- | --- | --- |
-| macOS | Apple Silicon and Intel CLI binaries plus native `.app` bundles. | CLI and GUI save the key in the macOS Keychain; `DEEPSEEK_API_KEY` also works. |
-| Linux | x64 glibc CLI and native GUI executables, built on Ubuntu 22.04. | Set `DEEPSEEK_API_KEY`, or enter a session-only key in the GUI. |
-| Windows | x64 CLI and native GUI executables. | Set `DEEPSEEK_API_KEY`, or enter a session-only key in the GUI. |
+| Operating system | CLI | Desktop GUI | API key storage |
+| --- | --- | --- | --- |
+| macOS Apple Silicon and Intel | Standalone executable | Native `.app` bundle | macOS Keychain or `DEEPSEEK_API_KEY` |
+| Linux x64 (glibc) | Standalone executable | AppImage | `DEEPSEEK_API_KEY` or a session-only GUI key |
+| Windows x64 | Standalone `.exe` | Portable `.exe` | `DEEPSEEK_API_KEY` or a session-only GUI key |
 
-`ya auth deepseek` is macOS-only because it uses the macOS `security` command.
-Do not run that command on Linux or Windows; use the environment variable
-instead.
+`ya auth deepseek` is macOS-only because it uses the system `security` utility. On Linux and Windows, use `DEEPSEEK_API_KEY` or enter a session-only key in Settings.
 
-## Install
+## Install from source
 
-Ya needs a DeepSeek API key. Python is required only for source development or
-the optional Python package installation.
+```sh
+git clone https://github.com/ZedingZhang/ya-agent.git
+cd ya-agent
+npm ci
+npm run check
+npm link
+```
 
-### Standalone executable (recommended)
+After `npm link`, the `ya` command is available in your current Node.js environment. You can also run it without linking:
 
-Download the matching file from the [latest GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest).
-Run it from the directory where it was downloaded; no administrator permission
-or PATH change is needed.
+```sh
+npm start -- ask "Explain Graph Engineering in plain language"
+```
 
-#### macOS Apple Silicon
+Start the desktop application from source with:
+
+```sh
+npm run gui
+```
+
+## Standalone releases
+
+Download the matching files from the [latest GitHub Release](https://github.com/ZedingZhang/ya-agent/releases/latest). The command-line and GUI assets are built separately.
+
+### macOS Apple Silicon
 
 ```sh
 curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-macos-arm64
@@ -58,9 +60,9 @@ chmod +x ya-macos-arm64
 ./ya-macos-arm64 ask "Explain Graph Engineering in plain language"
 ```
 
-Use `ya-macos-x64` instead on an Intel Mac.
+Use `ya-macos-x64` on an Intel Mac. The GUI archives are named `ya-gui-macos-arm64.zip` and `ya-gui-macos-x64.zip`.
 
-#### Linux x64
+### Linux x64
 
 ```sh
 curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-linux-x64
@@ -68,23 +70,20 @@ chmod +x ya-linux-x64
 ./ya-linux-x64 ask "Explain Graph Engineering in plain language"
 ```
 
-The Linux binary targets x64 systems using glibc, such as Ubuntu 22.04 or
-later. Alpine Linux and other musl-based systems are not supported by this
-binary.
+The desktop AppImage is published as `ya-gui-linux-x64`; make it executable before launching it. Linux release binaries target x64 glibc systems such as Ubuntu 22.04 and are not built for musl-based distributions such as Alpine Linux.
 
-#### Windows x64 (PowerShell)
+### Windows x64 (PowerShell)
 
 ```powershell
 Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-windows-x64.exe -OutFile ya-windows-x64.exe
 .\ya-windows-x64.exe ask "Explain Graph Engineering in plain language"
 ```
 
-### Verify an unsigned download
+The portable desktop application is `ya-gui-windows-x64.exe`.
 
-The macOS and Windows binaries are currently unsigned. Before overriding an
-operating-system warning, download
-[`checksums.txt`](https://github.com/ZedingZhang/ya-agent/releases/latest/download/checksums.txt)
-and compare its matching SHA-256 entry with the downloaded file:
+### Verify unsigned downloads
+
+macOS and Windows artifacts are currently unsigned. Download `checksums.txt` from the same release and compare the matching SHA-256 value before overriding an operating-system warning:
 
 ```sh
 shasum -a 256 ya-macos-arm64
@@ -95,321 +94,150 @@ shasum -a 256 ya-macos-arm64
 Get-FileHash .\ya-windows-x64.exe -Algorithm SHA256
 ```
 
-On macOS, only after verifying the checksum, remove the download quarantine if
-the system blocks execution:
+## CLI usage
 
 ```sh
-xattr -d com.apple.quarantine ./ya-macos-arm64
+ya --help
+ya ask --help
+ya ask "Explain recursion"
+ya ask --web on "Compare the latest evidence for two approaches"
+ya ask --thinking on --reasoning-effort max "Analyze this decision"
 ```
 
-On Windows, only after verifying the checksum, remove the downloaded-file mark
-if SmartScreen blocks the file:
-
-```powershell
-Unblock-File .\ya-windows-x64.exe
-```
-
-### Native desktop GUI
-
-The GUI defaults to English. Select **English** or **简体中文** in
-**Settings > Language**; Ya remembers this choice locally. Its primary screen is
-a workspace workbench with a file tree, a session-only task timeline, relevant
-memory, local-agent activity, and file-change approval. It does not start a
-local web server.
-
-Download the matching GUI asset from the latest release:
+Interactive terminals render Ya's common Markdown subset. Redirected output preserves raw Markdown for scripts and files:
 
 ```sh
-# macOS Apple Silicon (use ya-gui-macos-x64.zip on Intel Macs)
-curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-macos-arm64.zip
-unzip ya-gui-macos-arm64.zip
-open Ya.app
-
-# Linux x64
-curl -fL -O https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-linux-x64
-chmod +x ya-gui-linux-x64
-./ya-gui-linux-x64
+ya ask --format terminal "Create a concise table"
+ya ask --format markdown "Create a concise table" > answer.md
 ```
 
-```powershell
-# Windows x64
-Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/download/ya-gui-windows-x64.exe -OutFile ya-gui-windows-x64.exe
-.\ya-gui-windows-x64.exe
-```
+Simple tool-free answers stream by default in an interactive terminal. Web research, ToA, local workspace tasks, pipes, and Markdown output remain buffered. Use `--stream off` to disable streaming.
 
-macOS and Windows GUI binaries are unsigned. Verify their SHA-256 value against
-`checksums.txt` before responding to a system warning. On macOS, use
-`xattr -d com.apple.quarantine ./Ya.app` only after verification; on Windows,
-use `Unblock-File .\ya-gui-windows-x64.exe` only after verification.
+### Tree of Agents
 
-On macOS, the frozen GUI uses the system certificate bundle so it follows the
-same trusted certificate chain as the CLI when a local proxy or security tool
-is present. Keep TLS verification enabled; use `SSL_CERT_FILE` only when you
-need to explicitly provide a trusted CA bundle.
-
-### Python package and development
-
-For development, clone the repository and install it in editable mode:
+ToA has a root coordinator and one or two temporary evidence/risk workers. It always shows a preflight before starting:
 
 ```sh
-git clone https://github.com/ZedingZhang/ya-agent.git
-cd ya-agent
-python3 -m pip install -e .
-python3 -m unittest discover -s tests -q
+ya ask --toa --toa-workers 2 "Evaluate this strategic decision"
 ```
 
-On macOS, `ya auth deepseek` saves the key in the Keychain. For non-interactive
-environments, set `DEEPSEEK_API_KEY` instead. Never commit an API key. Ya
-stores configuration and memory under `~/.ya`; set `YA_HOME` to use a different
-local state directory.
-
-## Run Ya
-
-Use either interface; neither starts a local web server. After downloading a
-standalone CLI file, run it from its download directory:
+Non-interactive use requires explicit authorization for that invocation:
 
 ```sh
-./ya-macos-arm64 ask "Explain Graph Engineering in plain language"
+ya ask --toa --yes "Evaluate this strategic decision"
 ```
 
-To see the available options, append `--help`:
+`--local` and `--toa` cannot be combined.
+
+### Local workspace tools
+
+Local mode gives Ya a deliberately limited filesystem capability for one workspace:
 
 ```sh
-./ya-macos-arm64 ask --help
+ya ask --local --workspace "$PWD" "Create notes/summary.md from the text files here"
 ```
 
-When using the Python package from a checkout, the same CLI can run without a
-console-script PATH entry:
+The tool set can:
+
+- list directories;
+- read and search bounded UTF-8 text;
+- create one directory at a time;
+- create or replace text files;
+- move or rename files and directories.
+
+It cannot execute shell commands, scripts, Git, or package managers, and it cannot delete files. Every change shows an absolute path and requires approval. Replacements include a unified diff capped at 200 lines. In a non-interactive shell, changes are denied unless that invocation includes `--approve`.
+
+Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, credentials, private keys, binary files, invalid UTF-8, and files larger than 1 MiB are blocked. Action audit logs contain metadata—not file content or diffs—and rotate at 1 MiB with three archives.
 
 ```sh
-python3 -m ya ask "Explain Graph Engineering in plain language"
+ya audit clear
+ya audit clear --yes  # required in a non-interactive shell
 ```
 
-For the native app from a Python checkout, use:
+### Configuration
 
 ```sh
-python3 -m ya.gui
-```
-
-Interactive terminals render Ya's common Markdown output automatically. When
-redirecting or piping output, Ya preserves raw Markdown for scripts and files.
-Use `--format terminal` to force readable terminal formatting or
-`--format markdown` to always keep the source Markdown. Set `NO_COLOR=1` to
-disable ANSI styles.
-
-For a simple single-agent question, Ya streams completed lines to an interactive
-terminal by default, so the answer starts appearing before the full response is
-finished. It buffers output for ToA, web research, pipes, and Markdown output
-to keep those workflows reliable. Use `--stream off` to always wait for the
-complete answer.
-
-### Local workspace actions
-
-`--local` explicitly lets Ya read non-sensitive UTF-8 text in one workspace and
-offer limited file actions. The workspace is the current directory by default;
-use `--workspace` to choose another root:
-
-```sh
-ya ask --local --workspace /Users/zzd "Create a folder named notes"
-```
-
-Local mode can list directories, read and search text, create directories,
-create or replace text files, and move or rename files. It cannot run shell
-commands, scripts, Git, package managers, or delete files. Every change is
-shown with its absolute path and requires confirmation; replacements include a
-maximum 200-line unified diff. In a pipe or other non-interactive shell, writes
-are denied unless the current task explicitly includes `--approve`:
-
-```sh
-ya ask --local --workspace "$PWD" --approve "Create todo.txt with three tasks"
-```
-
-`--local` authorizes only reads inside that workspace. Read text is sent to the
-configured DeepSeek API, while `.env`, private keys, credentials, binary files,
-and files over 1 MiB are blocked from model reads. Ya records change metadata
-(not file content or diffs) in `~/.ya/actions.jsonl`. The active log rotates at
-1 MiB and keeps three archives (about 4 MiB total). Clear all audit history with
-`ya audit clear`; non-interactive use requires `--yes`. The GUI offers the same
-confirmed action in **Settings > Clear audit history**. Local mode can be combined
-with web research but not `--toa`, and it deliberately buffers answers so tool
-calls cannot bypass the confirmation flow.
-
-The native GUI uses the workspace workbench for both ordinary questions and
-local tasks. **Enable local tools** is on by default. On the first task, choose
-a workspace folder before Ya can access any local file; no workspace means no
-local file is read or sent to the model. The file tree is for navigation only
-and does not send file contents to the model. Agent
-directory, read, and search activity appears in the right panel without file
-contents. Each change pauses in that panel for a default-deny decision with
-absolute paths and a scrollable diff; the GUI cannot run shell commands,
-scripts, Git, package managers, or delete files.
-
-## Example output
-
-This is an illustrative terminal-style rendering based on a real Ya CLI answer.
-
-![Ya CLI example output](assets/ya-cli-example-en.png)
-
-## Native GUI
-
-The native GUI is English by default and persists a complete Chinese switch in
-Settings. Its single workspace workbench keeps task history only for the open
-application session. Simple requests stream into the rendered task timeline;
-web research, ToA, and local workspace tasks remain buffered so their tool and
-confirmation steps stay reliable. Choose **Stream simple answers** in
-**Settings** to keep or disable streaming; Ya saves that GUI preference locally.
-On first launch, the workbench opens centered at a spacious display-relative
-size with dedicated file, task, and activity columns; all panes remain draggable.
-
-![Ya workspace workbench in English](assets/ya-gui-workspace-en.png)
-
-## Execution flow
-
-The loop is deliberate: task-relevant approved memory informs the answer; ICM
-can close one evidence gap; explicit feedback enters SEA as a candidate; only
-approval updates local memory for a later task. ToA expands research breadth
-only when the user requests it.
-
-```mermaid
-flowchart TD
-    S["User submits a Ya CLI task"] --> C["Load minimal relevant context"]
-    C --> G["Resolve model, thinking, and budget settings"]
-    G --> O["CLI ToA option"]
-    O -->|Default or no --toa| X["Single-agent execution"]
-    O -->|With --toa| P["Show ToA preflight"]
-    P -->|User confirms| T["ToA root coordination"]
-    P -->|User declines| X
-    T --> W["Up to two temporary worker agents"]
-    W --> A["Aggregate evidence packets"]
-    X --> V["Evidence validation"]
-    A --> V
-    V --> I["ICM targeted exploration"]
-    I -->|Done or budget reached| R["Return sourced result"]
-    I -->|Supplementary search| E["Targeted search"]
-    E --> V
-    R --> F["Collect explicit user feedback"]
-    F --> L["SEA candidate experience card"]
-    L --> H["CLI user approval"]
-    H -->|Approve| M["Local memory version update"]
-    H -->|Reject or ignore| Z["Finish"]
-    M --> Z
-```
-
-## Use
-
-### 1. Authenticate
-
-Run this once on macOS, then paste the DeepSeek API key when prompted:
-
-```sh
-ya auth deepseek
-```
-
-On Linux, provide the key for the current shell instead:
-
-```sh
-export DEEPSEEK_API_KEY="your-api-key"
-```
-
-On Windows PowerShell, use:
-
-```powershell
-$env:DEEPSEEK_API_KEY = "your-api-key"
-```
-
-### 2. Ask a question
-
-Pass the complete task as the argument to `ya ask`. Ya sends it to DeepSeek and
-prints the answer under `[Ya single result]`:
-
-```sh
-ya ask "Summarize the benefits and tradeoffs of a relational database"
-ya ask "Summarize a proposal" --format markdown > answer.md
-ya ask "Summarize a proposal" --format terminal
-ya ask "Explain recursion" --stream off
-ya ask "Explain PostgreSQL indexes" --show-memory
-```
-
-Thinking is off by default. Use `--thinking on` for a request that benefits
-from extended reasoning, and add `--reasoning-effort high` or `max` to select
-its budget.
-
-Web access defaults to `--web auto`: Ya searches for clearly time-sensitive,
-research, source, comparison, or recommendation tasks, and answers ordinary
-explanations directly. Use `--web on` to require a search, or `--web off` for
-a faster answer without web tools. Web and ToA answers remain buffered so Ya
-can validate tool results before printing them.
-
-After an interactive answer, Ya asks whether to learn from that answer by
-creating a memory candidate. This is optional; choosing `N` leaves memory
-unchanged, and a candidate still requires review and approval.
-
-### Common commands
-
-```sh
-# Use the more capable model for one request.
-ya ask "Compare two database designs" --model pro --thinking on
-
-# Require a fresh web search, or disable web access for this request.
-ya ask "Latest database pricing" --web on
-ya ask "Explain a database index" --web off
-
-# Save defaults for future requests.
 ya config set model pro
 ya config set thinking on
 ya config set reasoning-effort max
-
-# Use the bounded Tree of Agents mode. Confirm the displayed preflight.
-ya ask "Assess this proposal" --toa --toa-workers 2
-
-# In a non-interactive shell, explicitly authorize that ToA run.
-ya ask "Assess this proposal" --toa --toa-workers 2 --yes
-
-# Review and explicitly approve a memory candidate.
-ya memory review
-ya memory approve <card-id>
-
-# Delete rejected and revoked cards after reviewing the preview.
-ya memory prune
-
-# Include pending candidates and confirm explicitly for a script.
-ya memory prune --include-candidates --yes
 ```
 
-`--toa` is not enabled by default. It shows its model, worker count, token
-budget, and timeout before it starts. Use `--no-feedback` to skip the optional
-memory prompt after any request.
+Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory.
 
-Pass `--show-memory` to display the approved cards selected for that task,
-including their IDs and local relevance scores. This may print personal memory
-text, so do not use it in shared terminal logs.
+### Long-term memory
 
-### Memory limits and cleanup
+```sh
+ya memory review
+ya memory approve CARD_ID
+ya memory reject CARD_ID
+ya memory revoke CARD_ID
+ya memory prune
+```
 
-Ya stores at most 100 local memory cards, including candidates, approved,
-rejected, and revoked cards. For each task, it selects at most three approved
-cards that meet a local relevance threshold: exact phrases and meaningful
-English keywords rank first, then Chinese character n-gram overlap; equal
-scores prefer newer cards. Low-relevance cards are not sent to the model.
-This selection is local, uses no embedding or network service, and consumes no
-extra API tokens. It prevents duplicate active cards when the same kind has
-equivalent text after Unicode normalization, case folding, and whitespace
-cleanup. A rejected or revoked card does not block you from adding the same
-memory again.
+Ya stores at most 100 local memory cards. Candidate cards do not enter model context until approved. For each task, Ya deterministically selects at most three relevant approved cards using English phrases/keywords and Chinese character n-grams. `--show-memory` displays the selection before an answer.
 
-`ya memory prune` previews and then deletes rejected and revoked cards. Add
-`--include-candidates` to delete pending candidates too. It never deletes an
-approved card directly: run `ya memory revoke <card-id>` first, then prune it.
-In a non-interactive shell, `ya memory prune` requires `--yes`.
+The existing `~/.ya/memory.json` format is preserved, so upgrading from the Python implementation does not discard memory.
 
-## Safety model
+## Desktop application
 
-- Only `deepseek-v4-flash` and `deepseek-v4-pro` are accepted.
-- Raw reasoning content is kept only during an in-flight tool-call loop.
-- Feedback becomes a candidate memory first; it changes future behavior only
-  after explicit approval.
-- `YA_HOME` can override Ya's local state directory for tests or portability.
+The desktop application is a workspace-first three-column workbench:
+
+- a navigation-only file browser;
+- a session-only task timeline;
+- relevant memory, local activity metadata, and inline file-change approval.
+
+It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, and audit-history management. It does not start a local web server. The renderer cannot access Node.js directly; API calls and filesystem operations run in the Electron main process behind validated IPC handlers.
+
+## Development
+
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run smoke:gui
+npm run check
+```
+
+Production output is written under `dist/typescript/` so older generated Python artifacts in `dist/` cannot accidentally enter the npm or Electron packages.
+
+Useful commands:
+
+```sh
+npm start -- --help        # build and run the CLI
+npm run gui                # build and run Electron
+npm run smoke:gui          # load IPC/preload/renderer and verify navigation
+npm run test:watch         # watch unit tests
+npm run package:cli        # package a CLI for the current host
+npm run package:gui        # package the Electron app for the current host
+```
+
+The test suite covers configuration/data compatibility, Keychain fallback, memory ranking, local-workspace confinement, audit rotation, DeepSeek request/retry/stream/tool behavior, web result parsing, orchestration, CLI semantics, and GUI controller/rendering helpers. The GUI smoke test additionally loads the packaged renderer boundary and verifies page navigation.
+
+## Project layout
+
+```text
+src/
+  cli.ts                 CLI entry point and consent flows
+  config.ts              validated persistent model configuration
+  deepseek.ts            typed DeepSeek HTTP, SSE, retry, and tool loop
+  local.ts               confined local filesystem tools and audit log
+  memory.ts              candidate lifecycle and relevance ranking
+  orchestrator.ts        single-agent, ToA, web, local, and ICM logic
+  service.ts             shared CLI/GUI task service
+  terminal.ts            safe terminal Markdown renderer
+  gui/
+    main.ts              Electron main process and validated IPC
+    preload.ts           narrow context-isolated bridge
+    renderer.ts          desktop interaction and safe DOM rendering
+    controller.ts        GUI state and shared-service facade
+tests/                   Vitest behavior tests
+```
+
+## TLS and proxies
+
+Keep certificate verification enabled. The Electron desktop application uses the operating system's Chromium network stack. For the Node.js CLI behind a trusted corporate proxy, configure Node's supported CA settings such as `NODE_EXTRA_CA_CERTS` rather than disabling TLS verification.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)
