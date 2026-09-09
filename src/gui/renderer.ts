@@ -71,6 +71,10 @@ interface YaRendererBridge {
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
+  saveWorkspaceModelSelection(selection: {
+    model: AppState["config"]["model"];
+    reasoningEffort: AppState["config"]["reasoningEffort"];
+  }): Promise<AppState>;
   saveSettings(settings: Record<string, unknown>): Promise<AppState>;
   runTask(options: Record<string, unknown>): Promise<RunResult>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number }>>;
@@ -105,7 +109,7 @@ const TEXT = {
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
     attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
-    visionOnly: "Select the vision model in Settings to attach images.", noImages: "No images attached.",
+    visionOnly: "Select the vision model in the workspace to attach images.", noImages: "No images attached.",
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
@@ -126,7 +130,7 @@ const TEXT = {
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
-    visionOnly: "请先在设置中选择视觉模型再添加图片。", noImages: "尚未添加图片。",
+    visionOnly: "请先在工作区选择视觉模型再添加图片。", noImages: "尚未添加图片。",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
 } as const;
@@ -140,6 +144,7 @@ let pendingAction: { id: string; action: LocalAction } | undefined;
 let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
+let workspaceModelSaving = false;
 const VISION_MODEL = "deepseek-v4-flash-vision-exp";
 
 function element<T extends HTMLElement>(id: string): T {
@@ -220,7 +225,7 @@ async function chooseWorkspace(): Promise<void> {
 }
 
 function visionEnabled(): boolean {
-  return state.config.model === VISION_MODEL;
+  return element<HTMLSelectElement>("task-model").value === VISION_MODEL;
 }
 
 function formatBytes(bytes: number): string {
@@ -232,9 +237,9 @@ function formatBytes(bytes: number): string {
 function renderImages(): void {
   const list = element<HTMLDivElement>("image-list");
   const running = document.body.classList.contains("task-running");
-  element<HTMLButtonElement>("choose-images").disabled = running || !visionEnabled();
-  element<HTMLButtonElement>("clear-images").disabled = running || selectedImages.length === 0;
-  element<HTMLSelectElement>("image-detail").disabled = running || !visionEnabled() || selectedImages.length === 0;
+  element<HTMLButtonElement>("choose-images").disabled = running || workspaceModelSaving || !visionEnabled();
+  element<HTMLButtonElement>("clear-images").disabled = running || workspaceModelSaving || selectedImages.length === 0;
+  element<HTMLSelectElement>("image-detail").disabled = running || workspaceModelSaving || !visionEnabled() || selectedImages.length === 0;
   list.replaceChildren();
   if (!visionEnabled()) {
     list.textContent = t("visionOnly");
@@ -440,9 +445,9 @@ async function runTask(): Promise<void> {
 }
 
 function setRunning(running: boolean): void {
-  element<HTMLButtonElement>("send-button").disabled = running;
   element<HTMLTextAreaElement>("task-input").disabled = running;
   document.body.classList.toggle("task-running", running);
+  syncWorkspaceControls();
   renderImages();
 }
 
@@ -593,11 +598,9 @@ async function pruneMemory(): Promise<void> {
 }
 
 function fillSettings(): void {
-  element<HTMLSelectElement>("task-model").options[0]!.text = state.config.model;
+  fillWorkspaceModelSelection();
   element<HTMLSelectElement>("setting-language").value = state.language;
-  element<HTMLSelectElement>("setting-model").value = state.config.model;
   element<HTMLInputElement>("setting-thinking").checked = state.config.thinkingEnabled;
-  element<HTMLSelectElement>("setting-reasoning").value = state.config.reasoningEffort;
   element<HTMLInputElement>("setting-budget").value = String(state.config.toaTokenBudget);
   element<HTMLInputElement>("setting-timeout").value = String(state.config.toaTimeout);
   element<HTMLInputElement>("setting-stream").checked = state.stream;
@@ -605,12 +608,43 @@ function fillSettings(): void {
   element<HTMLElement>("setting-keychain-label").hidden = state.platform !== "darwin";
   element<HTMLSpanElement>("api-state").textContent = state.hasApiKey ? t("apiReady") : t("apiMissing");
   element<HTMLSpanElement>("audit-state").textContent = `${state.auditLogCount} · ${state.auditLogBytes} bytes`;
-  toggleReasoning();
   renderImages();
 }
 
-function toggleReasoning(): void {
-  element<HTMLSelectElement>("setting-reasoning").disabled = !element<HTMLInputElement>("setting-thinking").checked;
+function fillWorkspaceModelSelection(): void {
+  element<HTMLSelectElement>("task-model").value = state.config.model;
+  element<HTMLSelectElement>("task-reasoning").value = state.config.reasoningEffort;
+  syncWorkspaceControls();
+}
+
+function syncWorkspaceControls(): void {
+  const running = document.body.classList.contains("task-running");
+  element<HTMLButtonElement>("send-button").disabled = running || workspaceModelSaving;
+  element<HTMLSelectElement>("task-model").disabled = running || workspaceModelSaving;
+  element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving;
+}
+
+async function saveWorkspaceModelSelection(): Promise<void> {
+  const model = element<HTMLSelectElement>("task-model").value as AppState["config"]["model"];
+  const reasoningEffort = element<HTMLSelectElement>("task-reasoning").value as AppState["config"]["reasoningEffort"];
+  workspaceModelSaving = true;
+  syncWorkspaceControls();
+  renderImages();
+  try {
+    state = await bridge.saveWorkspaceModelSelection({ model, reasoningEffort });
+    fillWorkspaceModelSelection();
+    if (!visionEnabled() && selectedImages.length > 0) await clearImages();
+    renderImages();
+    setStatus(t("saved"));
+  } catch (error) {
+    fillWorkspaceModelSelection();
+    renderImages();
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  } finally {
+    workspaceModelSaving = false;
+    syncWorkspaceControls();
+    renderImages();
+  }
 }
 
 async function saveSettings(): Promise<void> {
@@ -618,9 +652,7 @@ async function saveSettings(): Promise<void> {
   try {
     state = await bridge.saveSettings({
       language: element<HTMLSelectElement>("setting-language").value,
-      model: element<HTMLSelectElement>("setting-model").value,
       thinkingEnabled: element<HTMLInputElement>("setting-thinking").checked,
-      reasoningEffort: element<HTMLSelectElement>("setting-reasoning").value,
       toaTokenBudget: Number(element<HTMLInputElement>("setting-budget").value),
       toaTimeout: Number(element<HTMLInputElement>("setting-timeout").value),
       stream: element<HTMLInputElement>("setting-stream").checked,
@@ -797,6 +829,8 @@ function registerEvents(): void {
   element<HTMLButtonElement>("refresh-files").addEventListener("click", () => void renderFiles());
   element<HTMLButtonElement>("choose-images").addEventListener("click", () => void chooseImages());
   element<HTMLButtonElement>("clear-images").addEventListener("click", () => void clearImages());
+  element<HTMLSelectElement>("task-model").addEventListener("change", () => void saveWorkspaceModelSelection());
+  element<HTMLSelectElement>("task-reasoning").addEventListener("change", () => void saveWorkspaceModelSelection());
   element<HTMLButtonElement>("send-button").addEventListener("click", () => void runTask());
   element<HTMLTextAreaElement>("task-input").addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -813,7 +847,6 @@ function registerEvents(): void {
   element<HTMLButtonElement>("memory-prune").addEventListener("click", () => void pruneMemory());
   element<HTMLButtonElement>("settings-save").addEventListener("click", () => void saveSettings());
   element<HTMLButtonElement>("audit-clear").addEventListener("click", () => void clearAudit());
-  element<HTMLInputElement>("setting-thinking").addEventListener("change", toggleReasoning);
   element<HTMLButtonElement>("learn-button").addEventListener("click", learnFromAnswer);
 
   bridge.onTaskEvent((event) => {

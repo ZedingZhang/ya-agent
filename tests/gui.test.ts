@@ -54,6 +54,19 @@ describe("GUI controller", () => {
     expect(controller.apiKey()).toBe("session-key");
   });
 
+  it("persists workspace model controls without changing settings-owned values", () => {
+    const controller = new GuiController();
+    controller.saveModelConfig(new ModelConfig({ thinkingEnabled: true, toaTokenBudget: 6_000, toaTimeout: 120 }));
+    controller.saveWorkspaceModelSelection("deepseek-v4-pro", "max");
+    expect(loadConfig()).toEqual(new ModelConfig({
+      model: "deepseek-v4-pro",
+      reasoningEffort: "max",
+      thinkingEnabled: true,
+      toaTokenBudget: 6_000,
+      toaTimeout: 120,
+    }));
+  });
+
   it("streams only simple, non-local, non-ToA tasks", () => {
     const controller = new GuiController();
     expect(controller.canStream({ task: "Explain recursion" })).toBe(true);

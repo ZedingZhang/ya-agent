@@ -26,7 +26,14 @@ import { VERSION } from "../version";
 import { search } from "../web";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
-import type { AppState, RendererTaskOptions, SelectedImage, SettingsUpdate, TaskEvent } from "./shared";
+import type {
+  AppState,
+  RendererTaskOptions,
+  SelectedImage,
+  SettingsUpdate,
+  TaskEvent,
+  WorkspaceModelSelection,
+} from "./shared";
 
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
@@ -120,18 +127,24 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
 function validateSettings(value: unknown): SettingsUpdate {
   if (!isRecord(value)) throw new Error("Invalid settings payload.");
   if (!LANGUAGES.includes(value.language as Language)) throw new Error("Invalid language.");
-  if (!Object.values(VALID_MODELS).includes(value.model as never)) throw new Error("Invalid model.");
-  if (value.reasoningEffort !== "high" && value.reasoningEffort !== "max") throw new Error("Invalid reasoning effort.");
   return {
     language: value.language as Language,
     stream: Boolean(value.stream),
-    model: value.model as (typeof VALID_MODELS)[keyof typeof VALID_MODELS],
     thinkingEnabled: Boolean(value.thinkingEnabled),
-    reasoningEffort: value.reasoningEffort as ReasoningEffort,
     toaTokenBudget: Number(value.toaTokenBudget),
     toaTimeout: Number(value.toaTimeout),
     ...(typeof value.apiKey === "string" ? { apiKey: value.apiKey } : {}),
     ...(value.keyStorage === "session" || value.keyStorage === "keychain" ? { keyStorage: value.keyStorage } : {}),
+  };
+}
+
+function validateWorkspaceModelSelection(value: unknown): WorkspaceModelSelection {
+  if (!isRecord(value)) throw new Error("Invalid workspace model selection.");
+  if (!Object.values(VALID_MODELS).includes(value.model as never)) throw new Error("Invalid model.");
+  if (value.reasoningEffort !== "high" && value.reasoningEffort !== "max") throw new Error("Invalid reasoning effort.");
+  return {
+    model: value.model as (typeof VALID_MODELS)[keyof typeof VALID_MODELS],
+    reasoningEffort: value.reasoningEffort as ReasoningEffort,
   };
 }
 
@@ -156,6 +169,14 @@ function registerIpc(): void {
   ipcMain.handle("workspace:entries", (event, path: unknown) => {
     assertTrustedSender(event);
     return controller.workspaceEntries(typeof path === "string" ? path : ".");
+  });
+
+  ipcMain.handle("workspace:model-selection", (event, raw: unknown) => {
+    assertTrustedSender(event);
+    if (taskRunning) throw new Error("The model cannot be changed while a task is running.");
+    const selection = validateWorkspaceModelSelection(raw);
+    controller.saveWorkspaceModelSelection(selection.model, selection.reasoningEffort);
+    return appState();
   });
 
   ipcMain.handle("images:choose", async (event) => {
@@ -184,7 +205,13 @@ function registerIpc(): void {
   ipcMain.handle("settings:save", (event, raw: unknown) => {
     assertTrustedSender(event);
     const settings = validateSettings(raw);
-    const config = new ModelConfig(settings);
+    const config = new ModelConfig({
+      model: controller.config.model,
+      reasoningEffort: controller.config.reasoningEffort,
+      thinkingEnabled: settings.thinkingEnabled,
+      toaTokenBudget: settings.toaTokenBudget,
+      toaTimeout: settings.toaTimeout,
+    });
     controller.saveModelConfig(config);
     controller.setLanguage(settings.language);
     controller.setStream(settings.stream);
@@ -327,16 +354,32 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
   const pages = await window.webContents.executeJavaScript(`(() => {
     const memoryTab = document.querySelector('[data-page="memory"]');
     const settingsTab = document.querySelector('[data-page="settings"]');
+    const workspaceTab = document.querySelector('[data-page="workspace"]');
     memoryTab?.click();
     const memoryActive = document.querySelector('#page-memory')?.classList.contains('active') === true;
     settingsTab?.click();
     const settingsActive = document.querySelector('#page-settings')?.classList.contains('active') === true;
-    const visionOption = document.querySelector('#setting-model option[value="deepseek-v4-flash-vision-exp"]') !== null;
+    const legacySettingsModelControls = document.querySelector('#setting-model, #setting-reasoning') !== null;
+    workspaceTab?.click();
+    const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
+    const model = document.querySelector('#task-model');
+    const reasoning = document.querySelector('#task-reasoning');
+    const visionOption = document.querySelector('#task-model option[value="deepseek-v4-flash-vision-exp"]') !== null;
     const imagePicker = document.querySelector('#choose-images') !== null;
-    const modelsMatch = document.querySelector('#task-model')?.value === document.querySelector('#setting-model')?.value;
-    return { memoryActive, settingsActive, visionOption, imagePicker, modelsMatch };
-  })()`) as { memoryActive?: boolean; settingsActive?: boolean; visionOption?: boolean; imagePicker?: boolean; modelsMatch?: boolean };
-  if (!pages.memoryActive || !pages.settingsActive || !pages.visionOption || !pages.imagePicker || !pages.modelsMatch) {
+    const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
+      && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
+    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls };
+  })()`) as {
+    memoryActive?: boolean;
+    settingsActive?: boolean;
+    workspaceActive?: boolean;
+    legacySettingsModelControls?: boolean;
+    visionOption?: boolean;
+    imagePicker?: boolean;
+    workspaceControls?: boolean;
+  };
+  if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
+    || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls) {
     throw new Error("Renderer navigation or vision controls failed.");
   }
 }

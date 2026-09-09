@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { SettingsUpdate, RendererTaskOptions, TaskEvent, YaBridge } from "./shared";
+import type { RendererTaskOptions, SettingsUpdate, TaskEvent, WorkspaceModelSelection, YaBridge } from "./shared";
 
 const bridge: YaBridge = {
   state: () => ipcRenderer.invoke("state:get"),
@@ -7,6 +7,7 @@ const bridge: YaBridge = {
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   clearImages: () => ipcRenderer.invoke("images:clear"),
   workspaceEntries: (path = ".") => ipcRenderer.invoke("workspace:entries", path),
+  saveWorkspaceModelSelection: (selection: WorkspaceModelSelection) => ipcRenderer.invoke("workspace:model-selection", selection),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
   runTask: (options: RendererTaskOptions) => ipcRenderer.invoke("task:run", options),
   relevantCards: (task: string) => ipcRenderer.invoke("memory:relevant", task),
