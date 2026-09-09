@@ -46,12 +46,15 @@
                 <label><span data-i18n="imageDetail">Image detail</span>
                   <select id="image-detail"><option value="auto" selected>auto</option><option value="low">low</option><option value="high">high</option><option value="original">original</option></select>
                 </label>
-                <div id="image-list" class="image-list muted" data-i18n="visionOnly">Select the vision model in Settings to attach images.</div>
+                <div id="image-list" class="image-list muted" data-i18n="visionOnly">Select the vision model in the workspace to attach images.</div>
                 <button id="clear-images" class="secondary" type="button" disabled data-i18n="clearImages">Clear</button>
               </div>
               <div class="task-controls">
                 <label><span data-i18n="model">Model</span>
-                  <select id="task-model" disabled><option>Saved default</option></select>
+                  <select id="task-model"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option><option value="deepseek-v4-flash-vision-exp">deepseek-v4-flash-vision-exp</option></select>
+                </label>
+                <label><span data-i18n="reasoning">Reasoning effort</span>
+                  <select id="task-reasoning"><option value="high">high</option><option value="max">max</option></select>
                 </label>
                 <label><span data-i18n="web">Web</span>
                   <select id="web-mode"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select>
@@ -127,9 +130,7 @@
             <h1 data-i18n="settings">Settings</h1>
             <div class="form-grid">
               <label><span data-i18n="language">Language</span><select id="setting-language"><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
-              <label><span data-i18n="model">Model</span><select id="setting-model"><option value="deepseek-v4-flash">deepseek-v4-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option><option value="deepseek-v4-flash-vision-exp">deepseek-v4-flash-vision-exp</option></select></label>
               <label class="check setting-check"><input id="setting-thinking" type="checkbox"><span data-i18n="thinking">Thinking</span></label>
-              <label><span data-i18n="reasoning">Reasoning effort</span><select id="setting-reasoning"><option value="high">high</option><option value="max">max</option></select></label>
               <label><span data-i18n="budget">ToA token budget</span><input id="setting-budget" type="number" min="1000" max="16000" step="100"></label>
               <label><span data-i18n="timeout">ToA timeout (seconds)</span><input id="setting-timeout" type="number" min="30" max="180"></label>
               <label class="check setting-check span-two"><input id="setting-stream" type="checkbox"><span data-i18n="stream">Stream simple answers</span></label>

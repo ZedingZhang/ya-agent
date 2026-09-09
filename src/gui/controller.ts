@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ModelConfig, dataHome, loadConfig, saveConfig } from "../config";
+import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
@@ -146,6 +146,16 @@ export class GuiController {
     config.validate();
     saveConfig(config);
     this.config = config;
+  }
+
+  saveWorkspaceModelSelection(model: ModelId, reasoningEffort: ReasoningEffort): void {
+    this.saveModelConfig(new ModelConfig({
+      model,
+      reasoningEffort,
+      thinkingEnabled: this.config.thinkingEnabled,
+      toaTokenBudget: this.config.toaTokenBudget,
+      toaTimeout: this.config.toaTimeout,
+    }));
   }
 
   setSessionApiKey(apiKey: string): void {

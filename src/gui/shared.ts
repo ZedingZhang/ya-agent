@@ -27,9 +27,17 @@ export interface AppState {
   auditLogBytes: number;
 }
 
-export interface SettingsUpdate extends SerializedConfig {
+export interface WorkspaceModelSelection {
+  model: ModelId;
+  reasoningEffort: ReasoningEffort;
+}
+
+export interface SettingsUpdate {
   language: Language;
   stream: boolean;
+  thinkingEnabled: boolean;
+  toaTokenBudget: number;
+  toaTimeout: number;
   apiKey?: string;
   keyStorage?: "session" | "keychain";
 }
@@ -64,6 +72,7 @@ export interface YaBridge {
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
+  saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   runTask(options: RendererTaskOptions): Promise<RunResult>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
