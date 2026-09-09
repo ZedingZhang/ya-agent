@@ -130,7 +130,7 @@ const TEXT = {
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
-    visionOnly: "请先在工作区选择视觉模型再添加图片。", noImages: "尚未添加图片。",
+    visionOnly: "请先在工作区选择视觉模型再添加图片。", noImages: "尚未添加图片",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
 } as const;
