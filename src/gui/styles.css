@@ -82,6 +82,7 @@ textarea { width: 100%; padding: 10px 11px; resize: vertical; line-height: 1.45;
 input, select { min-height: 34px; padding: 6px 9px; }
 .task-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin-top: 9px; }
 .task-controls label:not(.check) { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
+.task-controls > .check { min-height: 32px; align-self: flex-end; }
 .task-controls select { min-height: 32px; }
 #task-model { min-width: 220px; }
 #task-reasoning { min-width: 82px; }
