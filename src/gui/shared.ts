@@ -2,7 +2,7 @@ import type { ModelId, ReasoningEffort } from "../config";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
-import type { WebMode } from "../types";
+import type { ImageDetail, WebMode } from "../types";
 import type { Language } from "./controller";
 
 export interface SerializedConfig {
@@ -42,6 +42,15 @@ export interface RendererTaskOptions {
   stream: boolean;
   local: boolean;
   workspace?: string;
+  imageIds: string[];
+  imageDetail: ImageDetail;
+}
+
+export interface SelectedImage {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
 }
 
 export type TaskEvent =
@@ -52,6 +61,8 @@ export type TaskEvent =
 export interface YaBridge {
   state(): Promise<AppState>;
   chooseWorkspace(): Promise<string | undefined>;
+  chooseImages(): Promise<SelectedImage[] | undefined>;
+  clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   runTask(options: RendererTaskOptions): Promise<RunResult>;

@@ -11,19 +11,27 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from "electron";
-import { ModelConfig, VALID_MODELS, type ReasoningEffort } from "../config";
+import { isVisionModel, ModelConfig, VALID_MODELS, type ReasoningEffort } from "../config";
 import { DeepSeekClient, type FetchLike } from "../deepseek";
+import {
+  imageContentPartsFromFiles,
+  inspectImageFiles,
+  isImageDetail,
+  MAX_IMAGES_PER_REQUEST,
+  type ImageFileInfo,
+} from "../images";
 import { DuplicateMemoryError, MemoryLimitError, type MemoryKind } from "../memory";
 import { runTask } from "../service";
 import { VERSION } from "../version";
 import { search } from "../web";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
-import type { AppState, RendererTaskOptions, SettingsUpdate, TaskEvent } from "./shared";
+import type { AppState, RendererTaskOptions, SelectedImage, SettingsUpdate, TaskEvent } from "./shared";
 
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 const pendingActions = new Map<string, (approved: boolean) => void>();
+const selectedImages = new Map<string, ImageFileInfo>();
 const rendererFile = join(__dirname, "index.html");
 const rendererUrl = pathToFileURL(rendererFile).toString();
 const electronFetch: FetchLike = (input, init) =>
@@ -89,6 +97,13 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   if (webMode !== "auto" && webMode !== "on" && webMode !== "off") throw new Error("Invalid web mode.");
   const workers = value.toaWorkers;
   if (workers !== 1 && workers !== 2) throw new Error("ToA workers must be 1 or 2.");
+  const imageIds = value.imageIds ?? [];
+  if (!Array.isArray(imageIds) || imageIds.length > MAX_IMAGES_PER_REQUEST || imageIds.some((id) => typeof id !== "string")) {
+    throw new Error("Invalid image selection.");
+  }
+  if (new Set(imageIds).size !== imageIds.length) throw new Error("Duplicate image selection.");
+  const imageDetail = value.imageDetail ?? "auto";
+  if (!isImageDetail(imageDetail)) throw new Error("Invalid image detail.");
   return {
     task: value.task.trim(),
     webMode,
@@ -96,6 +111,8 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     toaWorkers: workers,
     stream: Boolean(value.stream),
     local: Boolean(value.local),
+    imageIds,
+    imageDetail,
     ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}),
   };
 }
@@ -141,6 +158,29 @@ function registerIpc(): void {
     return controller.workspaceEntries(typeof path === "string" ? path : ".");
   });
 
+  ipcMain.handle("images:choose", async (event) => {
+    assertTrustedSender(event);
+    if (taskRunning) throw new Error("Images cannot be changed while a task is running.");
+    if (!mainWindow) return undefined;
+    const selection = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png", "gif", "webp"] }],
+    });
+    if (selection.canceled) return undefined;
+    const files = inspectImageFiles([...new Set(selection.filePaths)]);
+    selectedImages.clear();
+    return files.map((file): SelectedImage => {
+      const id = randomUUID();
+      selectedImages.set(id, file);
+      return { id, name: file.name, size: file.size, mimeType: file.mimeType };
+    });
+  });
+
+  ipcMain.handle("images:clear", (event) => {
+    assertTrustedSender(event);
+    selectedImages.clear();
+  });
+
   ipcMain.handle("settings:save", (event, raw: unknown) => {
     assertTrustedSender(event);
     const settings = validateSettings(raw);
@@ -159,9 +199,18 @@ function registerIpc(): void {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("A task is already running.");
     const options = validateTaskOptions(raw);
+    if (options.imageIds.length > 0 && !isVisionModel(controller.config.model)) {
+      throw new Error(`Image input requires model ${VALID_MODELS.vision}.`);
+    }
+    const files = options.imageIds.map((id) => {
+      const file = selectedImages.get(id);
+      if (!file) throw new Error("An image selection is no longer available. Choose the image again.");
+      return file;
+    });
+    const images = imageContentPartsFromFiles(files, options.imageDetail);
     taskRunning = true;
     try {
-      return await controller.run(options, {
+      return await controller.run({ ...options, images }, {
         onContent: (content) => sendTaskEvent({ type: "content", content }),
         onLocalActivity: (activity) => sendTaskEvent({ type: "activity", activity }),
         onLocalAction: (action) => new Promise<boolean>((resolvePromise) => {
@@ -172,6 +221,7 @@ function registerIpc(): void {
       });
     } finally {
       taskRunning = false;
+      for (const id of options.imageIds) selectedImages.delete(id);
     }
   });
 
@@ -259,6 +309,7 @@ async function createWindow(show = true): Promise<BrowserWindow> {
     mainWindow = undefined;
     for (const resolvePromise of pendingActions.values()) resolvePromise(false);
     pendingActions.clear();
+    selectedImages.clear();
   });
   await mainWindow.loadFile(rendererFile);
   return mainWindow;
@@ -280,9 +331,14 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const memoryActive = document.querySelector('#page-memory')?.classList.contains('active') === true;
     settingsTab?.click();
     const settingsActive = document.querySelector('#page-settings')?.classList.contains('active') === true;
-    return { memoryActive, settingsActive };
-  })()`) as { memoryActive?: boolean; settingsActive?: boolean };
-  if (!pages.memoryActive || !pages.settingsActive) throw new Error("Renderer page navigation failed.");
+    const visionOption = document.querySelector('#setting-model option[value="deepseek-v4-flash-vision-exp"]') !== null;
+    const imagePicker = document.querySelector('#choose-images') !== null;
+    const modelsMatch = document.querySelector('#task-model')?.value === document.querySelector('#setting-model')?.value;
+    return { memoryActive, settingsActive, visionOption, imagePicker, modelsMatch };
+  })()`) as { memoryActive?: boolean; settingsActive?: boolean; visionOption?: boolean; imagePicker?: boolean; modelsMatch?: boolean };
+  if (!pages.memoryActive || !pages.settingsActive || !pages.visionOption || !pages.imagePicker || !pages.modelsMatch) {
+    throw new Error("Renderer navigation or vision controls failed.");
+  }
 }
 
 const smokeTest = process.argv.includes("--smoke-test");
