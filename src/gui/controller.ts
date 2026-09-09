@@ -23,7 +23,7 @@ import {
 } from "../memory";
 import { shouldUseWeb, type RunResult } from "../orchestrator";
 import { runTask, type RunTaskOptions } from "../service";
-import type { WebMode } from "../types";
+import type { UserImageContentPart, WebMode } from "../types";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -42,6 +42,7 @@ export interface GuiTaskOptions {
   stream?: boolean;
   local?: boolean;
   workspace?: string;
+  images?: UserImageContentPart[];
 }
 
 export interface GuiRunCallbacks {
@@ -188,6 +189,7 @@ export class GuiController {
       toaWorkers: options.toaWorkers ?? 2,
       onContent: this.canStream(options) ? callbacks.onContent : undefined,
       localWorkspace,
+      images: options.images,
     });
   }
 

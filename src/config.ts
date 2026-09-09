@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 export const VALID_MODELS = {
   flash: "deepseek-v4-flash",
   pro: "deepseek-v4-pro",
+  vision: "deepseek-v4-flash-vision-exp",
 } as const;
 
 export type ModelAlias = keyof typeof VALID_MODELS;
@@ -44,7 +45,7 @@ export class ModelConfig implements ModelConfigValues {
 
   validate(): void {
     if (!Object.values(VALID_MODELS).includes(this.model)) {
-      throw new Error("Only deepseek-v4-flash and deepseek-v4-pro are supported.");
+      throw new Error(`Only ${Object.values(VALID_MODELS).join(", ")} are supported.`);
     }
     if (this.reasoningEffort !== "high" && this.reasoningEffort !== "max") {
       throw new Error("reasoning effort must be 'high' or 'max'.");
@@ -134,6 +135,17 @@ export function saveConfig(config: ModelConfig): void {
 }
 
 export function modelId(value: string): ModelId {
-  if (!(value in VALID_MODELS)) throw new Error("model must be 'flash' or 'pro'.");
-  return VALID_MODELS[value as ModelAlias];
+  if (value in VALID_MODELS) return VALID_MODELS[value as ModelAlias];
+  if (Object.values(VALID_MODELS).includes(value as ModelId)) return value as ModelId;
+  throw new Error("model must be 'flash', 'pro', or 'vision'.");
+}
+
+export function isVisionModel(model: ModelId): boolean {
+  return model === VALID_MODELS.vision;
+}
+
+export function assertImageInputSupported(model: ModelId, imageCount: number): void {
+  if (imageCount > 0 && !isVisionModel(model)) {
+    throw new Error(`Image input requires model ${VALID_MODELS.vision}.`);
+  }
 }

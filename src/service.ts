@@ -2,7 +2,7 @@ import { ModelConfig } from "./config";
 import { DeepSeekClient } from "./deepseek";
 import { LocalWorkspace } from "./local";
 import { singleAgent, toaAgent, type RunResult } from "./orchestrator";
-import type { ToolHandler, WebMode } from "./types";
+import type { ToolHandler, UserImageContentPart, WebMode } from "./types";
 
 export interface RunTaskOptions {
   webMode?: WebMode;
@@ -12,6 +12,7 @@ export interface RunTaskOptions {
   localWorkspace?: LocalWorkspace;
   clientFactory?: (apiKey: string) => DeepSeekClient;
   webSearch?: ToolHandler;
+  images?: UserImageContentPart[];
 }
 
 export async function runTask(
@@ -21,7 +22,8 @@ export async function runTask(
   options: RunTaskOptions = {},
 ): Promise<RunResult> {
   const client = options.clientFactory?.(apiKey) ?? new DeepSeekClient(apiKey);
-  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, options.webSearch);
+  const images = options.images ?? [];
+  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, options.webSearch, images);
   return singleAgent(
     client,
     task,
@@ -30,5 +32,6 @@ export async function runTask(
     options.onContent,
     options.localWorkspace,
     options.webSearch,
+    images,
   );
 }

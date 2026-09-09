@@ -1,9 +1,32 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
+export type ImageDetail = "low" | "high" | "original" | "auto";
+
+export interface ChatTextContentPart {
+  type: "text";
+  text: string;
+}
+
+export interface ChatImageUrlContentPart {
+  type: "image_url";
+  image_url: {
+    url: string;
+    detail?: ImageDetail;
+  };
+}
+
+export interface ChatFileContentPart {
+  type: "file";
+  file_id: string;
+}
+
+export type UserImageContentPart = ChatImageUrlContentPart | ChatFileContentPart;
+export type UserContentPart = ChatTextContentPart | UserImageContentPart;
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: string | UserContentPart[] | null;
   reasoning_content?: string | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;

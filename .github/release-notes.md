@@ -1,92 +1,92 @@
-# Ya TypeScript rewrite
+# Ya v0.7.0 — DeepSeek vision
 
-Ya has been rebuilt in strict TypeScript on Node.js. The command-line client and
-the new Electron desktop application share one typed service layer for DeepSeek
-requests, orchestration, memory, web research, and constrained local-workspace
-tools.
+Ya now supports DeepSeek's experimental `deepseek-v4-flash-vision-exp`
+multimodal model in both the command-line client and desktop application. The
+implementation follows DeepSeek's OpenAI-compatible Chat Completions vision
+format and keeps the existing consent, memory, tool, and workspace boundaries.
 
 ## What changed
 
-- Replaced the Python package and Tk GUI with a strict TypeScript codebase and an
-  Electron desktop application.
-- Preserved the existing CLI workflows for questions, bounded Tree of Agents
-  (ToA), local workspace access, memory review, configuration, authentication,
-  and audit-log management.
-- Added typed DeepSeek JSON/SSE handling, bounded retry behavior, tool-call
-  limits, and dependency-injected network adapters.
-- Kept SEA candidate-memory approval, deterministic relevance ranking, and the
-  single bounded ICM evidence follow-up.
-- Added a bilingual English/简体中文 workspace-first desktop UI with task history,
-  relevant memory, local activity metadata, inline file-change approval, memory
-  review, model settings, and audit management.
+- Added the `vision` model alias and persisted
+  `deepseek-v4-flash-vision-exp` configuration.
+- Added repeatable CLI `--image` input for local files, public HTTP(S) URLs,
+  base64 data URLs, and existing DeepSeek `file-api-*` IDs.
+- Added `--image-detail` with `auto`, `low`, `high`, and `original` modes.
+- Added native multi-image selection to the Electron desktop application,
+  including file metadata chips, image-only prompts, and bilingual UI copy.
+- Propagated multimodal user messages through streaming, tool calls, single
+  Agent, Tree of Agents (ToA), root synthesis, and the bounded ICM follow-up.
+- Exported the vision types, model helpers, image inspection utilities, and
+  content-part builders from the npm package.
 
-## Security and compatibility
+## Validation and safety
 
-- Existing `~/.ya/config.json`, `memory.json`, `gui.json`, and audit JSONL files
-  remain compatible with the earlier Python implementation.
-- Local tools remain confined to one physically resolved workspace. Symlink
-  escapes, sensitive-file reads, binary or invalid UTF-8 input, files over
-  1 MiB, shell execution, and deletion are blocked.
-- Every directory creation, text write, and move still requires explicit user
-  approval. Replacement previews use a bounded unified diff, while audit logs
-  contain metadata only and rotate at 1 MiB with three archives.
-- The Electron renderer runs sandboxed with context isolation and no Node.js
-  integration. Its narrow preload bridge reaches only validated IPC handlers;
-  IPC and navigation are restricted to the packaged renderer document.
-- Desktop DeepSeek and web-search traffic use Electron's Chromium network stack
-  so operating-system proxy and trust settings are honored. The CLI uses Node's
-  verified TLS stack.
-- macOS can store the DeepSeek key in Keychain. Linux and Windows use
-  `DEEPSEEK_API_KEY` or a session-only desktop key; plaintext key persistence was
-  not added.
+- JPEG, PNG, GIF, and WebP inputs are detected from their file signatures
+  instead of trusting file extensions or declared MIME types.
+- Non-vision models and images outside `user` messages are rejected before a
+  network request is sent.
+- Ya enforces the 600-image and 8,192-character URL limits. Local and data-URL
+  inputs use a conservative 32 MiB aggregate cap to leave room under
+  DeepSeek's 48 MiB request-body limit.
+- Desktop renderer code receives opaque image IDs and display metadata only;
+  local paths and image bytes stay in the Electron main process. Files are
+  checked again before transmission and selections are cleared after use.
+- ToA preflight now warns that images are resent to workers, root synthesis,
+  and follow-up requests because image tokens are billed per request.
 
-## Development and distribution
+See the official [DeepSeek vision guide](https://api-docs.deepseek.com/guides/vision/)
+for model behavior and service-side limits.
 
-- Source development now requires Node.js 22 or newer and npm. Python is no
-  longer required, and the old Python package entry points have been removed.
-- CI type-checks, tests, and builds on Node.js 22/24 across Linux, macOS, and
-  Windows. A renderer smoke test loads IPC, preload, and the browser UI and
-  verifies page navigation.
-- Releases include standalone CLI executables, macOS Electron ZIPs, a Windows
-  portable executable, a Linux AppImage, an npm tarball, and SHA-256 checksums.
-- macOS and Windows applications remain unsigned; verify the published checksum
-  before overriding an operating-system warning.
+## Compatibility and verification
+
+- Existing v0.6.0 configuration, memory, GUI preferences, Keychain credentials,
+  and audit logs remain compatible.
+- Existing CLI behavior is unchanged when no image is attached.
+- Type checking, all 109 automated tests, the production build, npm package
+  dry-run, and the Electron renderer smoke test pass.
+- macOS and Windows applications remain unsigned; verify `checksums.txt` before
+  overriding an operating-system warning.
 
 ---
 
-# Ya TypeScript 重构
+# Ya v0.7.0 — DeepSeek 视觉能力
 
-Ya 已使用 Node.js 上的严格 TypeScript 完成重构。命令行与新的 Electron 桌面端共享同一套带类型的
-服务层，包括 DeepSeek 请求、任务编排、记忆、网页研究和受限本地工作区工具。
+Ya 现已在命令行与桌面应用中支持 DeepSeek 实验性多模态模型
+`deepseek-v4-flash-vision-exp`。实现遵循 DeepSeek 的 OpenAI 兼容 Chat
+Completions 视觉格式，并保留现有的授权、记忆、工具和工作区安全边界。
 
 ## 主要变化
 
-- 以严格 TypeScript 代码库和 Electron 桌面应用替换 Python 包与 Tk GUI。
-- 保留问答、受限 Tree of Agents（ToA）、本地工作区、记忆审查、配置、认证和审计管理等 CLI 流程。
-- 新增带类型的 DeepSeek JSON/SSE 处理、受限重试、工具调用轮数限制，以及可注入的网络适配层。
-- 保留 SEA 候选记忆审批、确定性相关度排序，以及最多一次的受限 ICM 证据补充。
-- 新增 English/简体中文双语的工作区优先桌面界面，包含任务历史、相关记忆、本地活动元数据、行内文件
-  变更审批、记忆审查、模型设置和审计管理。
+- 新增 `vision` 模型别名和 `deepseek-v4-flash-vision-exp` 持久化配置。
+- CLI 新增可重复的 `--image`，支持本地文件、公开 HTTP(S) URL、base64
+  data URL，以及已有的 DeepSeek `file-api-*` 文件 ID。
+- 新增 `--image-detail`，可选 `auto`、`low`、`high`、`original`。
+- Electron 桌面端新增原生多图片选择、文件元数据标签、纯图片默认提示词和
+  中英文界面文案。
+- 多模态 user 消息已贯通流式输出、工具调用、单 Agent、Tree of Agents
+  （ToA）、根协调合成和受限 ICM 补充请求。
+- npm 包新增视觉类型、模型辅助函数、图片检查工具和内容块构建器导出。
 
-## 安全与兼容
+## 校验与安全
 
-- 现有 `~/.ya/config.json`、`memory.json`、`gui.json` 和审计 JSONL 文件继续兼容旧 Python 实现。
-- 本地工具仍被限制在一个经过物理路径解析的工作区内；符号链接逃逸、敏感文件读取、二进制或非法
-  UTF-8、超过 1 MiB 的文件、shell 执行和删除均会被阻止。
-- 创建目录、写入文本和移动路径仍需逐项获得用户批准。替换预览使用有上限的统一 diff；审计只记录
-  元数据，并在 1 MiB 时轮转、保留三份归档。
-- Electron renderer 启用沙箱和上下文隔离，并关闭 Node.js 集成。窄化的 preload 桥只能访问经过校验的
-  IPC；IPC 来源与页面导航均限制为应用包内唯一的 renderer 文档。
-- 桌面端的 DeepSeek 与网页搜索均使用 Electron Chromium 网络栈，从而遵循操作系统的代理和信任设置；
-  CLI 使用 Node 的证书校验网络栈。
-- macOS 可将 DeepSeek 密钥保存到钥匙串；Linux 与 Windows 使用 `DEEPSEEK_API_KEY` 或仅本次桌面会话
-  有效的密钥，没有新增明文持久化。
+- JPEG、PNG、GIF、WebP 按真实文件签名识别，不信任文件扩展名或声明的
+  MIME 类型。
+- 非视觉模型或出现在 `user` 以外消息中的图片会在网络请求前被拒绝。
+- Ya 执行 600 张图片和 URL 8,192 字符上限。本地文件与 data URL 使用
+  保守的 32 MiB 总量限制，为 DeepSeek 的 48 MiB 请求体上限留出空间。
+- 桌面渲染进程只接收不透明图片 ID 和展示元数据；本地路径与图片字节只
+  留在 Electron 主进程。发送前会再次检查文件，用后会清除选择。
+- ToA 预检会提示图片将重复发送给工作 Agent、根协调 Agent 和后续请求，
+  因为每次请求都会计算图片 Token。
 
-## 开发与发行
+模型行为与服务端限制详见 DeepSeek 官方的
+[视觉理解指南](https://api-docs.deepseek.com/guides/vision/)。
 
-- 源码开发现要求 Node.js 22 或更高版本及 npm；不再需要 Python，旧 Python 包入口已移除。
-- CI 在 Linux、macOS、Windows 上使用 Node.js 22/24 执行类型检查、测试和构建。renderer 烟测会真正
-  加载 IPC、preload 与浏览器界面，并验证页面导航。
-- Release 包含独立 CLI、macOS Electron ZIP、Windows 便携程序、Linux AppImage、npm 压缩包和
-  SHA-256 校验文件。
-- macOS 与 Windows 应用目前仍未签名；绕过操作系统警告前请核对已发布的校验值。
+## 兼容性与验证
+
+- v0.6.0 的配置、记忆、GUI 偏好、钥匙串凭据和审计日志继续兼容。
+- 不附加图片时，现有 CLI 行为不变。
+- TypeScript 类型检查、全部 109 项自动化测试、生产构建、npm 打包预检和
+  Electron renderer 烟测均已通过。
+- macOS 与 Windows 应用仍未签名；绕过系统警告前请先核对
+  `checksums.txt`。

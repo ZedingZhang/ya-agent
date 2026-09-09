@@ -4,8 +4,9 @@ import { Command, CommanderError, Option } from "commander";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { ModelConfig, loadConfig, modelId, saveConfig } from "./config";
+import { assertImageInputSupported, ModelConfig, loadConfig, modelId, saveConfig } from "./config";
 import { DeepSeekClient, DeepSeekError } from "./deepseek";
+import { imageContentPartsFromSources } from "./images";
 import { loadApiKey, saveApiKey } from "./keychain";
 import {
   LocalWorkspace,
@@ -27,7 +28,7 @@ import {
 } from "./memory";
 import { shouldUseWeb, singleAgent, toaAgent, type RunResult } from "./orchestrator";
 import { StreamingMarkdownRenderer, formatOutput } from "./terminal";
-import type { OutputFormat, WebMode } from "./types";
+import type { ImageDetail, OutputFormat, WebMode } from "./types";
 import { VERSION } from "./version";
 
 interface InputStream extends NodeJS.ReadableStream {
@@ -75,6 +76,8 @@ interface AskOptions {
   local: boolean;
   workspace?: string;
   approve: boolean;
+  image: string[];
+  imageDetail: ImageDetail;
 }
 
 const defaultRuntime: CliRuntime = {
@@ -162,6 +165,10 @@ function parseInteger(value: string, label: string): number {
   return parsed;
 }
 
+function collectValue(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
 export async function toaConfirm(options: AskOptions, config: ModelConfig, io: CliIo): Promise<boolean> {
   write(io.stdout, "\nToA preflight\n");
   write(io.stdout, `  model: ${config.model}\n`);
@@ -169,6 +176,9 @@ export async function toaConfirm(options: AskOptions, config: ModelConfig, io: C
   write(io.stdout, `  workers: ${options.toaWorkers} (evidence and risk roles, max 2)\n`);
   write(io.stdout, `  completion token budget: ${config.toaTokenBudget}\n`);
   write(io.stdout, `  timeout: ${config.toaTimeout}s\n`);
+  if (options.image.length > 0) {
+    write(io.stdout, `  images: ${options.image.length} (re-sent to every worker, the root synthesis, and follow-up requests)\n`);
+  }
   if (options.yes) return true;
   if (!io.stdin.isTTY) throw new Error("--toa requires interactive confirmation or --yes in a non-interactive shell.");
   return ["y", "yes"].includes((await io.prompt("Start ToA for this task? [y/N] ")).trim().toLocaleLowerCase("und"));
@@ -241,11 +251,13 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
   if (options.workspace && !options.local) throw new Error("--workspace requires --local.");
   if (options.approve && !options.local) throw new Error("--approve requires --local.");
   const config = resolveConfig(options);
+  assertImageInputSupported(config.model, options.image.length);
   const apiKey = runtime.loadApiKey();
   if (!apiKey) {
     throw new Error("No DeepSeek API key found. Set DEEPSEEK_API_KEY or, on macOS, run: ya auth deepseek");
   }
   if (options.showMemory) showMemory(task, io);
+  const images = imageContentPartsFromSources(options.image, options.imageDetail);
 
   const workspace = options.local
     ? new LocalWorkspace(resolve(options.workspace ? expandHome(options.workspace) : process.cwd()), (action) => localConfirm(action, options.approve, io))
@@ -268,9 +280,9 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
   const client = runtime.createClient(apiKey);
   let result: RunResult;
   if (options.toa && await toaConfirm(options, config, io)) {
-    result = await toaAgent(client, task, config, Number(options.toaWorkers));
+    result = await toaAgent(client, task, config, Number(options.toaWorkers), undefined, images);
   } else {
-    result = await singleAgent(client, task, config, options.web, emit, workspace);
+    result = await singleAgent(client, task, config, options.web, emit, workspace, undefined, images);
   }
   if (renderer) {
     const tail = renderer.finish();
@@ -363,7 +375,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   program.command("ask")
     .description("Run a research task")
     .argument("<task>")
-    .addOption(new Option("--model <model>").choices(["flash", "pro"]))
+    .addOption(new Option("--model <model>").choices(["flash", "pro", "vision"]))
     .addOption(new Option("--thinking <state>").choices(["on", "off"]))
     .addOption(new Option("--reasoning-effort <effort>").choices(["high", "max"]))
     .option("--toa", "Use the bounded Tree of Agents", false)
@@ -379,6 +391,8 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .option("--local", "Allow workspace file tools for this task", false)
     .option("--workspace <path>", "Workspace root for --local (default: current directory)")
     .option("--approve", "Allow local file changes in a non-interactive shell", false)
+    .option("--image <source>", "Attach a local image, HTTP(S) URL, data URL, or file-api-* ID (repeatable)", collectValue, [])
+    .addOption(new Option("--image-detail <detail>").choices(["low", "high", "original", "auto"]).default("auto"))
     .action(async (task: string, options: AskOptions) => ask(task, options, io, runtime));
 
   program.command("auth")

@@ -6,6 +6,7 @@ import { main, localConfirm, type CliIo } from "../src/cli";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
+import type { ChatMessage } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
 class CaptureStream extends Writable {
@@ -89,6 +90,14 @@ describe("CLI", () => {
     expect(capture.stdout.output).toContain("ask");
   });
 
+  it("advertises the vision model and repeatable image input", async () => {
+    const capture = fakeIo();
+    expect(await main(["ask", "--help"], context(capture.io))).toBe(0);
+    expect(capture.stdout.output).toContain("vision");
+    expect(capture.stdout.output).toContain("--image <source>");
+    expect(capture.stdout.output).toContain("--image-detail <detail>");
+  });
+
   it("sets validated configuration values", async () => {
     const capture = fakeIo();
     expect(await main(["config", "set", "model", "pro"], { io: capture.io })).toBe(0);
@@ -144,6 +153,52 @@ describe("CLI", () => {
     const pipe = fakeIo(false);
     expect(await main(["ask", "test", "--no-feedback"], context(pipe.io))).toBe(0);
     expect(pipe.stdout.output).toContain("## Title");
+  });
+
+  it("sends local images as vision content blocks with the selected detail", async () => {
+    const path = join(home.path, "chart.png");
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    writeFileSync(path, png);
+    let seen: ChatMessage[] = [];
+    const client = {
+      completeStream: async () => modelReply("unused"),
+      runWithTools: async (messages: ChatMessage[]) => {
+        seen = messages;
+        return modelReply("described");
+      },
+    } as unknown as DeepSeekClient;
+    const capture = fakeIo(false);
+    expect(await main([
+      "ask",
+      "Explain the chart",
+      "--model",
+      "vision",
+      "--image",
+      path,
+      "--image-detail",
+      "high",
+      "--no-feedback",
+    ], context(capture.io, client))).toBe(0);
+    expect(seen[1]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Explain the chart" },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${png.toString("base64")}`, detail: "high" } },
+      ],
+    });
+  });
+
+  it("rejects image input before calling a text-only model", async () => {
+    const capture = fakeIo(false);
+    const client = fakeClient();
+    expect(await main([
+      "ask",
+      "Explain the chart",
+      "--image",
+      "does-not-need-to-exist.png",
+      "--no-feedback",
+    ], context(capture.io, client))).toBe(2);
+    expect(capture.stderr.output).toContain("deepseek-v4-flash-vision-exp");
   });
 
   it("honors explicit Markdown and terminal output formats", async () => {
