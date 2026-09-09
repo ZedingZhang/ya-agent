@@ -6,7 +6,8 @@ import type {
   ToolDefinition,
   ToolHandler,
 } from "./types";
-import { ModelConfig } from "./config";
+import { assertImageInputSupported, ModelConfig } from "./config";
+import { assertImageCount } from "./images";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
 export const MAX_TOOL_CALL_ROUNDS = 6;
@@ -66,6 +67,20 @@ function replyFromBody(body: unknown): ModelReply {
   };
 }
 
+function validateImageMessages(messages: ChatMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    const messageImageCount = message.content.filter((part) => part.type === "image_url" || part.type === "file").length;
+    if (messageImageCount > 0 && message.role !== "user") {
+      throw new Error("DeepSeek image content is supported only in user messages.");
+    }
+    count += messageImageCount;
+  }
+  assertImageCount(count);
+  return count;
+}
+
 export class DeepSeekClient {
   readonly apiKey: string;
   private readonly fetcher: FetchLike;
@@ -84,6 +99,7 @@ export class DeepSeekClient {
     tools: ToolDefinition[] | undefined,
     stream: boolean,
   ): DeepSeekPayload {
+    assertImageInputSupported(config.model, validateImageMessages(messages));
     const payload: DeepSeekPayload = {
       model: config.model,
       messages,

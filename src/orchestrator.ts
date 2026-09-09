@@ -1,8 +1,9 @@
 import { LOCAL_TOOLS, LocalWorkspace } from "./local";
-import { ModelConfig } from "./config";
+import { assertImageInputSupported, ModelConfig } from "./config";
 import type { ModelReply } from "./deepseek";
+import { assertImageCount } from "./images";
 import { relevantContext } from "./memory";
-import type { ChatMessage, TokenUsage, ToolDefinition, ToolHandler, WebMode } from "./types";
+import type { ChatMessage, TokenUsage, ToolDefinition, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search, WEB_SEARCH_TOOL } from "./web";
 
 export const CORE_PROMPT = `You are Ya, a consent-first personal research assistant.
@@ -50,13 +51,21 @@ export interface AgentClient {
   ): Promise<ModelReply>;
 }
 
-export function messagesForTask(task: string, extraInstruction = "", localEnabled = false): ChatMessage[] {
+export function messagesForTask(
+  task: string,
+  extraInstruction = "",
+  localEnabled = false,
+  images: UserImageContentPart[] = [],
+): ChatMessage[] {
   const memory = relevantContext(task);
   const context = memory ? `\nApproved relevant memory:\n${memory}` : "";
   const localContext = localEnabled ? `\n${LOCAL_PROMPT}` : "";
   return [
     { role: "system", content: `${CORE_PROMPT}${context}${localContext}\n${extraInstruction}` },
-    { role: "user", content: task },
+    {
+      role: "user",
+      content: images.length > 0 ? [{ type: "text", text: task }, ...images] : task,
+    },
   ];
 }
 
@@ -75,6 +84,7 @@ async function runAgent(
   webMode: WebMode = "auto",
   localWorkspace?: LocalWorkspace,
   webSearch: ToolHandler = search,
+  images: UserImageContentPart[] = [],
 ): Promise<ModelReply> {
   const useWeb = shouldUseWeb(task, webMode);
   let completeInstruction = instruction;
@@ -92,7 +102,7 @@ async function runAgent(
     Object.assign(handlers, localWorkspace.toolHandlers);
   }
   return client.runWithTools(
-    messagesForTask(task, completeInstruction, Boolean(localWorkspace)),
+    messagesForTask(task, completeInstruction, Boolean(localWorkspace), images),
     config,
     maxTokens,
     tools.length > 0 ? tools : undefined,
@@ -108,15 +118,18 @@ export async function singleAgent(
   onContent?: (content: string) => void,
   localWorkspace?: LocalWorkspace,
   webSearch: ToolHandler = search,
+  images: UserImageContentPart[] = [],
 ): Promise<RunResult> {
+  assertImageCount(images.length);
+  assertImageInputSupported(config.model, images.length);
   const reserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const maxTokens = Math.min(4_096, config.toaTokenBudget - reserve);
   if (onContent && !localWorkspace && !shouldUseWeb(task, webMode)) {
-    const reply = await client.completeStream(messagesForTask(task), config, maxTokens, onContent);
+    const reply = await client.completeStream(messagesForTask(task, "", false, images), config, maxTokens, onContent);
     return { content: reply.content, mode: "single", usage: reply.usage };
   }
-  const reply = await runAgent(client, task, config, maxTokens, "", webMode, localWorkspace, webSearch);
-  return applyIcm(client, task, config, { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch);
+  const reply = await runAgent(client, task, config, maxTokens, "", webMode, localWorkspace, webSearch, images);
+  return applyIcm(client, task, config, { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch, images);
 }
 
 export async function toaAgent(
@@ -125,8 +138,11 @@ export async function toaAgent(
   config: ModelConfig,
   workers: number,
   webSearch: ToolHandler = search,
+  images: UserImageContentPart[] = [],
 ): Promise<RunResult> {
   if (workers !== 1 && workers !== 2) throw new Error("ToA workers must be 1 or 2.");
+  assertImageCount(images.length);
+  assertImageInputSupported(config.model, images.length);
   const roles = (["evidence", "risk"] as const).slice(0, workers);
   const icmReserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const workingBudget = config.toaTokenBudget - icmReserve;
@@ -137,7 +153,7 @@ export async function toaAgent(
   await Promise.all(roles.map(async (role) => {
     try {
       const reply = await withTimeout(
-        runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch),
+        runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images),
         config.toaTimeout * 1_000,
       );
       packets.push({ role, content: reply.content, usage: reply.usage });
@@ -150,7 +166,7 @@ export async function toaAgent(
 Treat a worker's unsupported statement as an open question. Separate evidence, inference,
 risks, and remaining uncertainty. Include cited URLs from the packets when available.
 Evidence packets:\n${JSON.stringify(packets)}`;
-  const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch);
+  const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch, images);
   const usage: TokenUsage = { ...reply.usage, worker_count: workers };
   return applyIcm(
     client,
@@ -159,6 +175,7 @@ Evidence packets:\n${JSON.stringify(packets)}`;
     { content: reply.content, mode: "toa", usage, partial: failures.length > 0 },
     icmReserve,
     webSearch,
+    images,
   );
 }
 
@@ -173,12 +190,13 @@ async function applyIcm(
   result: RunResult,
   reserve: number,
   webSearch: ToolHandler,
+  images: UserImageContentPart[],
 ): Promise<RunResult> {
   if (!icmFollowUpNeeded(result.content)) return result;
   const instruction = `The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n${result.content}`;
-  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch);
+  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images);
   return {
     ...result,
     content: `${result.content.replace(/\[ICM_GAP\]/iu, "")}\n\nEvidence supplement:\n${reply.content}`,
