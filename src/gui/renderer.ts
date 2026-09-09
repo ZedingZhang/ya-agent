@@ -1,6 +1,14 @@
 type Language = "en" | "zh-CN";
 type MemoryStatus = "candidate" | "approved" | "rejected" | "revoked";
 type MemoryKind = "preference" | "procedure" | "knowledge";
+type ImageDetail = "low" | "high" | "original" | "auto";
+
+interface SelectedImage {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+}
 
 interface MemoryCard {
   id: string;
@@ -21,7 +29,7 @@ interface AppState {
   stream: boolean;
   hasApiKey: boolean;
   config: {
-    model: "deepseek-v4-flash" | "deepseek-v4-pro";
+    model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp";
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     toaTokenBudget: number;
@@ -60,6 +68,8 @@ interface RunResult {
 interface YaRendererBridge {
   state(): Promise<AppState>;
   chooseWorkspace(): Promise<string | undefined>;
+  chooseImages(): Promise<SelectedImage[] | undefined>;
+  clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
   saveSettings(settings: Record<string, unknown>): Promise<AppState>;
   runTask(options: Record<string, unknown>): Promise<RunResult>;
@@ -94,6 +104,9 @@ const TEXT = {
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
+    attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
+    visionOnly: "Select the vision model in Settings to attach images.", noImages: "No images attached.",
+    defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
@@ -112,6 +125,9 @@ const TEXT = {
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
+    attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
+    visionOnly: "请先在设置中选择视觉模型再添加图片。", noImages: "尚未添加图片。",
+    defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
 } as const;
 
@@ -123,6 +139,8 @@ let activeAnswerText = "";
 let pendingAction: { id: string; action: LocalAction } | undefined;
 let activities: LocalActivity[] = [];
 let lastAnswer = "";
+let selectedImages: SelectedImage[] = [];
+const VISION_MODEL = "deepseek-v4-flash-vision-exp";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -166,6 +184,7 @@ function applyLanguage(): void {
   renderWorkspaceLabel();
   renderActivities();
   renderPendingAction();
+  renderImages();
   if (!activeAnswer) setStatus(t("ready"));
 }
 
@@ -198,6 +217,65 @@ async function chooseWorkspace(): Promise<void> {
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   }
+}
+
+function visionEnabled(): boolean {
+  return state.config.model === VISION_MODEL;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(1)} KiB`;
+  return `${(bytes / (1_024 * 1_024)).toFixed(1)} MiB`;
+}
+
+function renderImages(): void {
+  const list = element<HTMLDivElement>("image-list");
+  const running = document.body.classList.contains("task-running");
+  element<HTMLButtonElement>("choose-images").disabled = running || !visionEnabled();
+  element<HTMLButtonElement>("clear-images").disabled = running || selectedImages.length === 0;
+  element<HTMLSelectElement>("image-detail").disabled = running || !visionEnabled() || selectedImages.length === 0;
+  list.replaceChildren();
+  if (!visionEnabled()) {
+    list.textContent = t("visionOnly");
+    list.className = "image-list muted";
+    return;
+  }
+  if (selectedImages.length === 0) {
+    list.textContent = t("noImages");
+    list.className = "image-list muted";
+    return;
+  }
+  list.className = "image-list";
+  for (const image of selectedImages) {
+    const chip = document.createElement("span");
+    chip.className = "image-chip";
+    const name = document.createElement("span");
+    name.textContent = image.name;
+    name.title = `${image.mimeType} · ${formatBytes(image.size)}`;
+    const size = document.createElement("span");
+    size.textContent = formatBytes(image.size);
+    chip.append(name, size);
+    list.append(chip);
+  }
+}
+
+async function chooseImages(): Promise<void> {
+  try {
+    const images = await bridge.chooseImages();
+    if (!images) return;
+    selectedImages = images;
+    renderImages();
+    setStatus(t("ready"));
+  } catch (error) {
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  }
+}
+
+async function clearImages(): Promise<void> {
+  selectedImages = [];
+  renderImages();
+  await bridge.clearImages();
 }
 
 async function renderFiles(): Promise<void> {
@@ -254,14 +332,27 @@ function fileRow(name: string, type: string): HTMLButtonElement {
   return row;
 }
 
-function appendTask(task: string): HTMLElement {
+function appendTask(task: string, images: SelectedImage[]): HTMLElement {
   const timeline = element<HTMLDivElement>("timeline");
   element<HTMLDivElement>("timeline-empty").hidden = true;
   const turn = document.createElement("article");
   turn.className = "turn";
   const prompt = document.createElement("div");
   prompt.className = "prompt-bubble";
-  prompt.textContent = task;
+  const promptText = document.createElement("div");
+  promptText.textContent = task;
+  prompt.append(promptText);
+  if (images.length > 0) {
+    const imageList = document.createElement("div");
+    imageList.className = "prompt-images";
+    for (const image of images) {
+      const label = document.createElement("span");
+      label.className = "prompt-image";
+      label.textContent = `▧ ${image.name}`;
+      imageList.append(label);
+    }
+    prompt.append(imageList);
+  }
   const answer = document.createElement("div");
   answer.className = "answer-card prose busy-answer";
   answer.setAttribute("aria-live", "polite");
@@ -274,7 +365,8 @@ function appendTask(task: string): HTMLElement {
 
 async function runTask(): Promise<void> {
   const input = element<HTMLTextAreaElement>("task-input");
-  const task = input.value.trim();
+  const taskImages = [...selectedImages];
+  const task = input.value.trim() || (taskImages.length > 0 ? t("defaultVisionTask") : "");
   if (!task) {
     input.focus();
     return;
@@ -289,15 +381,20 @@ async function runTask(): Promise<void> {
     setStatus(`${t("taskError")}: Local workspace mode cannot be used with Tree of Agents.`, "error");
     return;
   }
+  if (taskImages.length > 0 && !visionEnabled()) {
+    setStatus(`${t("taskError")}: ${t("visionOnly")}`, "error");
+    return;
+  }
   if (toa) {
     const config = state.config;
     const thinking = config.thinkingEnabled ? t("on") : t("off");
-    const message = `${t("confirmToa")}\n\n${config.model}\n${t("thinking")}: ${thinking} (${config.reasoningEffort})\n${t("workers")}: ${element<HTMLSelectElement>("toa-workers").value}\n${t("budget")}: ${config.toaTokenBudget}\n${t("timeout")}: ${config.toaTimeout}s`;
+    const imageLine = taskImages.length > 0 ? `\n${t("images")}: ${taskImages.length} (${t("imagesToa")})` : "";
+    const message = `${t("confirmToa")}\n\n${config.model}\n${t("thinking")}: ${thinking} (${config.reasoningEffort})\n${t("workers")}: ${element<HTMLSelectElement>("toa-workers").value}\n${t("budget")}: ${config.toaTokenBudget}\n${t("timeout")}: ${config.toaTimeout}s${imageLine}`;
     if (!window.confirm(message)) return;
   }
 
   input.value = "";
-  activeAnswer = appendTask(task);
+  activeAnswer = appendTask(task, taskImages);
   activeAnswerText = "";
   lastAnswer = "";
   activities = [];
@@ -314,6 +411,8 @@ async function runTask(): Promise<void> {
       stream: state.stream,
       local,
       workspace: state.validWorkspace,
+      imageIds: taskImages.map((image) => image.id),
+      imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
     });
     activeAnswerText = result.content;
     lastAnswer = result.content;
@@ -334,6 +433,8 @@ async function runTask(): Promise<void> {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
     activeAnswer = undefined;
+    selectedImages = [];
+    void bridge.clearImages().catch(() => undefined);
     setRunning(false);
   }
 }
@@ -342,6 +443,7 @@ function setRunning(running: boolean): void {
   element<HTMLButtonElement>("send-button").disabled = running;
   element<HTMLTextAreaElement>("task-input").disabled = running;
   document.body.classList.toggle("task-running", running);
+  renderImages();
 }
 
 async function renderRelevant(task: string): Promise<void> {
@@ -504,6 +606,7 @@ function fillSettings(): void {
   element<HTMLSpanElement>("api-state").textContent = state.hasApiKey ? t("apiReady") : t("apiMissing");
   element<HTMLSpanElement>("audit-state").textContent = `${state.auditLogCount} · ${state.auditLogBytes} bytes`;
   toggleReasoning();
+  renderImages();
 }
 
 function toggleReasoning(): void {
@@ -524,6 +627,7 @@ async function saveSettings(): Promise<void> {
       ...(apiKey.trim() ? { apiKey, keyStorage: state.platform === "darwin" && element<HTMLInputElement>("setting-keychain").checked ? "keychain" : "session" } : {}),
     });
     element<HTMLInputElement>("setting-api-key").value = "";
+    if (!visionEnabled() && selectedImages.length > 0) await clearImages();
     applyLanguage();
     fillSettings();
     renderMemory();
@@ -691,6 +795,8 @@ function registerEvents(): void {
   });
   element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
   element<HTMLButtonElement>("refresh-files").addEventListener("click", () => void renderFiles());
+  element<HTMLButtonElement>("choose-images").addEventListener("click", () => void chooseImages());
+  element<HTMLButtonElement>("clear-images").addEventListener("click", () => void clearImages());
   element<HTMLButtonElement>("send-button").addEventListener("click", () => void runTask());
   element<HTMLTextAreaElement>("task-input").addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {

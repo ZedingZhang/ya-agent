@@ -4,6 +4,8 @@ import type { SettingsUpdate, RendererTaskOptions, TaskEvent, YaBridge } from ".
 const bridge: YaBridge = {
   state: () => ipcRenderer.invoke("state:get"),
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
+  chooseImages: () => ipcRenderer.invoke("images:choose"),
+  clearImages: () => ipcRenderer.invoke("images:clear"),
   workspaceEntries: (path = ".") => ipcRenderer.invoke("workspace:entries", path),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
   runTask: (options: RendererTaskOptions) => ipcRenderer.invoke("task:run", options),

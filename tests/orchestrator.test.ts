@@ -12,12 +12,17 @@ import {
   type AgentClient,
 } from "../src/orchestrator";
 import type { ModelReply } from "../src/deepseek";
-import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
+import type { ChatMessage, ToolDefinition, ToolHandler, UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
 function reply(content: string): ModelReply {
   return { content, toolCalls: [], usage: {}, assistantMessage: { role: "assistant", content } };
 }
+
+const image: UserImageContentPart = {
+  type: "image_url",
+  image_url: { url: "https://example.com/chart.png", detail: "high" },
+};
 
 class FakeClient implements AgentClient {
   streamed = false;
@@ -76,6 +81,29 @@ describe("agent orchestration", () => {
     expect(messages[0]!.content).not.toContain(unrelated.text);
   });
 
+  it("builds a multimodal user message without placing images in system messages", () => {
+    const messages = messagesForTask("Explain the chart", "", false, [image]);
+    expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.content).toBeTypeOf("string");
+    expect(messages[1]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "Explain the chart" }, image],
+    });
+  });
+
+  it("rejects image content unless the configured model supports vision", async () => {
+    await expect(singleAgent(
+      new FakeClient(),
+      "Explain the chart",
+      new ModelConfig(),
+      "off",
+      undefined,
+      undefined,
+      undefined,
+      [image],
+    )).rejects.toThrow(/deepseek-v4-flash-vision-exp/u);
+  });
+
   it("buffers local mode and combines local and web tools", async () => {
     const root = join(home.path, "workspace");
     mkdirSync(root);
@@ -124,6 +152,22 @@ describe("agent orchestration", () => {
     expect(result).toMatchObject({ content: "synthesis", mode: "toa", partial: false });
     expect(result.usage.worker_count).toBe(2);
     expect(client.calls).toHaveLength(3);
+  });
+
+  it("propagates vision input to each ToA worker and root synthesis", async () => {
+    const client = new FakeClient();
+    await toaAgent(
+      client,
+      "Explain the chart",
+      new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }),
+      2,
+      async () => "[]",
+      [image],
+    );
+    expect(client.calls).toHaveLength(3);
+    for (const call of client.calls) {
+      expect(call.messages[1]!.content).toEqual([{ type: "text", text: "Explain the chart" }, image]);
+    }
   });
 
   it("marks synthesis partial when a worker fails", async () => {

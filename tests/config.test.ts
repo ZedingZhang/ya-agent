@@ -1,6 +1,14 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ModelConfig, configPath, loadConfig, modelId, saveConfig } from "../src/config";
+import {
+  ModelConfig,
+  assertImageInputSupported,
+  configPath,
+  isVisionModel,
+  loadConfig,
+  modelId,
+  saveConfig,
+} from "../src/config";
 import { tempHome, type TempHome } from "./helpers";
 
 describe("configuration", () => {
@@ -53,5 +61,14 @@ describe("configuration", () => {
     expect(() => new ModelConfig({ toaTokenBudget: 999 }).validate()).toThrow(/between 1000 and 16000/u);
     expect(() => new ModelConfig({ toaTimeout: 181 }).validate()).toThrow(/between 30 and 180/u);
     expect(() => modelId("legacy")).toThrow(/flash.*pro/u);
+  });
+
+  it("accepts the experimental vision model by alias or full model ID", () => {
+    const vision = "deepseek-v4-flash-vision-exp";
+    expect(modelId("vision")).toBe(vision);
+    expect(modelId(vision)).toBe(vision);
+    expect(isVisionModel(modelId("vision"))).toBe(true);
+    expect(() => assertImageInputSupported(modelId("vision"), 1)).not.toThrow();
+    expect(() => assertImageInputSupported(modelId("flash"), 1)).toThrow(vision);
   });
 });

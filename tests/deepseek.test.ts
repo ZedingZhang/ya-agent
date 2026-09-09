@@ -59,6 +59,48 @@ describe("DeepSeek client", () => {
     expect(seen).not.toHaveProperty("reasoning_effort");
   });
 
+  it("preserves vision content blocks in an OpenAI-compatible request", async () => {
+    let seen: Record<string, unknown> = {};
+    const fetcher: FetchLike = async (_url, init) => {
+      seen = payloadFrom(init);
+      return jsonResponse({ choices: [{ message: { content: "a chart" } }] });
+    };
+    const messages = [{
+      role: "user" as const,
+      content: [
+        { type: "text" as const, text: "What is shown?" },
+        { type: "image_url" as const, image_url: { url: "https://example.com/chart.png", detail: "original" as const } },
+        { type: "file" as const, file_id: "file-api-example" },
+      ],
+    }];
+    await new DeepSeekClient("key", fetcher).complete(
+      messages,
+      new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }),
+      100,
+    );
+    expect(seen).toMatchObject({ model: "deepseek-v4-flash-vision-exp", messages });
+  });
+
+  it("rejects vision content before sending it to a text-only model", async () => {
+    const fetcher = vi.fn<FetchLike>();
+    await expect(new DeepSeekClient("key", fetcher).complete(
+      [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.com/chart.png" } }] }],
+      new ModelConfig(),
+      100,
+    )).rejects.toThrow(/deepseek-v4-flash-vision-exp/u);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects images outside user messages before sending a request", async () => {
+    const fetcher = vi.fn<FetchLike>();
+    await expect(new DeepSeekClient("key", fetcher).complete(
+      [{ role: "system", content: [{ type: "image_url", image_url: { url: "https://example.com/chart.png" } }] }],
+      new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }),
+      100,
+    )).rejects.toThrow(/only in user messages/u);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("allows six tool rounds before the final response", async () => {
     const toolCall: ToolCall = { id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } };
     const responses = Array.from({ length: MAX_TOOL_CALL_ROUNDS }, () => ({ choices: [{ message: { role: "assistant", tool_calls: [toolCall] } }] }));

@@ -11,6 +11,7 @@ import {
 import { initialWindowGeometry, initialWorkbenchColumns } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
+import type { UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
 describe("GUI controller", () => {
@@ -91,6 +92,23 @@ describe("GUI controller", () => {
     await controller.run({ task: "latest news" }, { onContent: () => undefined });
     expect(calls[0]![3]!.onContent).toBeTypeOf("function");
     expect(calls[1]![3]!.onContent).toBeUndefined();
+  });
+
+  it("passes selected vision content through the shared task service boundary", async () => {
+    const calls: Parameters<TaskRunner>[] = [];
+    const runner: TaskRunner = async (...arguments_) => {
+      calls.push(arguments_);
+      return { content: "answer", mode: "single", usage: {} };
+    };
+    const images: UserImageContentPart[] = [{
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,iVBORw0KGgo=", detail: "auto" },
+    }];
+    const controller = new GuiController(runner);
+    controller.setSessionApiKey("key");
+    controller.saveModelConfig(new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }));
+    await controller.run({ task: "Explain the image", images });
+    expect(calls[0]![3]!.images).toEqual(images);
   });
 
   it("rejects local plus ToA and missing local workspaces", async () => {
