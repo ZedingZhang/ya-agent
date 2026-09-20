@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -357,6 +358,15 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const workspaceTab = document.querySelector('[data-page="workspace"]');
     memoryTab?.click();
     const memoryActive = document.querySelector('#page-memory')?.classList.contains('active') === true;
+    const formCard = document.querySelector('#page-memory .form-card');
+    const cardBottom = formCard instanceof HTMLElement ? formCard.getBoundingClientRect().bottom : 0;
+    const evidenceInput = document.querySelector('#candidate-evidence');
+    const createButton = document.querySelector('#memory-create');
+    const evidenceOverflow = evidenceInput instanceof HTMLElement
+      ? Math.round(evidenceInput.getBoundingClientRect().bottom - cardBottom) : 0;
+    const createOverflow = createButton instanceof HTMLElement
+      ? Math.round(createButton.getBoundingClientRect().bottom - cardBottom) : 0;
+    const formOverflow = Math.max(evidenceOverflow, createOverflow);
     settingsTab?.click();
     const settingsActive = document.querySelector('#page-settings')?.classList.contains('active') === true;
     const legacySettingsModelControls = document.querySelector('#setting-model, #setting-reasoning') !== null;
@@ -368,7 +378,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
-    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls };
+    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls, formOverflow };
   })()`) as {
     memoryActive?: boolean;
     settingsActive?: boolean;
@@ -377,11 +387,27 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     visionOption?: boolean;
     imagePicker?: boolean;
     workspaceControls?: boolean;
+    formOverflow?: number;
   };
   if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
     || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls) {
     throw new Error("Renderer navigation or vision controls failed.");
   }
+  if ((pages.formOverflow ?? 0) > 0) {
+    throw new Error(`The memory candidate form overflows its card by ${pages.formOverflow}px.`);
+  }
+}
+
+/** YA_SMOKE_CAPTURE=<file> writes a PNG of the memory page while running the smoke test. */
+async function captureMemoryPage(window: BrowserWindow, target: string): Promise<void> {
+  await window.webContents.executeJavaScript(`(() => {
+    document.querySelectorAll('.page').forEach((node) => node.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach((node) => node.classList.remove('active'));
+    document.querySelector('[data-page="memory"]')?.classList.add('active');
+    document.querySelector('#page-memory')?.classList.add('active');
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  writeFileSync(target, (await window.webContents.capturePage()).toPNG());
 }
 
 const smokeTest = process.argv.includes("--smoke-test");
@@ -391,6 +417,7 @@ app.whenReady().then(async () => {
   if (smokeTest) {
     const window = await createWindow(false);
     await verifyRenderer(window);
+    if (process.env.YA_SMOKE_CAPTURE) await captureMemoryPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();
     app.quit();
