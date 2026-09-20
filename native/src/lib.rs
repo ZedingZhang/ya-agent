@@ -13,4 +13,5 @@ mod keychain;
 mod local;
 mod memory;
 mod orchestrator;
+mod terminal;
 mod web;

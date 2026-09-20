@@ -92,6 +92,17 @@ Two parts of `local.ts` are not ported, on purpose:
   The output is presentation text whose exact bytes the approval UI shows;
   matching `createTwoFilesPatch` byte for byte would mean reimplementing that
   package's Myers tie-breaking rather than porting a decision of Ya's own.
+- **The front ends.** `cli.ts` is Commander wiring over argv, stdout and
+  readline prompts; `service.ts` is 37 lines that pick between `singleAgent` and
+  `toaAgent` and construct the client. Neither holds a decision that the desktop
+  also needs, and porting argv parsing and terminal prompts to Rust would be a
+  rewrite of the front end rather than of the shared core.
+- **The Markdown parsing primitives** (`stripTerminalControls`, `tableCells`,
+  `isTableSeparator` and the exported patterns). `gui/markdown.ts` parses with
+  them line by line into DOM nodes, so they are shared by both front ends rather
+  than owned by the terminal renderer; moving them behind the boundary would add
+  a call per line. The parity harness still compares them against the Rust
+  renderer's internal copies.
 
 ## Milestones
 
@@ -106,9 +117,9 @@ Two parts of `local.ts` are not ported, on purpose:
 | 6 | `deepseek` — request body, reply parsing, stream chunks, SSE framing | done: ported, parity verified pre-switch, TS delegates; transport and the retry loop stay in TS |
 | 7 | `orchestrator` — prompts, token budgets, ICM rules | done: ported, parity verified pre-switch, TS delegates; the agent calls stay in TS |
 | 8 | `local` — sensitive-name policy, text decoding, audit tail, limits, tool contracts | done: ported, parity verified pre-switch, TS delegates; the confinement check and the diff stay in TS (see below) |
-| 9 | `service` + CLI front end | next |
-| 9 | `service` + CLI front end | not started |
-| 10 | Packaging: prebuilt bindings per platform, `electron-builder` + `pkg` | not started |
+| 9 | `terminal` — Markdown rendered as terminal text, streaming renderer | done: ported, parity verified pre-switch, TS delegates; the shared parsing primitives stay in TS |
+| 10 | `service` + `cli` front end | front ends stay in TS (see below) |
+| 11 | Packaging: prebuilt bindings per platform, `electron-builder` + `pkg` | next |
 
 The TypeScript modules stay in place and keep working while each port lands, so
 the branch is never in a half-broken state.

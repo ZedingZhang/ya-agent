@@ -24,6 +24,17 @@ export declare class SseReader {
   finish(): string | null
 }
 
+/**
+ * Streaming Markdown for a token-by-token answer. A line is held back until
+ * the next one arrives, because a table separator only becomes recognisable
+ * once the following line is known.
+ */
+export declare class StreamingMarkdownRenderer {
+  constructor(color?: boolean | undefined | null)
+  write(chunk: string): string
+  finish(): string
+}
+
 export declare function assertImageCount(count: number): void
 
 /** Rejects a text file that is too large to read or replace. */
@@ -99,6 +110,8 @@ export declare function isSchemeUrl(source: string): boolean
  */
 export declare function isSensitiveFile(loweredBasename: string, pathParts: Array<string>): boolean
 
+export declare function isTableSeparator(line: string): boolean
+
 export declare function isVisionModel(model: string): boolean
 
 export declare function keychainAccount(): string
@@ -147,6 +160,8 @@ export declare function parseSearchResults(html: string): Array<SearchResult>
  */
 export declare function parseStreamChunk(data: string): StreamChunk
 
+export declare function renderMarkdown(text: string, color: boolean): string
+
 /** Resolves an alias, a current model id, or one retired by the V4.1 line-up. */
 export declare function resolveModel(value: string): string
 
@@ -178,7 +193,11 @@ export interface StreamChunk {
 /** Removes the first ICM marker, as `replace` with a non-global pattern does. */
 export declare function stripIcmMarker(content: string): string
 
+export declare function stripTerminalControls(text: string): string
+
 export declare function supportedModels(): Array<string>
+
+export declare function tableCells(line: string): Array<string>
 
 /**
  * Keeps the last `limit` bytes from the first complete line onwards, so an

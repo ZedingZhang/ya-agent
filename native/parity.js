@@ -36,6 +36,7 @@ const ts = {
   deepseek: require(path.join(tsRoot, "deepseek.js")),
   orchestrator: require(path.join(tsRoot, "orchestrator.js")),
   local: require(path.join(tsRoot, "local.js")),
+  terminal: require(path.join(tsRoot, "terminal.js")),
 };
 const native = require(bindingPath);
 
@@ -931,6 +932,131 @@ check("golden: NUL byte is binary", capture(() => native.decodeTextFile(Buffer.f
 check("golden: invalid utf-8", capture(() => native.decodeTextFile(Buffer.from([0xff, 0xfe]))), { error: "Only UTF-8 text files can be read in local mode." });
 check("golden: audit tail starts on a line boundary", native.tailCompleteLines(Buffer.from("first\nsecond\nthird\n"), 10).toString("utf8"), "third\n");
 check("golden: audit tail with no newline is dropped", native.tailCompleteLines(Buffer.from("no newline here"), 5).length, 0);
+
+// --- terminal: markdown rendering and streaming ---------------------------------
+
+const terminalSamples = [
+  "# Heading",
+  "### Trailing hashes ###",
+  "   # Indented heading",
+  "####### too many hashes",
+  "---",
+  "* * *",
+  "___",
+  "- item",
+  "+ item",
+  "* item",
+  "  - nested item",
+  "1. first",
+  "42) second",
+  "> quote",
+  ">no space quote",
+  "plain text",
+  "",
+  "```",
+  "code line",
+  "# not a heading inside code",
+  "```",
+  "after the fence",
+  "**bold** and *italic* and _underscored_",
+  "a*b*c not italic **but this is**",
+  "**bold with *inner* stars**",
+  "`inline code` and **[bold link](https://e.com)**",
+  "[label](https://example.com)",
+  "![alt](https://example.com/a.png)",
+  "![alt](https://e.com/a.png) and [link](https://e.com)",
+  "| head | two |",
+  "| --- | --- |",
+  "| a | b |",
+  "| c | d |",
+  "| head | two |",
+  "| --- | --- |",
+  "text before",
+  "esc\u001b[31mred\u001b[0m text",
+  "bell\u0007here",
+  "multi\u0000nul",
+  "line one\r\nline two\r\n",
+  "lone\rcarriage",
+  "trailing newline\n",
+  "no trailing newline",
+];
+
+for (const sample of terminalSamples) {
+  const label = sample.length > 40 ? `${sample.slice(0, 37)}...` : sample;
+  check(`stripTerminalControls(${JSON.stringify(label)})`, native.stripTerminalControls(sample), ts.terminal.stripTerminalControls(sample));
+  for (const color of [false, true]) {
+    check(
+      `renderMarkdown(${JSON.stringify(label)}, color=${color})`,
+      native.renderMarkdown(sample, color),
+      ts.terminal.renderMarkdown(sample, color),
+    );
+  }
+}
+
+const cellSamples = ["| a | b |", "a|b", "  |  x  |  y  |  ", "|", "", "one", "| a | b", "a | b |"];
+for (const sample of cellSamples) {
+  check(`tableCells(${JSON.stringify(sample)})`, native.tableCells(sample), ts.terminal.tableCells(sample));
+  check(`isTableSeparator(${JSON.stringify(sample)})`, native.isTableSeparator(sample), ts.terminal.isTableSeparator(sample));
+}
+
+/** Feeds the same chunks to both streaming renderers. */
+function streamTerminal(chunks, color) {
+  const tsRenderer = new ts.terminal.StreamingMarkdownRenderer(color);
+  const nativeRenderer = new native.StreamingMarkdownRenderer(color);
+  const expected = [];
+  const actual = [];
+  for (const chunk of chunks) {
+    expected.push(tsRenderer.write(chunk));
+    actual.push(nativeRenderer.write(chunk));
+  }
+  expected.push(tsRenderer.finish());
+  actual.push(nativeRenderer.finish());
+  return { expected: expected.join(""), actual: actual.join("") };
+}
+
+const streamSamples = [
+  ["single chunk", ["# Title\n\nBody text\n"]],
+  ["token by token", ["# ", "Tit", "le\n", "Body", " text", "\n"]],
+  ["no trailing newline", ["plain text"]],
+  ["table split across chunks", ["| a | b |\n", "| --- | --- |\n", "| 1 | 2 |\n"]],
+  ["code fence split", ["```\n", "code\n", "```\n"]],
+  ["heading closes a code fence", ["```\n", "# heading\n", "```\n"]],
+  ["empty chunks", ["", "", "\n", ""]],
+  ["crlf", ["line\r\nline\r\n"]],
+  ["ansi inside the stream", ["\u001b[31mred\u001b[0m\n"]],
+];
+
+for (const [label, chunks] of streamSamples) {
+  for (const color of [false, true]) {
+    const { expected, actual } = streamTerminal(chunks, color);
+    check(`streaming(${label}, color=${color})`, actual, expected);
+  }
+}
+
+// Frozen expectations for the terminal renderer, captured from the verified
+// pre-switch implementation.
+check("golden: heading style", native.renderMarkdown("## Title", false), "Title");
+check("golden: heading with colour", native.renderMarkdown("## Title", true), "\u001b[1;36mTitle\u001b[0m");
+check("golden: horizontal rule width", native.renderMarkdown("---", false), "-".repeat(40));
+check("golden: nested list indentation", native.renderMarkdown("  - item", false), "  - item");
+check("golden: ordered list becomes a dash", native.renderMarkdown("3. third", false), "- third");
+check("golden: block quote keeps the marker", native.renderMarkdown("> quoted", false), "| quoted");
+check("golden: code fence indents", native.renderMarkdown("```\ncode\n```", false), "  code");
+check("golden: heading exits the code fence", native.renderMarkdown("```\n# h\n```", false), "h");
+check("golden: table collapses to pairs", native.renderMarkdown("| a | b |\n| --- | --- |\n| 1 | 2 |", false), "a | b\n- a: 1; b: 2");
+check("golden: bold and italic", native.renderMarkdown("**b** and *i*", true), "\u001b[1mb\u001b[0m and \u001b[3mi\u001b[0m");
+check("golden: italic inside bold nests", native.renderMarkdown("**bold with *inner* stars**", true), "\u001b[1mbold with \u001b[3minner\u001b[0m stars\u001b[0m");
+check("golden: link expands", native.renderMarkdown("[label](https://e.com)", false), "label <https://e.com>");
+check("golden: image expands to alt and url", native.renderMarkdown("![alt](https://e.com/a.png)", false), "alt <https://e.com/a.png>");
+check("golden: strikethrough is left alone", native.renderMarkdown("~~unfinished~~", false), "~~unfinished~~");
+check("golden: control characters stripped", native.stripTerminalControls("safe\u001b[31m text\u0007\r"), "safe text");
+check("golden: carriage return is a control character", native.renderMarkdown("lone\rcarriage", false), "lonecarriage");
+check("golden: streaming holds a table line back", (() => {
+  const renderer = new native.StreamingMarkdownRenderer(false);
+  const first = renderer.write("| a | b |\n");
+  const rest = renderer.finish();
+  return `${first}|${rest}`;
+})(), "|| a | b |");
 
 // --- report -------------------------------------------------------------------
 

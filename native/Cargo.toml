@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 base64 = "0.23.1"
 encoding_rs = "0.8.41"
+fancy-regex = "0.19.2"
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
 regex = "1.13.1"
