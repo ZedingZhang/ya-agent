@@ -6,5 +6,6 @@
 //! verified against the TypeScript implementation by `native/parity.js`.
 
 mod config;
+mod images;
 mod keychain;
 mod memory;

@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { defaultModel, supportedModels } from "ya-core";
 import {
   ModelConfig,
+  VALID_MODELS,
   assertImageInputSupported,
   configPath,
   isVisionModel,
@@ -84,5 +86,12 @@ describe("configuration", () => {
     expect(isVisionModel(modelId("pro"))).toBe(false);
     expect(() => assertImageInputSupported(modelId("flash"), 1)).not.toThrow();
     expect(() => assertImageInputSupported(modelId("pro"), 1)).toThrow(flash);
+  });
+
+  it("keeps the TypeScript model table in step with the Rust core", () => {
+    // VALID_MODELS carries the compile-time ModelId union, so it cannot be
+    // derived from the binding; this pins the two together instead.
+    expect(supportedModels()).toEqual(Object.values(VALID_MODELS));
+    expect(defaultModel()).toBe(VALID_MODELS.flash);
   });
 });

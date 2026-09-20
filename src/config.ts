@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import {
+  isVisionModel as nativeIsVisionModel,
+  resolveModel as nativeResolveModel,
+} from "ya-core";
 
 export const VALID_MODELS = {
   flash: "deepseek-v4.1-flash",
@@ -10,9 +14,6 @@ export const VALID_MODELS = {
 export type ModelAlias = keyof typeof VALID_MODELS;
 export type ModelId = (typeof VALID_MODELS)[ModelAlias];
 export type ReasoningEffort = "high" | "max";
-
-/** V4.1-Flash has native vision support; the pro model is text-only. */
-const VISION_MODELS: readonly ModelId[] = [VALID_MODELS.flash];
 
 /** Names retired by the V4.1 line-up, still resolved so existing configuration keeps loading. */
 const RETIRED_MODELS: Record<string, ModelId> = {
@@ -151,14 +152,17 @@ export function saveConfig(config: ModelConfig): void {
   renameSync(temporary, path);
 }
 
+/**
+ * Resolves an alias, a current model id, or one retired by the V4.1 line-up.
+ * The behaviour lives in the Rust core; `VALID_MODELS` above is the
+ * compile-time contract and a test asserts the two agree.
+ */
 export function modelId(value: string): ModelId {
-  const resolved = resolveModel(value);
-  if (!resolved) throw new Error("model must be 'flash' or 'pro'.");
-  return resolved;
+  return nativeResolveModel(value) as ModelId;
 }
 
 export function isVisionModel(model: ModelId): boolean {
-  return VISION_MODELS.includes(model);
+  return nativeIsVisionModel(model);
 }
 
 export function assertImageInputSupported(model: ModelId, imageCount: number): void {

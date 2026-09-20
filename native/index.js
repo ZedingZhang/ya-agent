@@ -778,11 +778,19 @@ function __napiStampBindingTarget(exportsObject, target) {
 // linked import resolves to `undefined`.
 module.exports.__napiBindingTarget = __napiStampBindingTarget(nativeBinding, __napiLoadedBindingTarget)
 module.exports = nativeBinding
+module.exports.assertImageCount = nativeBinding.assertImageCount
 module.exports.currentPlatform = nativeBinding.currentPlatform
 module.exports.defaultModel = nativeBinding.defaultModel
+module.exports.detectImageMimeType = nativeBinding.detectImageMimeType
 module.exports.englishPhraseTokens = nativeBinding.englishPhraseTokens
 module.exports.englishWordTokens = nativeBinding.englishWordTokens
+module.exports.externalImageUrl = nativeBinding.externalImageUrl
+module.exports.fileApiImageId = nativeBinding.fileApiImageId
 module.exports.hanNgramTokens = nativeBinding.hanNgramTokens
+module.exports.imageDataUrlPart = nativeBinding.imageDataUrlPart
+module.exports.isHttpUrl = nativeBinding.isHttpUrl
+module.exports.isImageDetail = nativeBinding.isImageDetail
+module.exports.isSchemeUrl = nativeBinding.isSchemeUrl
 module.exports.isVisionModel = nativeBinding.isVisionModel
 module.exports.keychainAccount = nativeBinding.keychainAccount
 module.exports.keychainService = nativeBinding.keychainService

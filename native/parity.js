@@ -26,6 +26,7 @@ const ts = {
   config: require(path.join(tsRoot, "config.js")),
   keychain: require(path.join(tsRoot, "keychain.js")),
   memory: require(path.join(tsRoot, "memory.js")),
+  images: require(path.join(tsRoot, "images.js")),
 };
 const native = require(bindingPath);
 
@@ -48,6 +49,29 @@ function capture(fn) {
     return { value: value === undefined ? null : value };
   } catch (error) {
     return { error: String((error && error.message) || error) };
+  }
+}
+
+// Intentional divergences are listed here while a module is still being
+// compared pre-switch. Once the TypeScript module delegates, both sides run the
+// same code and the entry must be deleted; the golden checks below then carry
+// the regression value.
+const intentionalDivergences = [];
+
+function checkWithDivergences(label, actual, expected) {
+  const exception = intentionalDivergences.find((entry) => entry.label === label);
+  if (!exception) {
+    check(label, actual, expected);
+    return;
+  }
+  checks += 1;
+  try {
+    assert.deepEqual(actual, exception.rust);
+    assert.deepEqual(expected, exception.ts);
+  } catch {
+    failures.push(
+      `  ${label}: documented divergence changed\n    rust:         ${JSON.stringify(actual)}\n    ts:           ${JSON.stringify(expected)}\n    expected rust: ${JSON.stringify(exception.rust)}\n    expected ts:   ${JSON.stringify(exception.ts)}`,
+    );
   }
 }
 
@@ -197,6 +221,152 @@ for (const [task, text] of memoryPairs) {
     `memoryScore(${JSON.stringify(task)}, ${JSON.stringify(text)})`,
     native.memoryScore(task, text),
     ts.memory.memoryScore(task, memoryCard(text)),
+  );
+}
+
+// --- images: signature sniffing and inline limits ------------------------------
+
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x00]);
+const jpegBytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+const gif87Bytes = Buffer.from("GIF87a______", "ascii");
+const gif89Bytes = Buffer.from("GIF89a______", "ascii");
+const webpBytes = Buffer.from("RIFF____WEBP", "ascii");
+const riffOnlyBytes = Buffer.from("RIFF________", "ascii");
+const textBytes = Buffer.from("hello world!", "ascii");
+
+const byteSamples = [
+  ["png", pngBytes],
+  ["jpeg", jpegBytes],
+  ["gif87a", gif87Bytes],
+  ["gif89a", gif89Bytes],
+  ["webp", webpBytes],
+  ["riff without webp", riffOnlyBytes],
+  ["plain text", textBytes],
+  ["empty", Buffer.alloc(0)],
+  ["png signature truncated", pngBytes.subarray(0, 7)],
+  ["jpeg truncated", jpegBytes.subarray(0, 2)],
+];
+
+for (const [label, bytes] of byteSamples) {
+  check(
+    `detectImageMimeType(${label})`,
+    native.detectImageMimeType(bytes),
+    ts.images.detectImageMimeType(bytes) ?? null,
+  );
+}
+
+for (const value of ["low", "high", "original", "auto", "LOW", "", "medium"]) {
+  check(`isImageDetail(${JSON.stringify(value)})`, native.isImageDetail(value), ts.images.isImageDetail(value));
+}
+
+for (const count of [0, 1, 600, 601, 1000]) {
+  check(
+    `assertImageCount(${count})`,
+    capture(() => native.assertImageCount(count)),
+    capture(() => ts.images.assertImageCount(count)),
+  );
+}
+
+// --- images: source classification --------------------------------------------
+//
+// Mirrors the TypeScript branch order exactly. The final branch (a local file
+// path) is still TypeScript-only, so it is asserted separately rather than
+// compared against a Rust function that does not exist.
+
+function tsImagePart(source) {
+  return capture(() => ts.images.imageContentPartsFromSources([source.trim()], "auto")[0]);
+}
+
+function nativeImagePart(source) {
+  const trimmed = source.trim();
+  if (trimmed.startsWith("file-api-")) {
+    return capture(() => ({ type: "file", file_id: native.fileApiImageId(trimmed) }));
+  }
+  if (trimmed.startsWith("data:")) {
+    return capture(() => {
+      const inline = native.imageDataUrlPart(trimmed);
+      return { type: "image_url", image_url: { url: inline.url, detail: "auto" } };
+    });
+  }
+  if (native.isHttpUrl(trimmed)) {
+    return capture(() => ({
+      type: "image_url",
+      image_url: { url: native.externalImageUrl(trimmed), detail: "auto" },
+    }));
+  }
+  if (native.isSchemeUrl(trimmed)) {
+    return capture(() => {
+      throw new Error("External images require an HTTP(S) URL.");
+    });
+  }
+  return { localFile: true };
+}
+
+const imageSources = [
+  `data:image/png;base64,${pngBytes.toString("base64")}`,
+  `data:image/jpeg;base64,${jpegBytes.toString("base64")}`,
+  `data:image/gif;base64,${gif89Bytes.toString("base64")}`,
+  `data:image/webp;base64,${webpBytes.toString("base64")}`,
+  `data:image/png;base64,${jpegBytes.toString("base64")}`,
+  `data:image/png;base64,${textBytes.toString("base64")}`,
+  "data:image/png;base64,AAAAA",
+  "data:image/png;base64,AAAA=",
+  "data:image/png;base64,A",
+  "data:image/png;base64,!!!!",
+  "data:image/bmp;base64,AAAA",
+  "data:image/jpeg;base64,////",
+  "file-api-abc123",
+  "file-api-ABC_123-",
+  "file-api-",
+  "http://example.com/a.png",
+  "https://example.com/a.png?x=1#f",
+  "HTTP://EXAMPLE.com",
+  "https://example.com/a b.png",
+  "http://example.com:80/a.png",
+  "ftp://example.com/a.png",
+  "http://",
+  "https://",
+  `https://example.com/${"a".repeat(8200)}`,
+];
+
+for (const source of imageSources) {
+  const label = source.length > 60 ? `${source.slice(0, 57)}...` : source;
+  const actual = nativeImagePart(source);
+  if (actual.localFile) {
+    checks += 1;
+    const fallThrough = tsImagePart(source);
+    if (typeof fallThrough.error !== "string" || !fallThrough.error.startsWith("Image does not exist:")) {
+      failures.push(
+        `  local-file fall-through for ${JSON.stringify(label)}\n    expected the TypeScript file branch to reject it, got ${JSON.stringify(fallThrough)}`,
+      );
+    }
+    continue;
+  }
+  checkWithDivergences(`image part for ${JSON.stringify(label)}`, actual, tsImagePart(source));
+}
+
+// Frozen expectations captured from the verified pre-switch implementation.
+// These cover behaviour the vitest suite does not: Node's lenient base64
+// decoding, WHATWG URL normalisation, and the malformed-URL message that used
+// to leak Node's bare `new URL()` TypeError.
+const pngBase64 = pngBytes.toString("base64");
+check("golden: canonical PNG data URL", native.imageDataUrlPart(`data:image/png;base64,${pngBase64}`).url, `data:image/png;base64,${pngBase64}`);
+check("golden: trailing group ignored like Node", native.imageDataUrlPart(`data:image/png;base64,${pngBase64}A`).url, `data:image/png;base64,${pngBase64}`);
+check("golden: extra padding ignored like Node", native.imageDataUrlPart(`data:image/png;base64,${pngBase64}=`).url, `data:image/png;base64,${pngBase64}`);
+check("golden: non-image payload rejected", capture(() => native.imageDataUrlPart("data:image/png;base64,AAAAA")), { error: "Image data URL does not contain supported JPEG, PNG, GIF, or WebP content." });
+check("golden: host lowercased and path added", native.externalImageUrl("HTTP://EXAMPLE.com"), "http://example.com/");
+check("golden: default port dropped", native.externalImageUrl("http://example.com:80/a.png"), "http://example.com/a.png");
+check("golden: space escaped", native.externalImageUrl("https://example.com/a b.png"), "https://example.com/a%20b.png");
+check("golden: file-api id is case-insensitive but returned unchanged", native.fileApiImageId("file-api-ABC_123-"), "file-api-ABC_123-");
+check("golden: malformed URL message", capture(() => native.externalImageUrl("http://")), { error: "External images require an HTTP(S) URL." });
+
+// Sources that reach the local-file branch in TypeScript, where Rust
+// deliberately has no opinion.
+for (const source of ["DATA:IMAGE/PNG;BASE64,AAAA", "FILE-API-abc", "/tmp/does-not-exist.png"]) {
+  check(
+    `neither HTTP nor scheme URL: ${JSON.stringify(source)}`,
+    { http: native.isHttpUrl(source), scheme: native.isSchemeUrl(source) },
+    { http: false, scheme: false },
   );
 }
 

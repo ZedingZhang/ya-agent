@@ -59,11 +59,11 @@ replaced.
 | # | Scope | State |
 |---|-------|-------|
 | 0 | Toolchain, crate scaffold, napi bridge, parity harness | done |
-| 1 | `config` — model table, aliases, retired-id migration, vision rules | ported + parity verified; TS not switched yet |
+| 1 | `config` — model table, aliases, retired-id migration, vision rules | done: behaviour ported, TS delegates; `VALID_MODELS` stays as the compile-time contract and a test pins it to the Rust table |
 | 2 | `keychain` — macOS `security` shell-out, `DEEPSEEK_API_KEY` fallback | done: ported, parity verified pre-switch, TS delegates |
 | 3 | `memory` — ranking: NFKC folding, English words/phrases, Han n-grams | done: ranking ported, parity verified pre-switch, TS delegates; card file I/O stays in TS |
-| 4 | `images` — signature sniffing, data URLs, size limits | next |
-| 5 | `web` — result parsing and normalisation | not started |
+| 4 | `images` — signature sniffing, data URLs, source validation | done: ported, parity verified pre-switch, TS delegates; file inspection stays in TS |
+| 5 | `web` — result parsing and normalisation | next |
 | 6 | `deepseek` — payload/response/SSE logic; transport stays in TS | not started |
 | 7 | `orchestrator` — single agent, tool rounds, ToA workers | not started |
 | 8 | `local` — workspace confinement, audit rotation, unified diff | not started |
