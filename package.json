@@ -19,6 +19,9 @@
   },
   "files": [
     "dist/typescript",
+    "native/index.js",
+    "native/index.d.ts",
+    "native/*.node",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"
@@ -60,7 +63,8 @@
     ],
     "assets": [
       "dist/typescript/gui/index.html",
-      "dist/typescript/gui/styles.css"
+      "dist/typescript/gui/styles.css",
+      "native/*.node"
     ]
   },
   "build": {
@@ -70,11 +74,20 @@
       "main": "dist/typescript/gui/main.js"
     },
     "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
     "directories": {
       "output": "release/electron"
     },
     "files": [
       "dist/typescript/**/*",
+      "!node_modules/ya-core/target/**",
+      "!node_modules/ya-core/node_modules/**",
+      "!node_modules/ya-core/src/**",
+      "!node_modules/ya-core/Cargo.*",
+      "!node_modules/ya-core/build.rs",
+      "!node_modules/ya-core/parity.js",
       "package.json",
       "LICENSE"
     ],

@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Must precede every import that pulls in the binding: it repoints the native
+// loader at a binding shipped beside a packaged executable.
+import "./native-binding";
 import { Command, CommanderError, Option } from "commander";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
