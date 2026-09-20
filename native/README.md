@@ -10,50 +10,58 @@ src/cli.ts        ─┐
 src/gui/main.ts   ─┘
 ```
 
+The root `package.json` depends on this crate as `ya-core` (`file:./native`), so
+`import ... from "ya-core"` resolves from both `src/` (vitest) and
+`dist/typescript/` (the built CLI).
+
 ## Build
 
 ```sh
-npm install                       # once, installs @napi-rs/cli
+npm install                       # once, installs @napi-rs/cli and links ya-core
 npm run build                     # debug binding
 npm run build -- --release        # release binding
 ```
 
-Outputs (git-ignored): `ya-core.<platform-arch-abi>.node`, `index.js`, `index.d.ts`.
+Outputs: `ya-core.<platform-arch-abi>.node` (git-ignored), plus the generated
+`index.js` and `index.d.ts`, which are committed so typechecking works without a
+Rust toolchain.
 
 Windows needs the MSVC linker and the Windows SDK; Rust finds them through the
 Visual Studio Build Tools installation.
 
-## Parity harness
+## Verifying a port
 
-`node parity.js` runs the same inputs through the compiled TypeScript core
-(`dist/typescript/*.js`, so run `npm run build` in the repository root first) and
-through this binding, and fails on any divergence.
+Each module is ported in three ordered steps, and the order matters:
 
-The rewrite is verified module by module with this harness rather than by
-eyeballing two implementations. Every ported module adds a section to it.
+1. **Port** the logic to Rust.
+2. **Run parity while both implementations still exist** — `npm run test:parity`
+   compares the TypeScript and Rust implementations. Run it *before* step 3,
+   because once the TypeScript module delegates, its parity section compares
+   Rust with itself and proves nothing.
+3. **Delegate**: rewrite the TypeScript module to call `ya-core`, keeping its
+   exported API so callers do not change.
 
-## Porting strategy
+The vitest suite is the ongoing gate after step 3; parity is the gate before it.
 
-Each TypeScript module splits into two parts, which are ported differently:
+## Testable I/O seams
 
-- **Pure logic** — payload construction, response parsing, retry policy, SSE
-  framing, memory ranking, path confinement, diff generation. Moves into Rust
-  and is verified by the parity harness.
-- **I/O shell** — `fetch`, `fs`, `child_process`. Stays in the host at first,
-  because the existing tests inject fakes through these seams
-  (`new DeepSeekClient(key, fakeFetcher)`, `tempHome()`) and a cross-language
-  boundary cannot carry an injected JavaScript object without a
-  `ThreadsafeFunction`. Where the shell does move, the Rust side takes a
-  configurable base URL so the tests can point it at a local server.
+The TypeScript tests mock `node:fs`, `node:child_process`, and `process.platform`,
+and none of those mocks survive the move into Rust. Rather than reintroduce
+mocking, the ported functions take the environment as parameters —
+`macosKeychainAvailable(platform, securityPath)` and
+`saveApiKey(key, platform, securityPath)` — so tests can exercise the real code
+path on any host. `tests/keychain.test.ts` fails a genuine subprocess by pointing
+`securityPath` at a real non-executable file, which is stronger than the mock it
+replaced.
 
 ## Milestones
 
 | # | Scope | State |
 |---|-------|-------|
-| 0 | Toolchain, crate scaffold, napi bridge, parity harness | in progress |
-| 1 | `config` — model table, aliases, retired-id migration, vision rules | bound, pending parity run |
-| 2 | `keychain` — macOS `security` shell-out, `DEEPSEEK_API_KEY` fallback | not started |
-| 3 | `memory` — card storage, ranking (English keywords + Chinese n-grams) | not started |
+| 0 | Toolchain, crate scaffold, napi bridge, parity harness | done |
+| 1 | `config` — model table, aliases, retired-id migration, vision rules | ported + parity verified; TS not switched yet |
+| 2 | `keychain` — macOS `security` shell-out, `DEEPSEEK_API_KEY` fallback | done: ported, parity verified pre-switch, TS delegates |
+| 3 | `memory` — card storage, ranking (English keywords + Chinese n-grams) | next |
 | 4 | `images` — signature sniffing, data URLs, size limits | not started |
 | 5 | `web` — result parsing and normalisation | not started |
 | 6 | `deepseek` — payload/response/SSE logic; transport stays in TS | not started |

@@ -1,35 +1,29 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  existsSync: vi.fn(() => false),
-  execFileSync: vi.fn(),
-}));
-
-vi.mock("node:fs", () => ({
-  existsSync: mocks.existsSync,
-}));
-
-vi.mock("node:child_process", () => ({
-  execFileSync: mocks.execFileSync,
-}));
-
-import { loadApiKey, macosKeychainAvailable, saveApiKey } from "../src/keychain";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  KEYCHAIN_ACCOUNT,
+  KEYCHAIN_SERVICE,
+  loadApiKey,
+  macosKeychainAvailable,
+  saveApiKey,
+} from "../src/keychain";
 
 describe("API key storage", () => {
   let previousApiKey: string | undefined;
+  let scratch: string | undefined;
 
   beforeEach(() => {
     previousApiKey = process.env.DEEPSEEK_API_KEY;
     delete process.env.DEEPSEEK_API_KEY;
-    mocks.existsSync.mockReset();
-    mocks.existsSync.mockReturnValue(false);
-    mocks.execFileSync.mockReset();
   });
 
   afterEach(() => {
     if (previousApiKey === undefined) delete process.env.DEEPSEEK_API_KEY;
     else process.env.DEEPSEEK_API_KEY = previousApiKey;
-    vi.restoreAllMocks();
+    if (scratch) rmSync(scratch, { recursive: true, force: true });
+    scratch = undefined;
   });
 
   it("loads the cross-platform environment variable first", () => {
@@ -44,6 +38,12 @@ describe("API key storage", () => {
   it("recognizes Keychain only on macOS with the security executable", () => {
     expect(macosKeychainAvailable("linux", "/usr/bin/security")).toBe(false);
     expect(macosKeychainAvailable("darwin", "/missing/security")).toBe(false);
+    expect(macosKeychainAvailable("win32", "/usr/bin/security")).toBe(false);
+  });
+
+  it("keeps the documented Keychain identity", () => {
+    expect(KEYCHAIN_SERVICE).toBe("Ya DeepSeek API");
+    expect(KEYCHAIN_ACCOUNT).toBe("default");
   });
 
   it("explains the portable environment-variable fallback", () => {
@@ -55,14 +55,14 @@ describe("API key storage", () => {
   });
 
   it("never exposes the API key when the security command fails", () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-    mocks.existsSync.mockReturnValue(true);
-    mocks.execFileSync.mockImplementation(() => {
-      throw new Error("Command failed with secret test-key");
-    });
+    // A real, non-executable file stands in for /usr/bin/security so the
+    // failure path actually runs instead of being mocked away.
+    scratch = mkdtempSync(join(tmpdir(), "ya-keychain-"));
+    const fakeSecurity = join(scratch, "security");
+    writeFileSync(fakeSecurity, "not an executable\n");
     let message = "";
     try {
-      saveApiKey("  test-key  ");
+      saveApiKey("  test-key  ", "darwin", fakeSecurity);
     } catch (error) {
       message = error instanceof Error ? error.message : String(error);
     }
