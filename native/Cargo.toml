@@ -1,0 +1,21 @@
+[package]
+name = "ya-core"
+version = "0.7.2"
+edition = "2021"
+license = "MIT"
+description = "Shared Rust core for the Ya CLI and desktop application"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "3", default-features = false, features = ["napi6"] }
+napi-derive = "3"
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"

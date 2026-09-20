@@ -19,3 +19,10 @@ venv/
 .DS_Store
 .vscode/
 .idea/
+
+# Rust native core build artifacts
+native/target/
+native/*.node
+native/index.js
+native/index.d.ts
+native/npm/

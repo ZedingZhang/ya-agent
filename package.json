@@ -28,9 +28,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node dist/typescript/scripts/copy-assets.js",
+    "build:native": "npm --prefix native run build",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
+    "test:parity": "node native/parity.js",
     "test:watch": "vitest",
     "smoke:gui": "npm run build && electron dist/typescript/gui/main.js --smoke-test",
     "check": "npm run typecheck && npm test && npm run build",
