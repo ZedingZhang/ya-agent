@@ -15,20 +15,6 @@ export type ModelAlias = keyof typeof VALID_MODELS;
 export type ModelId = (typeof VALID_MODELS)[ModelAlias];
 export type ReasoningEffort = "high" | "max";
 
-/** Names retired by the V4.1 line-up, still resolved so existing configuration keeps loading. */
-const RETIRED_MODELS: Record<string, ModelId> = {
-  vision: VALID_MODELS.flash,
-  "deepseek-v4-flash": VALID_MODELS.flash,
-  "deepseek-v4-pro": VALID_MODELS.pro,
-  "deepseek-v4-flash-vision-exp": VALID_MODELS.flash,
-};
-
-function resolveModel(value: string): ModelId | undefined {
-  if (value in VALID_MODELS) return VALID_MODELS[value as ModelAlias];
-  if (Object.values(VALID_MODELS).includes(value as ModelId)) return value as ModelId;
-  return RETIRED_MODELS[value];
-}
-
 export interface ModelConfigValues {
   model: ModelId;
   thinkingEnabled: boolean;
@@ -105,9 +91,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Resolves a stored model name, including the ids the V4.1 line-up retired.
+ * An unrecognised name is passed through so `validate()` can report the
+ * supported set instead of a resolution error.
+ */
 function readModel(value: unknown): ModelId {
   if (typeof value !== "string") return VALID_MODELS.flash;
-  return resolveModel(value) ?? (value as ModelId);
+  try {
+    return nativeResolveModel(value) as ModelId;
+  } catch {
+    return value as ModelId;
+  }
 }
 
 function readEffort(value: unknown): ReasoningEffort {
