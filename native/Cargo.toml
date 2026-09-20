@@ -11,9 +11,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 base64 = "0.23.1"
+encoding_rs = "0.8.41"
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
 regex = "1.13.1"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 unicode-normalization = "0.1.25"
 url = "2.5.8"
 

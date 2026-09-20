@@ -9,7 +9,25 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+/**
+ * Incremental server-sent-event framing.
+ *
+ * `TextDecoder` is fed with `{ stream: true }`, so a multi-byte character split
+ * across two chunks stays intact; `take_utf8` reproduces that by holding an
+ * incomplete trailing sequence until the next chunk arrives.
+ */
+export declare class SseReader {
+  constructor()
+  /** Feeds one chunk and returns every complete `data:` payload it completed. */
+  push(chunk: Buffer): Array<string>
+  /** Flushes the trailing line, mirroring the final `pending.trim()` pass. */
+  finish(): string | null
+}
+
 export declare function assertImageCount(count: number): void
+
+/** Builds the chat-completions request body. */
+export declare function buildChatPayload(messagesJson: string, model: string, thinkingEnabled: boolean, reasoningEffort: string, maxTokens: number, toolsJson: string | undefined | null, stream: boolean): string
 
 export declare function currentPlatform(): string
 
@@ -70,7 +88,19 @@ export declare function normalizeApiKey(value: string): string | null
 
 export declare function normalizeMemoryText(text: string): string
 
+/** Parses a non-streaming reply into the `ModelReply` shape. */
+export declare function parseModelReply(bodyJson: string): string
+
 export declare function parseSearchResults(html: string): Array<SearchResult>
+
+/**
+ * Interprets one `data:` payload from the streaming response.
+ *
+ * A malformed payload is an error rather than a skipped event: the TypeScript
+ * original lets `JSON.parse` throw, which fails the request instead of
+ * silently dropping part of the answer.
+ */
+export declare function parseStreamChunk(data: string): StreamChunk
 
 /** Resolves an alias, a current model id, or one retired by the V4.1 line-up. */
 export declare function resolveModel(value: string): string
@@ -80,6 +110,14 @@ export declare function saveApiKey(apiKey: string, platform?: string | undefined
 export interface SearchResult {
   title: string
   url: string
+}
+
+/** One interpreted server-sent event. */
+export interface StreamChunk {
+  done: boolean
+  content?: string
+  reasoningContent?: string
+  usageJson?: string
 }
 
 export declare function supportedModels(): Array<string>

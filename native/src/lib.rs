@@ -7,6 +7,7 @@
 
 mod compat;
 mod config;
+mod deepseek;
 mod images;
 mod keychain;
 mod memory;
