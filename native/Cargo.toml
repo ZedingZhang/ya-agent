@@ -10,9 +10,12 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+base64 = "0.23.1"
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
+regex = "1.13.1"
 unicode-normalization = "0.1.25"
+url = "2.5.8"
 
 [build-dependencies]
 napi-build = "2"

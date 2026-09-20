@@ -9,15 +9,49 @@
  */
 export declare const __napiBindingTarget: 'native' | 'wasm32-wasi' | 'wasm32-wasip1'
 
+export declare function assertImageCount(count: number): void
+
 export declare function currentPlatform(): string
 
 export declare function defaultModel(): string
+
+export declare function detectImageMimeType(bytes: Buffer): string | null
 
 export declare function englishPhraseTokens(text: string): Array<string>
 
 export declare function englishWordTokens(text: string): Array<string>
 
+/**
+ * Validates an HTTP(S) image source and returns the normalised URL.
+ *
+ * Sources that are not HTTP(S) belong to the caller's other branches; the
+ * local-file branch in particular stays in TypeScript.
+ */
+export declare function externalImageUrl(source: string): string
+
+/** Validates a DeepSeek Files API image id and returns it unchanged. */
+export declare function fileApiImageId(source: string): string
+
 export declare function hanNgramTokens(text: string, width: number): Array<string>
+
+export declare function imageDataUrlPart(source: string): ImageDataUrlPart
+
+/**
+ * The canonical data URL and decoded byte count for an inline image source.
+ * `detail` is validated by the caller and attached when the part is built.
+ */
+export interface ImageDataUrlPart {
+  url: string
+  bytes: number
+}
+
+/** Mirrors `/^https?:\/\//iu`: the transport gate the source branch uses. */
+export declare function isHttpUrl(source: string): boolean
+
+export declare function isImageDetail(value: string): boolean
+
+/** Mirrors `/^[a-z][a-z0-9+.-]*:\/\//iu`: a scheme that is not HTTP(S). */
+export declare function isSchemeUrl(source: string): boolean
 
 export declare function isVisionModel(model: string): boolean
 
