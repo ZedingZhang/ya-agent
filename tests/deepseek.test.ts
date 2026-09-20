@@ -40,7 +40,7 @@ describe("DeepSeek client", () => {
     );
     expect(reply.content).toBe("ok");
     expect(seen).toMatchObject({
-      model: "deepseek-v4-flash",
+      model: "deepseek-v4.1-flash",
       thinking: { type: "enabled" },
       reasoning_effort: "high",
       max_tokens: 100,
@@ -75,19 +75,19 @@ describe("DeepSeek client", () => {
     }];
     await new DeepSeekClient("key", fetcher).complete(
       messages,
-      new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }),
+      new ModelConfig({ model: "deepseek-v4.1-flash" }),
       100,
     );
-    expect(seen).toMatchObject({ model: "deepseek-v4-flash-vision-exp", messages });
+    expect(seen).toMatchObject({ model: "deepseek-v4.1-flash", messages });
   });
 
   it("rejects vision content before sending it to a text-only model", async () => {
     const fetcher = vi.fn<FetchLike>();
     await expect(new DeepSeekClient("key", fetcher).complete(
       [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.com/chart.png" } }] }],
-      new ModelConfig(),
+      new ModelConfig({ model: "deepseek-v4-pro-0813" }),
       100,
-    )).rejects.toThrow(/deepseek-v4-flash-vision-exp/u);
+    )).rejects.toThrow(/deepseek-v4\.1-flash/u);
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -95,7 +95,7 @@ describe("DeepSeek client", () => {
     const fetcher = vi.fn<FetchLike>();
     await expect(new DeepSeekClient("key", fetcher).complete(
       [{ role: "system", content: [{ type: "image_url", image_url: { url: "https://example.com/chart.png" } }] }],
-      new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }),
+      new ModelConfig({ model: "deepseek-v4.1-flash" }),
       100,
     )).rejects.toThrow(/only in user messages/u);
     expect(fetcher).not.toHaveBeenCalled();

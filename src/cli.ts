@@ -375,7 +375,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   program.command("ask")
     .description("Run a research task")
     .argument("<task>")
-    .addOption(new Option("--model <model>").choices(["flash", "pro", "vision"]))
+    .addOption(new Option("--model <model>").choices(["flash", "pro"]))
     .addOption(new Option("--thinking <state>").choices(["on", "off"]))
     .addOption(new Option("--reasoning-effort <effort>").choices(["high", "max"]))
     .option("--toa", "Use the bounded Tree of Agents", false)

@@ -47,7 +47,7 @@ describe("GUI controller", () => {
 
   it("saves model configuration and keeps a session-only API key", () => {
     const controller = new GuiController();
-    const config = new ModelConfig({ model: "deepseek-v4-pro", thinkingEnabled: true, reasoningEffort: "max" });
+    const config = new ModelConfig({ model: "deepseek-v4-pro-0813", thinkingEnabled: true, reasoningEffort: "max" });
     controller.saveModelConfig(config);
     controller.setSessionApiKey(" session-key ");
     expect(loadConfig()).toEqual(config);
@@ -57,9 +57,9 @@ describe("GUI controller", () => {
   it("persists workspace model controls without changing settings-owned values", () => {
     const controller = new GuiController();
     controller.saveModelConfig(new ModelConfig({ thinkingEnabled: true, toaTokenBudget: 6_000, toaTimeout: 120 }));
-    controller.saveWorkspaceModelSelection("deepseek-v4-pro", "max");
+    controller.saveWorkspaceModelSelection("deepseek-v4-pro-0813", "max");
     expect(loadConfig()).toEqual(new ModelConfig({
-      model: "deepseek-v4-pro",
+      model: "deepseek-v4-pro-0813",
       reasoningEffort: "max",
       thinkingEnabled: true,
       toaTokenBudget: 6_000,
@@ -119,7 +119,7 @@ describe("GUI controller", () => {
     }];
     const controller = new GuiController(runner);
     controller.setSessionApiKey("key");
-    controller.saveModelConfig(new ModelConfig({ model: "deepseek-v4-flash-vision-exp" }));
+    controller.saveModelConfig(new ModelConfig({ model: "deepseek-v4.1-flash" }));
     await controller.run({ task: "Explain the image", images });
     expect(calls[0]![3]!.images).toEqual(images);
   });
