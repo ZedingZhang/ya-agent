@@ -70,9 +70,16 @@ export declare function normalizeApiKey(value: string): string | null
 
 export declare function normalizeMemoryText(text: string): string
 
+export declare function parseSearchResults(html: string): Array<SearchResult>
+
 /** Resolves an alias, a current model id, or one retired by the V4.1 line-up. */
 export declare function resolveModel(value: string): string
 
 export declare function saveApiKey(apiKey: string, platform?: string | undefined | null, securityPath?: string | undefined | null): void
+
+export interface SearchResult {
+  title: string
+  url: string
+}
 
 export declare function supportedModels(): Array<string>

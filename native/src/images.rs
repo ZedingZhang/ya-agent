@@ -11,6 +11,8 @@ use napi_derive::napi;
 use regex::Regex;
 use url::Url;
 
+use crate::compat::{decode_base64_lenient, utf16_len};
+
 pub const MAX_IMAGES_PER_REQUEST: u32 = 600;
 pub const MAX_IMAGE_URL_LENGTH: usize = 8_192;
 const MAX_INLINE_IMAGE_BYTES: usize = 32 * 1024 * 1024;
@@ -27,56 +29,21 @@ fn data_url_pattern() -> &'static Regex {
 
 fn file_api_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r"(?i)^file-api-[a-z0-9_-]+$").expect("file-api pattern is valid"))
+    PATTERN.get_or_init(|| {
+        Regex::new(r"(?i)^file-api-[a-z0-9_-]+$").expect("file-api pattern is valid")
+    })
 }
 
 fn generic_scheme_pattern() -> &'static Regex {
     static PATTERN: OnceLock<Regex> = OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r"(?i)^[a-z][a-z0-9+.-]*://").expect("scheme pattern is valid"))
+    PATTERN.get_or_init(|| {
+        Regex::new(r"(?i)^[a-z][a-z0-9+.-]*://").expect("scheme pattern is valid")
+    })
 }
 
 fn http_scheme(source: &str) -> bool {
     let lowered = source.get(..8).unwrap_or(source).to_ascii_lowercase();
     lowered.starts_with("http://") || lowered.starts_with("https://")
-}
-
-/// Mirrors `Buffer.from(value, "base64")`, which ignores padding and any
-/// trailing characters that do not complete a group of four.
-fn decode_base64_lenient(payload: &str) -> Vec<u8> {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut groups: Vec<u8> = Vec::with_capacity(payload.len());
-    for byte in payload.bytes() {
-        if byte == b'=' {
-            continue;
-        }
-        if let Some(index) = ALPHABET.iter().position(|candidate| *candidate == byte) {
-            groups.push(index as u8);
-        }
-    }
-    let mut decoded = Vec::with_capacity(groups.len() / 4 * 3 + 2);
-    for chunk in groups.chunks(4) {
-        let first = chunk[0] as u32;
-        match chunk.len() {
-            4 => {
-                let second = chunk[1] as u32;
-                let third = chunk[2] as u32;
-                decoded.push(((first << 2) | (second >> 4)) as u8);
-                decoded.push((((second & 0x0f) << 4) | (third >> 2)) as u8);
-                decoded.push((((third & 0x03) << 6) | chunk[3] as u32) as u8);
-            }
-            3 => {
-                let second = chunk[1] as u32;
-                let third = chunk[2] as u32;
-                decoded.push(((first << 2) | (second >> 4)) as u8);
-                decoded.push((((second & 0x0f) << 4) | (third >> 2)) as u8);
-            }
-            2 => {
-                decoded.push(((first << 2) | (chunk[1] as u32 >> 4)) as u8);
-            }
-            _ => {}
-        }
-    }
-    decoded
 }
 
 fn sniff_mime_type(bytes: &[u8]) -> Option<&'static str> {
@@ -180,9 +147,11 @@ pub fn is_scheme_url(source: String) -> bool {
 #[napi]
 pub fn external_image_url(source: String) -> napi::Result<String> {
     if !http_scheme(&source) {
-        return Err(napi::Error::from_reason("External images require an HTTP(S) URL."));
+        return Err(napi::Error::from_reason(
+            "External images require an HTTP(S) URL.",
+        ));
     }
-    if source.encode_utf16().count() > MAX_IMAGE_URL_LENGTH {
+    if utf16_len(&source) > MAX_IMAGE_URL_LENGTH {
         return Err(napi::Error::from_reason(
             "External image URLs may contain at most 8192 characters.",
         ));
@@ -190,10 +159,12 @@ pub fn external_image_url(source: String) -> napi::Result<String> {
     let parsed = Url::parse(&source)
         .map_err(|_| napi::Error::from_reason("External images require an HTTP(S) URL."))?;
     if parsed.scheme() != "https" && parsed.scheme() != "http" {
-        return Err(napi::Error::from_reason("External images require an HTTP(S) URL."));
+        return Err(napi::Error::from_reason(
+            "External images require an HTTP(S) URL.",
+        ));
     }
     let normalized = parsed.to_string();
-    if normalized.encode_utf16().count() > MAX_IMAGE_URL_LENGTH {
+    if utf16_len(&normalized) > MAX_IMAGE_URL_LENGTH {
         return Err(napi::Error::from_reason(
             "External image URLs may contain at most 8192 characters.",
         ));
