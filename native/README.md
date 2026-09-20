@@ -61,8 +61,8 @@ replaced.
 | 0 | Toolchain, crate scaffold, napi bridge, parity harness | done |
 | 1 | `config` — model table, aliases, retired-id migration, vision rules | ported + parity verified; TS not switched yet |
 | 2 | `keychain` — macOS `security` shell-out, `DEEPSEEK_API_KEY` fallback | done: ported, parity verified pre-switch, TS delegates |
-| 3 | `memory` — card storage, ranking (English keywords + Chinese n-grams) | next |
-| 4 | `images` — signature sniffing, data URLs, size limits | not started |
+| 3 | `memory` — ranking: NFKC folding, English words/phrases, Han n-grams | done: ranking ported, parity verified pre-switch, TS delegates; card file I/O stays in TS |
+| 4 | `images` — signature sniffing, data URLs, size limits | next |
 | 5 | `web` — result parsing and normalisation | not started |
 | 6 | `deepseek` — payload/response/SSE logic; transport stays in TS | not started |
 | 7 | `orchestrator` — single agent, tool rounds, ToA workers | not started |

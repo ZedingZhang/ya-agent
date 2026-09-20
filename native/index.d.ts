@@ -13,6 +13,12 @@ export declare function currentPlatform(): string
 
 export declare function defaultModel(): string
 
+export declare function englishPhraseTokens(text: string): Array<string>
+
+export declare function englishWordTokens(text: string): Array<string>
+
+export declare function hanNgramTokens(text: string, width: number): Array<string>
+
 export declare function isVisionModel(model: string): boolean
 
 export declare function keychainAccount(): string
@@ -23,7 +29,12 @@ export declare function loadApiKey(): string | null
 
 export declare function macosKeychainAvailable(platform: string, securityPath?: string | undefined | null): boolean
 
+/** Scores a task against a card's text; the card object carries nothing else. */
+export declare function memoryScore(task: string, cardText: string): number
+
 export declare function normalizeApiKey(value: string): string | null
+
+export declare function normalizeMemoryText(text: string): string
 
 /** Resolves an alias, a current model id, or one retired by the V4.1 line-up. */
 export declare function resolveModel(value: string): string
