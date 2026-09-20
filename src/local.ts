@@ -22,15 +22,26 @@ import {
   sep,
 } from "node:path";
 import { createTwoFilesPatch } from "diff";
+import {
+  assertTextSize as nativeAssertTextSize,
+  decodeTextFile as nativeDecodeTextFile,
+  isSensitiveFile as nativeIsSensitiveFile,
+  localLimits,
+  localToolDefinitions,
+  tailCompleteLines as nativeTailCompleteLines,
+} from "ya-core";
 import { dataHome } from "./config";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
-export const MAX_TEXT_BYTES = 1024 * 1024;
-export const MAX_LIST_ENTRIES = 200;
-export const MAX_SEARCH_RESULTS = 100;
-export const MAX_DIFF_LINES = 200;
-export let AUDIT_LOG_MAX_BYTES = 1024 * 1024;
-export const MAX_AUDIT_ARCHIVES = 3;
+/** The limits and the tool contracts live in the Rust core. */
+const LIMITS = localLimits();
+
+export const MAX_TEXT_BYTES = LIMITS.maxTextBytes;
+export const MAX_LIST_ENTRIES = LIMITS.maxListEntries;
+export const MAX_SEARCH_RESULTS = LIMITS.maxSearchResults;
+export const MAX_DIFF_LINES = LIMITS.maxDiffLines;
+export const MAX_AUDIT_ARCHIVES = LIMITS.maxAuditArchives;
+export let AUDIT_LOG_MAX_BYTES = LIMITS.auditLogMaxBytes;
 
 export interface LocalAction {
   operation: "mkdir" | "write" | "move";
@@ -48,68 +59,7 @@ export interface LocalActivity {
 export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boolean>;
 export type LocalActivityObserver = (activity: LocalActivity) => void;
 
-export const LOCAL_TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "local_list",
-      description: "List up to 200 entries in a directory inside the authorized workspace.",
-      parameters: { type: "object", properties: { path: { type: "string" } } },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_read",
-      description: "Read a UTF-8 text file up to 1 MiB inside the authorized workspace. Sensitive files are blocked.",
-      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_search",
-      description: "Search file names and non-sensitive UTF-8 text files inside the authorized workspace.",
-      parameters: {
-        type: "object",
-        properties: { query: { type: "string" }, path: { type: "string" } },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_mkdir",
-      description: "Create one directory inside the workspace. Its parent must already exist. The client asks the user before writing.",
-      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_write",
-      description: "Create or replace a UTF-8 text file inside the workspace. Its parent must already exist. The client shows a diff and asks before writing.",
-      parameters: {
-        type: "object",
-        properties: { path: { type: "string" }, content: { type: "string" } },
-        required: ["path", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_move",
-      description: "Move or rename a file or directory inside the workspace without replacing a destination. The client asks before writing.",
-      parameters: {
-        type: "object",
-        properties: { source: { type: "string" }, destination: { type: "string" } },
-        required: ["source", "destination"],
-      },
-    },
-  },
-];
+export const LOCAL_TOOLS: ToolDefinition[] = JSON.parse(localToolDefinitions()) as ToolDefinition[];
 
 export function setAuditLogMaxBytesForTesting(value: number): void {
   AUDIT_LOG_MAX_BYTES = value;
@@ -139,10 +89,7 @@ export function clearAuditLogs(): string[] {
 }
 
 function tailCompleteLines(data: Buffer, limit: number): Buffer {
-  if (data.byteLength <= limit) return data;
-  const tail = data.subarray(data.byteLength - limit);
-  const newline = tail.indexOf(0x0a);
-  return newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0);
+  return nativeTailCompleteLines(data, limit);
 }
 
 function rotateAuditLogs(): void {
@@ -240,25 +187,15 @@ export class LocalWorkspace {
   }
 
   private isSensitive(path: string): boolean {
-    const lowered = basename(path).toLocaleLowerCase("und");
-    const extension = lowered.includes(".") ? lowered.slice(lowered.lastIndexOf(".")) : "";
-    if (path.split(sep).some((part) => part === ".git")) return true;
-    if (lowered === ".env" || lowered.startsWith(".env.")) return true;
-    if (["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json"].includes(lowered)) return true;
-    return [".pem", ".key", ".p12", ".pfx", ".kdbx", ".der", ".token"].includes(extension) || lowered.includes("secret");
+    // Splitting the path is Node path semantics; the policy itself is in Rust.
+    return nativeIsSensitiveFile(basename(path).toLocaleLowerCase("und"), path.split(sep));
   }
 
   private readText(path: string, allowSensitive = false): string {
     if (this.isSensitive(path) && !allowSensitive) throw new Error("Reading sensitive files is blocked in local mode.");
     if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`Not a file: ${path}`);
-    if (statSync(path).size > MAX_TEXT_BYTES) throw new Error("Text files larger than 1 MiB cannot be read or replaced.");
-    const data = readFileSync(path);
-    if (data.includes(0)) throw new Error("Binary files cannot be read in local mode.");
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(data);
-    } catch {
-      throw new Error("Only UTF-8 text files can be read in local mode.");
-    }
+    nativeAssertTextSize(statSync(path).size);
+    return nativeDecodeTextFile(readFileSync(path));
   }
 
   private audit(operation: string, paths: string[], status: string, error?: string): void {

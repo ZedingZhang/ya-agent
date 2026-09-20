@@ -26,6 +26,9 @@ export declare class SseReader {
 
 export declare function assertImageCount(count: number): void
 
+/** Rejects a text file that is too large to read or replace. */
+export declare function assertTextSize(size: number): void
+
 /** Builds the chat-completions request body. */
 export declare function buildChatPayload(messagesJson: string, model: string, thinkingEnabled: boolean, reasoningEffort: string, maxTokens: number, toolsJson: string | undefined | null, stream: boolean): string
 
@@ -41,6 +44,9 @@ export declare function buildTaskMessages(task: string, memoryContext: string, e
 export declare function corePrompt(): string
 
 export declare function currentPlatform(): string
+
+/** Decodes file bytes as strict UTF-8, refusing NUL bytes as binary. */
+export declare function decodeTextFile(bytes: Buffer): string
 
 export declare function defaultModel(): string
 
@@ -85,6 +91,14 @@ export declare function isImageDetail(value: string): boolean
 /** Mirrors `/^[a-z][a-z0-9+.-]*:\/\//iu`: a scheme that is not HTTP(S). */
 export declare function isSchemeUrl(source: string): boolean
 
+/**
+ * Policy for names that must never be read in local mode.
+ *
+ * The caller passes the lower-cased basename and the already-split path parts,
+ * because splitting a path is Node path semantics rather than policy.
+ */
+export declare function isSensitiveFile(loweredBasename: string, pathParts: Array<string>): boolean
+
 export declare function isVisionModel(model: string): boolean
 
 export declare function keychainAccount(): string
@@ -93,7 +107,22 @@ export declare function keychainService(): string
 
 export declare function loadApiKey(): string | null
 
+export declare function localLimits(): LocalLimits
+
+/** The size and count limits the local tools enforce. */
+export interface LocalLimits {
+  maxTextBytes: number
+  maxListEntries: number
+  maxSearchResults: number
+  maxDiffLines: number
+  maxAuditArchives: number
+  auditLogMaxBytes: number
+}
+
 export declare function localPrompt(): string
+
+/** The tool contracts advertised to the model in local mode. */
+export declare function localToolDefinitions(): string
 
 export declare function macosKeychainAvailable(platform: string, securityPath?: string | undefined | null): boolean
 
@@ -150,6 +179,12 @@ export interface StreamChunk {
 export declare function stripIcmMarker(content: string): string
 
 export declare function supportedModels(): Array<string>
+
+/**
+ * Keeps the last `limit` bytes from the first complete line onwards, so an
+ * archived audit log never starts mid-record.
+ */
+export declare function tailCompleteLines(data: Buffer, limit: number): Buffer
 
 export declare function toaAgentBudget(toaTokenBudget: number, workers: number): ToaBudget
 

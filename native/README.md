@@ -75,6 +75,24 @@ Rust default. Each one was found by the parity harness rather than assumed:
   auto-detection writes `(?-u:\b)` so a keyword next to a Han character still
   matches, which a Unicode boundary would block.
 
+## What deliberately stays in TypeScript
+
+Two parts of `local.ts` are not ported, on purpose:
+
+- **The workspace-confinement check** (`resolveInput`). It is a security
+  boundary built on `path.resolve`, `path.relative`, `path.isAbsolute` and
+  `realpath`. Node's Windows semantics — drive-relative paths, UNC prefixes,
+  both separators, case-insensitive roots — are not reproduced by `std::path`,
+  which keeps `..` components instead of resolving them. Re-deriving those rules
+  in another language would put the boundary at risk for no functional gain, so
+  the check stays where the semantics are defined. The surrounding policy — the
+  sensitive-name rule, the size limit, the strict-UTF-8 decode, the audit tail —
+  is ported and compared.
+- **`limitedDiff`**, which formats the approval diff with the `diff` package.
+  The output is presentation text whose exact bytes the approval UI shows;
+  matching `createTwoFilesPatch` byte for byte would mean reimplementing that
+  package's Myers tie-breaking rather than porting a decision of Ya's own.
+
 ## Milestones
 
 | # | Scope | State |
@@ -87,7 +105,8 @@ Rust default. Each one was found by the parity harness rather than assumed:
 | 5 | `web` — search-result parsing, redirect unwrapping, HTML entities | done: ported, parity verified pre-switch, TS delegates; the HTTP call stays in TS |
 | 6 | `deepseek` — request body, reply parsing, stream chunks, SSE framing | done: ported, parity verified pre-switch, TS delegates; transport and the retry loop stay in TS |
 | 7 | `orchestrator` — prompts, token budgets, ICM rules | done: ported, parity verified pre-switch, TS delegates; the agent calls stay in TS |
-| 8 | `local` — workspace confinement, audit rotation, unified diff | next |
+| 8 | `local` — sensitive-name policy, text decoding, audit tail, limits, tool contracts | done: ported, parity verified pre-switch, TS delegates; the confinement check and the diff stay in TS (see below) |
+| 9 | `service` + CLI front end | next |
 | 9 | `service` + CLI front end | not started |
 | 10 | Packaging: prebuilt bindings per platform, `electron-builder` + `pkg` | not started |
 
