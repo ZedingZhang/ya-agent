@@ -23,6 +23,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 body { display: grid; grid-template-rows: 58px 1fr; }
 button, input, select, textarea { font: inherit; }
 button { border: 0; }
+/* Author display rules such as .check/.timeline-empty would otherwise outrank the UA [hidden] rule. */
+[hidden] { display: none !important; }
 
 .app-header {
   display: grid;
