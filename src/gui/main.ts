@@ -369,6 +369,8 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const formOverflow = Math.max(evidenceOverflow, createOverflow);
     settingsTab?.click();
     const settingsActive = document.querySelector('#page-settings')?.classList.contains('active') === true;
+    const keychainLabel = document.querySelector('#setting-keychain-label');
+    const keychainVisible = keychainLabel instanceof HTMLElement && keychainLabel.getClientRects().length > 0;
     const legacySettingsModelControls = document.querySelector('#setting-model, #setting-reasoning') !== null;
     workspaceTab?.click();
     const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
@@ -378,7 +380,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
-    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls, formOverflow };
+    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls, formOverflow, keychainVisible };
   })()`) as {
     memoryActive?: boolean;
     settingsActive?: boolean;
@@ -388,6 +390,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     imagePicker?: boolean;
     workspaceControls?: boolean;
     formOverflow?: number;
+    keychainVisible?: boolean;
   };
   if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
     || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls) {
@@ -396,15 +399,22 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
   if ((pages.formOverflow ?? 0) > 0) {
     throw new Error(`The memory candidate form overflows its card by ${pages.formOverflow}px.`);
   }
+  if ((pages.keychainVisible ?? false) !== (process.platform === "darwin")) {
+    throw new Error(`The keychain setting must be visible only on macOS (visible=${pages.keychainVisible} on ${process.platform}).`);
+  }
 }
 
-/** YA_SMOKE_CAPTURE=<file> writes a PNG of the memory page while running the smoke test. */
-async function captureMemoryPage(window: BrowserWindow, target: string): Promise<void> {
+/** YA_SMOKE_CAPTURE=<file> writes a PNG of one page (YA_SMOKE_CAPTURE_PAGE=workspace|memory|settings) during the smoke test. */
+async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
+  const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
+  if (!["workspace", "memory", "settings"].includes(page)) {
+    throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, memory, or settings.");
+  }
   await window.webContents.executeJavaScript(`(() => {
     document.querySelectorAll('.page').forEach((node) => node.classList.remove('active'));
     document.querySelectorAll('.tab').forEach((node) => node.classList.remove('active'));
-    document.querySelector('[data-page="memory"]')?.classList.add('active');
-    document.querySelector('#page-memory')?.classList.add('active');
+    document.querySelector('[data-page="${page}"]')?.classList.add('active');
+    document.querySelector('#page-${page}')?.classList.add('active');
   })()`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());
@@ -417,7 +427,7 @@ app.whenReady().then(async () => {
   if (smokeTest) {
     const window = await createWindow(false);
     await verifyRenderer(window);
-    if (process.env.YA_SMOKE_CAPTURE) await captureMemoryPage(window, process.env.YA_SMOKE_CAPTURE);
+    if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();
     app.quit();
