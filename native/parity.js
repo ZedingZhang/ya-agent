@@ -28,6 +28,7 @@ const ts = {
   memory: require(path.join(tsRoot, "memory.js")),
   images: require(path.join(tsRoot, "images.js")),
   web: require(path.join(tsRoot, "web.js")),
+  deepseek: require(path.join(tsRoot, "deepseek.js")),
 };
 const native = require(bindingPath);
 
@@ -427,11 +428,287 @@ check("golden: ftp dropped", native.parseSearchResults(anchor('href="ftp://examp
 check("golden: lone surrogate becomes U+FFFD", native.parseSearchResults(anchor('href="https://example.com/z"', "&#xD800;")), [{ title: "\uFFFD", url: "https://example.com/z" }]);
 check("golden: invalid code point rejected", capture(() => native.parseSearchResults(anchor('href="https://example.com/x"', "&#x110000;"))), { error: "Invalid code point 1114112" });
 
+// --- deepseek: request payload -------------------------------------------------
+
+const client = new ts.deepseek.DeepSeekClient("test-key", async () => {
+  throw new Error("transport must not be reached by payload checks");
+});
+const payloadConfig = (options) => new ts.config.ModelConfig(options);
+
+const payloadCases = [
+  ["plain", [{ role: "user", content: "hello" }], payloadConfig({}), 100, undefined, false],
+  ["thinking on", [{ role: "user", content: "hello" }], payloadConfig({ thinkingEnabled: true }), 256, undefined, false],
+  ["thinking on, max effort", [{ role: "user", content: "hi" }], payloadConfig({ thinkingEnabled: true, reasoningEffort: "max" }), 10, undefined, false],
+  ["streaming", [{ role: "user", content: "hi" }], payloadConfig({}), 100, undefined, true],
+  ["with tools", [{ role: "user", content: "hi" }], payloadConfig({}), 100, [], false],
+  [
+    "with one tool",
+    [{ role: "user", content: "hi" }],
+    payloadConfig({}),
+    100,
+    [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }],
+    false,
+  ],
+  ["pro model", [{ role: "user", content: "hi" }], payloadConfig({ model: "deepseek-v4-pro-0813" }), 100, undefined, false],
+];
+
+for (const [label, messages, config, maxTokens, tools, stream] of payloadCases) {
+  check(
+    `payload(${label})`,
+    capture(() => JSON.parse(native.buildChatPayload(
+      JSON.stringify(messages),
+      config.model,
+      config.thinkingEnabled,
+      config.reasoningEffort,
+      maxTokens,
+      tools === undefined ? undefined : JSON.stringify(tools),
+      stream,
+    ))),
+    capture(() => client.payload(messages, config, maxTokens, tools, stream)),
+  );
+}
+
+const pngPart = { type: "image_url", image_url: { url: "https://example.com/a.png" } };
+const imagePayloadCases = [
+  ["image in a user message", [{ role: "user", content: [pngPart] }], payloadConfig({})],
+  ["image in a system message", [{ role: "system", content: [pngPart] }], payloadConfig({})],
+  ["image with the pro model", [{ role: "user", content: [pngPart] }], payloadConfig({ model: "deepseek-v4-pro-0813" })],
+  ["file part in a user message", [{ role: "user", content: [{ type: "file", file_id: "file-api-x" }] }], payloadConfig({})],
+  ["text-only parts", [{ role: "user", content: [{ type: "text", text: "hi" }] }], payloadConfig({})],
+];
+
+for (const [label, messages, config] of imagePayloadCases) {
+  check(
+    `payload(${label})`,
+    capture(() => JSON.parse(native.buildChatPayload(
+      JSON.stringify(messages),
+      config.model,
+      config.thinkingEnabled,
+      config.reasoningEffort,
+      100,
+      undefined,
+      false,
+    ))),
+    capture(() => client.payload(messages, config, 100, undefined, false)),
+  );
+}
+
+// --- deepseek: replies, streaming and SSE framing -------------------------------
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/** Byte chunks, so a multi-byte character can be split across two chunks. */
+function streamResponse(byteChunks) {
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of byteChunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+}
+
+/** Mirrors the TypeScript assembly in completeStream, driven by the Rust reader. */
+function nativeStreamReply(byteChunks) {
+  const reader = new native.SseReader();
+  const content = [];
+  const reasoning = [];
+  const streamed = [];
+  const usage = {};
+  let done = false;
+  const handle = (data) => {
+    let parsed;
+    try {
+      parsed = native.parseStreamChunk(data);
+    } catch (error) {
+      // completeStream wraps a chunk that keeps failing after its retries.
+      throw new Error(`DeepSeek API request failed: ${error.message}`);
+    }
+    if (parsed.done) {
+      done = true;
+      return;
+    }
+    if (parsed.usageJson) Object.assign(usage, JSON.parse(parsed.usageJson));
+    if (parsed.reasoningContent !== null && parsed.reasoningContent !== undefined) reasoning.push(parsed.reasoningContent);
+    if (parsed.content !== null && parsed.content !== undefined) {
+      content.push(parsed.content);
+      streamed.push(parsed.content);
+    }
+  };
+  for (const chunk of byteChunks) {
+    for (const data of reader.push(Buffer.from(chunk))) {
+      if (done) break;
+      handle(data);
+    }
+  }
+  const trailing = reader.finish();
+  if (!done && trailing !== null && trailing !== undefined) handle(trailing);
+  const joined = content.join("");
+  const joinedReasoning = reasoning.join("");
+  return {
+    reply: {
+      content: joined,
+      ...(joinedReasoning ? { reasoningContent: joinedReasoning } : {}),
+      toolCalls: [],
+      usage,
+      assistantMessage: { role: "assistant", content: joined },
+    },
+    streamed,
+  };
+}
+
+async function tsCompleteReply(body, status) {
+  const fetcher = async () => jsonResponse(body, status);
+  const reply = await new ts.deepseek.DeepSeekClient("key", fetcher).complete(
+    [{ role: "user", content: "hello" }],
+    new ts.config.ModelConfig({}),
+    100,
+  );
+  return reply;
+}
+
+async function tsStreamReply(byteChunks) {
+  const streamed = [];
+  const reply = await new ts.deepseek.DeepSeekClient("key", async () => streamResponse(byteChunks)).completeStream(
+    [{ role: "user", content: "hello" }],
+    new ts.config.ModelConfig({}),
+    100,
+    (piece) => streamed.push(piece),
+  );
+  return { reply, streamed };
+}
+
+async function deepseekChecks() {
+  const responseBodies = [
+    ["plain content", { choices: [{ message: { role: "assistant", content: "ok" } }] }],
+    ["reasoning content", { choices: [{ message: { role: "assistant", content: "ok", reasoning_content: "because" } }] }],
+    ["null content", { choices: [{ message: { role: "assistant", content: null } }] }],
+    ["tool calls", { choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup", arguments: "{}" } }] } }] }],
+    ["usage", { choices: [{ message: { role: "assistant", content: "ok" } }], usage: { total_tokens: 7 } }],
+    ["no choices", { error: { message: "bad" } }],
+    ["empty choices", { choices: [] }],
+    ["choice without message", { choices: [{}] }],
+    ["not an object", [1, 2, 3]],
+  ];
+
+  for (const [label, body] of responseBodies) {
+    const expected = await captureAsync(() => tsCompleteReply(body));
+    check(`reply(${label})`, capture(() => JSON.parse(native.parseModelReply(JSON.stringify(body)))), expected);
+  }
+
+  const emoji = "😀 中文 mixed";
+  const encoder = new TextEncoder();
+  const emojiBytes = encoder.encode(`data: {"choices":[{"delta":{"content":"${emoji}"}}]}\n`);
+  const splitAt = 20;
+
+  const streamCases = [
+    ["two content deltas", ['data: {"choices":[{"delta":{"content":"Hel"}}]}\n\ndata: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: [DONE]\n\n']],
+    ["reasoning then content with usage", ['data:{"choices":[{"delta":{"reasoning_content":"think"}}]}\ndata:{"choices":[{"delta":{"content":"ok"}}],"usage":{"total_tokens":5}}\ndata:[DONE]\n']],
+    ["no trailing newline", ['data: {"choices":[{"delta":{"content":"tail"}}]}']],
+    ["comments and blank lines", [': comment\n\ndata: {"choices":[{"delta":{"content":"x"}}]}\n\n']],
+    ["malformed json chunk", ['data: {not json}\ndata: {"choices":[{"delta":{"content":"y"}}]}\n']],
+    ["done only", ["data: [DONE]\n"]],
+    ["empty", [""]],
+    ["crlf line endings", ['data: {"choices":[{"delta":{"content":"crlf"}}]}\r\n\r\ndata: [DONE]\r\n']],
+    ["json token split across chunks", ['data: {"choices":[{"delta":{"cont', 'ent":"split"}}]}\ndata: [DONE]\n']],
+    ["multibyte split across chunks", [emojiBytes.slice(0, splitAt), emojiBytes.slice(splitAt)]],
+  ];
+
+  for (const [label, rawChunks] of streamCases) {
+    const byteChunks = rawChunks.map((chunk) => (typeof chunk === "string" ? encoder.encode(chunk) : chunk));
+    const expected = await captureAsync(() => tsStreamReply(byteChunks));
+    const actual = capture(() => nativeStreamReply(byteChunks));
+    checkWithDivergences(`stream(${label})`, actual, expected, label);
+  }
+}
+
+function captureAsync(fn) {
+  return fn().then(
+    (value) => ({ value: value === undefined ? null : value }),
+    (error) => ({ error: String((error && error.message) || error) }),
+  );
+}
+
+// Frozen expectations for the DeepSeek client, captured from the verified
+// pre-switch implementation.
+const userMessage = [{ role: "user", content: "hi" }];
+check("golden: payload with thinking and max effort", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", true, "max", 42, undefined, false)), {
+  model: "deepseek-v4.1-flash",
+  messages: userMessage,
+  thinking: { type: "enabled" },
+  stream: false,
+  max_tokens: 42,
+  reasoning_effort: "max",
+});
+check("golden: payload omits effort when thinking is off", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, undefined, false)), {
+  model: "deepseek-v4.1-flash",
+  messages: userMessage,
+  thinking: { type: "disabled" },
+  stream: false,
+  max_tokens: 42,
+});
+check("golden: streaming payload asks for usage", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, undefined, true)).stream_options, { include_usage: true });
+check("golden: empty tool list is omitted", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, "[]", false)), {
+  model: "deepseek-v4.1-flash",
+  messages: userMessage,
+  thinking: { type: "disabled" },
+  stream: false,
+  max_tokens: 42,
+});
+check(
+  "golden: image in a system message rejected",
+  capture(() => native.buildChatPayload(JSON.stringify([{ role: "system", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-v4.1-flash", false, "high", 10, undefined, false)),
+  { error: "DeepSeek image content is supported only in user messages." },
+);
+check(
+  "golden: image with the pro model rejected",
+  capture(() => native.buildChatPayload(JSON.stringify([{ role: "user", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-v4-pro-0813", false, "high", 10, undefined, false)),
+  { error: "Image input requires model deepseek-v4.1-flash." },
+);
+check(
+  "golden: reply parsing",
+  JSON.parse(native.parseModelReply(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok", reasoning_content: "why" } }], usage: { total_tokens: 3 } }))),
+  {
+    content: "ok",
+    reasoningContent: "why",
+    toolCalls: [],
+    usage: { total_tokens: 3 },
+    assistantMessage: { role: "assistant", content: "ok", reasoning_content: "why" },
+  },
+);
+check(
+  "golden: unexpected response message",
+  capture(() => native.parseModelReply(JSON.stringify({ error: { message: "bad" } }))),
+  { error: 'Unexpected DeepSeek response: {"error":{"message":"bad"}}' },
+);
+check(
+  "golden: malformed chunk fails the stream instead of dropping deltas",
+  capture(() => nativeStreamReply([new TextEncoder().encode("data: {not json}\ndata: [DONE]\n")])),
+  { error: "DeepSeek API request failed: Invalid streaming chunk: key must be a string at line 1 column 2" },
+);
+check(
+  "golden: multibyte character split across chunks survives",
+  nativeStreamReply((() => {
+    const bytes = new TextEncoder().encode('data: {"choices":[{"delta":{"content":"😀 中文"}}]}\ndata: [DONE]\n');
+    return [bytes.slice(0, 30), bytes.slice(30)];
+  })()).reply.content,
+  "😀 中文",
+);
+
 // --- report -------------------------------------------------------------------
 
-if (failures.length > 0) {
-  console.error(`parity FAILED: ${failures.length} of ${checks} checks diverged\n`);
-  console.error(failures.join("\n\n"));
-  process.exit(1);
-}
-console.log(`parity OK: ${checks} checks matched between the TypeScript core and the Rust binding`);
+deepseekChecks().then(
+  () => {
+    if (failures.length > 0) {
+      console.error(`parity FAILED: ${failures.length} of ${checks} checks diverged\n`);
+      console.error(failures.join("\n\n"));
+      process.exit(1);
+    }
+    console.log(`parity OK: ${checks} checks matched between the TypeScript core and the Rust binding`);
+  },
+  (error) => {
+    console.error("parity harness error:", error);
+    process.exit(1);
+  },
+);

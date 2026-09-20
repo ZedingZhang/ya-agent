@@ -72,14 +72,19 @@ pub fn is_image_detail(value: String) -> bool {
     matches!(value.as_str(), "low" | "high" | "original" | "auto")
 }
 
-#[napi]
-pub fn assert_image_count(count: u32) -> napi::Result<()> {
-    if count > MAX_IMAGES_PER_REQUEST {
-        return Err(napi::Error::from_reason(format!(
+/// Enforces DeepSeek's per-request image limit.
+pub(crate) fn check_image_count(count: usize) -> Result<(), String> {
+    if count > MAX_IMAGES_PER_REQUEST as usize {
+        return Err(format!(
             "DeepSeek accepts at most {MAX_IMAGES_PER_REQUEST} images per request."
-        )));
+        ));
     }
     Ok(())
+}
+
+#[napi]
+pub fn assert_image_count(count: u32) -> napi::Result<()> {
+    check_image_count(count as usize).map_err(napi::Error::from_reason)
 }
 
 /// The canonical data URL and decoded byte count for an inline image source.

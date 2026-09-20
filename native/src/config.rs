@@ -32,7 +32,12 @@ pub fn resolve_model(value: String) -> napi::Result<String> {
     }
 }
 
+/// V4.1-Flash carries the vision support; the pro model is text-only.
+pub(crate) fn vision_capable(model: &str) -> bool {
+    model == FLASH
+}
+
 #[napi]
 pub fn is_vision_model(model: String) -> bool {
-    model == FLASH
+    vision_capable(&model)
 }
