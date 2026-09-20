@@ -7,7 +7,7 @@
 // Usage: npm run test:parity   (needs `npm run build` and `npm run build:native`)
 
 const assert = require("node:assert/strict");
-const { existsSync, mkdtempSync } = require("node:fs");
+const { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const path = require("node:path");
 
@@ -35,6 +35,7 @@ const ts = {
   web: require(path.join(tsRoot, "web.js")),
   deepseek: require(path.join(tsRoot, "deepseek.js")),
   orchestrator: require(path.join(tsRoot, "orchestrator.js")),
+  local: require(path.join(tsRoot, "local.js")),
 };
 const native = require(bindingPath);
 
@@ -831,6 +832,105 @@ check("golden: substring is not a keyword", native.shouldUseWeb("priceless artef
 check("golden: unknown worker role", capture(() => native.workerPrompt("nope")), { error: "Unknown ToA worker role: nope" });
 check("golden: core prompt opening", native.corePrompt().startsWith("You are Ya, a consent-first personal research assistant."), true);
 check("golden: local prompt is offered only when local tools are on", native.buildTaskMessages("t", "", "", false, "[]").includes("Local workspace tools are available"), false);
+
+// --- local: limits, tool contracts and file policy ------------------------------
+
+check("local tool definitions", JSON.parse(native.localToolDefinitions()), ts.local.LOCAL_TOOLS);
+check("local limits", native.localLimits(), {
+  maxTextBytes: ts.local.MAX_TEXT_BYTES,
+  maxListEntries: ts.local.MAX_LIST_ENTRIES,
+  maxSearchResults: ts.local.MAX_SEARCH_RESULTS,
+  maxDiffLines: ts.local.MAX_DIFF_LINES,
+  maxAuditArchives: ts.local.MAX_AUDIT_ARCHIVES,
+  auditLogMaxBytes: ts.local.AUDIT_LOG_MAX_BYTES,
+});
+
+// The sensitive-name rule is private in TypeScript, so the comparison runs the
+// real workspace read over a directory of awkward names and derives the Rust
+// outcome the same way local.ts layers its checks.
+const localRoot = mkdtempSync(path.join(tmpdir(), "ya-local-"));
+const localFiles = [
+  ["notes.md", "hello\n"],
+  [".env", "SECRET=1\n"],
+  [".env.local", "SECRET=1\n"],
+  ["id_rsa", "key\n"],
+  ["credentials.json", "{}\n"],
+  ["cert.pem", "cert\n"],
+  ["store.kdbx", "vault\n"],
+  ["mysecrets.txt", "shh\n"],
+  ["solar.key", "key\n"],
+  ["binary.bin", null],
+  ["latin1.txt", null],
+];
+for (const [name, content] of localFiles) {
+  if (content === null) writeFileSync(path.join(localRoot, name), Buffer.from(name === "binary.bin" ? [0x00, 0x01, 0x02] : [0xff, 0xfe, 0x41]));
+  else writeFileSync(path.join(localRoot, name), content);
+}
+mkdirSync(path.join(localRoot, ".git"));
+writeFileSync(path.join(localRoot, ".git", "config"), "[core]\n");
+
+const localWorkspace = new ts.local.LocalWorkspace(localRoot, () => false);
+const localTargets = [...localFiles.map(([name]) => name), path.join(".git", "config")];
+
+for (const target of localTargets) {
+  const full = path.join(localRoot, target);
+  const relativePath = path.relative(localRoot, full) || ".";
+  const expected = capture(() => JSON.parse(localWorkspace.read({ path: target })));
+  const actual = capture(() => {
+    if (native.isSensitiveFile(path.basename(full).toLowerCase(), relativePath.split(path.sep))) {
+      throw new Error("Reading sensitive files is blocked in local mode.");
+    }
+    const bytes = readFileSync(full);
+    native.assertTextSize(bytes.length);
+    return { path: relativePath, content: native.decodeTextFile(bytes) };
+  });
+  check(`local read(${JSON.stringify(target)})`, actual, expected);
+}
+
+for (const size of [0, 1_048_576, 1_048_577]) {
+  check(`assertTextSize(${size})`, capture(() => native.assertTextSize(size)), size > ts.local.MAX_TEXT_BYTES
+    ? { error: "Text files larger than 1 MiB cannot be read or replaced." }
+    : { value: null });
+}
+
+// tailCompleteLines is private in TypeScript; this restates its four lines so
+// the port is compared against the same algorithm.
+function tsTailCompleteLines(data, limit) {
+  if (data.byteLength <= limit) return data;
+  const tail = data.subarray(data.byteLength - limit);
+  const newline = tail.indexOf(0x0a);
+  return newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0);
+}
+
+const tailSamples = [
+  [Buffer.from("a\nbb\nccc\n", "utf8"), 6],
+  [Buffer.from("a\nbb\nccc\n", "utf8"), 100],
+  [Buffer.from("no newline at all", "utf8"), 5],
+  [Buffer.from("", "utf8"), 4],
+  [Buffer.from("x\ny\n", "utf8"), 0],
+];
+for (const [data, limit] of tailSamples) {
+  check(
+    `tailCompleteLines(${JSON.stringify(data.toString("utf8"))}, ${limit})`,
+    native.tailCompleteLines(data, limit),
+    tsTailCompleteLines(data, limit),
+  );
+}
+
+// Frozen expectations for the local-mode policy, captured from the verified
+// pre-switch implementation.
+check("golden: dotfile secrets", native.isSensitiveFile(".env", [".env"]), true);
+check("golden: dotfile secret variant", native.isSensitiveFile(".env.local", [".env.local"]), true);
+check("golden: private key name", native.isSensitiveFile("id_ed25519", ["id_ed25519"]), true);
+check("golden: key extension", native.isSensitiveFile("server.key", ["server.key"]), true);
+check("golden: substring match", native.isSensitiveFile("mysecrets.txt", ["mysecrets.txt"]), true);
+check("golden: git directory anywhere in the path", native.isSensitiveFile("config", ["nested", ".git", "config"]), true);
+check("golden: ordinary file", native.isSensitiveFile("notes.md", ["notes.md"]), false);
+check("golden: dotted name that is not a secret", native.isSensitiveFile("report.final.md", ["report.final.md"]), false);
+check("golden: NUL byte is binary", capture(() => native.decodeTextFile(Buffer.from([0x41, 0x00]))), { error: "Binary files cannot be read in local mode." });
+check("golden: invalid utf-8", capture(() => native.decodeTextFile(Buffer.from([0xff, 0xfe]))), { error: "Only UTF-8 text files can be read in local mode." });
+check("golden: audit tail starts on a line boundary", native.tailCompleteLines(Buffer.from("first\nsecond\nthird\n"), 10).toString("utf8"), "third\n");
+check("golden: audit tail with no newline is dropped", native.tailCompleteLines(Buffer.from("no newline here"), 5).length, 0);
 
 // --- report -------------------------------------------------------------------
 

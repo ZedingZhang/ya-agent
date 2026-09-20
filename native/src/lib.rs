@@ -10,6 +10,7 @@ mod config;
 mod deepseek;
 mod images;
 mod keychain;
+mod local;
 mod memory;
 mod orchestrator;
 mod web;
