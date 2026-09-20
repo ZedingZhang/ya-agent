@@ -90,10 +90,11 @@ describe("CLI", () => {
     expect(capture.stdout.output).toContain("ask");
   });
 
-  it("advertises the vision model and repeatable image input", async () => {
+  it("advertises the V4.1 model aliases and repeatable image input", async () => {
     const capture = fakeIo();
     expect(await main(["ask", "--help"], context(capture.io))).toBe(0);
-    expect(capture.stdout.output).toContain("vision");
+    expect(capture.stdout.output).toContain("flash");
+    expect(capture.stdout.output).not.toContain("vision");
     expect(capture.stdout.output).toContain("--image <source>");
     expect(capture.stdout.output).toContain("--image-detail <detail>");
   });
@@ -101,7 +102,7 @@ describe("CLI", () => {
   it("sets validated configuration values", async () => {
     const capture = fakeIo();
     expect(await main(["config", "set", "model", "pro"], { io: capture.io })).toBe(0);
-    expect(capture.stdout.output).toContain("deepseek-v4-pro");
+    expect(capture.stdout.output).toContain("deepseek-v4-pro-0813");
     expect(await main(["config", "set", "unknown", "max"], { io: capture.io })).toBe(2);
     expect(capture.stderr.output).toContain("config key");
   });
@@ -172,7 +173,7 @@ describe("CLI", () => {
       "ask",
       "Explain the chart",
       "--model",
-      "vision",
+      "flash",
       "--image",
       path,
       "--image-detail",
@@ -194,11 +195,13 @@ describe("CLI", () => {
     expect(await main([
       "ask",
       "Explain the chart",
+      "--model",
+      "pro",
       "--image",
       "does-not-need-to-exist.png",
       "--no-feedback",
     ], context(capture.io, client))).toBe(2);
-    expect(capture.stderr.output).toContain("deepseek-v4-flash-vision-exp");
+    expect(capture.stderr.output).toContain("deepseek-v4.1-flash");
   });
 
   it("honors explicit Markdown and terminal output formats", async () => {

@@ -227,7 +227,7 @@ function registerIpc(): void {
     if (taskRunning) throw new Error("A task is already running.");
     const options = validateTaskOptions(raw);
     if (options.imageIds.length > 0 && !isVisionModel(controller.config.model)) {
-      throw new Error(`Image input requires model ${VALID_MODELS.vision}.`);
+      throw new Error(`Image input requires model ${VALID_MODELS.flash}.`);
     }
     const files = options.imageIds.map((id) => {
       const file = selectedImages.get(id);
@@ -364,7 +364,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
     const model = document.querySelector('#task-model');
     const reasoning = document.querySelector('#task-reasoning');
-    const visionOption = document.querySelector('#task-model option[value="deepseek-v4-flash-vision-exp"]') !== null;
+    const visionOption = document.querySelector('#task-model option[value="deepseek-v4.1-flash"]') !== null;
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';

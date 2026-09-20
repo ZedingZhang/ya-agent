@@ -29,7 +29,7 @@ interface AppState {
   stream: boolean;
   hasApiKey: boolean;
   config: {
-    model: "deepseek-v4-flash" | "deepseek-v4-pro" | "deepseek-v4-flash-vision-exp";
+    model: "deepseek-v4.1-flash" | "deepseek-v4-pro-0813";
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     toaTokenBudget: number;
@@ -109,7 +109,7 @@ const TEXT = {
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
     attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
-    visionOnly: "Select the vision model in the workspace to attach images.", noImages: "No images attached.",
+    visionOnly: "Image input requires the DeepSeek-V4.1-Flash model.", noImages: "No images attached.",
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
@@ -130,7 +130,7 @@ const TEXT = {
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
-    visionOnly: "请先在工作区选择视觉模型再添加图片。", noImages: "尚未添加图片",
+    visionOnly: "图片输入需要选择 DeepSeek-V4.1-Flash 模型。", noImages: "尚未添加图片",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
 } as const;
@@ -145,7 +145,7 @@ let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
-const VISION_MODEL = "deepseek-v4-flash-vision-exp";
+const VISION_MODEL = "deepseek-v4.1-flash";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);

@@ -3,14 +3,30 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 export const VALID_MODELS = {
-  flash: "deepseek-v4-flash",
-  pro: "deepseek-v4-pro",
-  vision: "deepseek-v4-flash-vision-exp",
+  flash: "deepseek-v4.1-flash",
+  pro: "deepseek-v4-pro-0813",
 } as const;
 
 export type ModelAlias = keyof typeof VALID_MODELS;
 export type ModelId = (typeof VALID_MODELS)[ModelAlias];
 export type ReasoningEffort = "high" | "max";
+
+/** V4.1-Flash has native vision support; the pro model is text-only. */
+const VISION_MODELS: readonly ModelId[] = [VALID_MODELS.flash];
+
+/** Names retired by the V4.1 line-up, still resolved so existing configuration keeps loading. */
+const RETIRED_MODELS: Record<string, ModelId> = {
+  vision: VALID_MODELS.flash,
+  "deepseek-v4-flash": VALID_MODELS.flash,
+  "deepseek-v4-pro": VALID_MODELS.pro,
+  "deepseek-v4-flash-vision-exp": VALID_MODELS.flash,
+};
+
+function resolveModel(value: string): ModelId | undefined {
+  if (value in VALID_MODELS) return VALID_MODELS[value as ModelAlias];
+  if (Object.values(VALID_MODELS).includes(value as ModelId)) return value as ModelId;
+  return RETIRED_MODELS[value];
+}
 
 export interface ModelConfigValues {
   model: ModelId;
@@ -89,7 +105,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readModel(value: unknown): ModelId {
-  return typeof value === "string" ? (value as ModelId) : VALID_MODELS.flash;
+  if (typeof value !== "string") return VALID_MODELS.flash;
+  return resolveModel(value) ?? (value as ModelId);
 }
 
 function readEffort(value: unknown): ReasoningEffort {
@@ -135,17 +152,17 @@ export function saveConfig(config: ModelConfig): void {
 }
 
 export function modelId(value: string): ModelId {
-  if (value in VALID_MODELS) return VALID_MODELS[value as ModelAlias];
-  if (Object.values(VALID_MODELS).includes(value as ModelId)) return value as ModelId;
-  throw new Error("model must be 'flash', 'pro', or 'vision'.");
+  const resolved = resolveModel(value);
+  if (!resolved) throw new Error("model must be 'flash' or 'pro'.");
+  return resolved;
 }
 
 export function isVisionModel(model: ModelId): boolean {
-  return model === VALID_MODELS.vision;
+  return VISION_MODELS.includes(model);
 }
 
 export function assertImageInputSupported(model: ModelId, imageCount: number): void {
   if (imageCount > 0 && !isVisionModel(model)) {
-    throw new Error(`Image input requires model ${VALID_MODELS.vision}.`);
+    throw new Error(`Image input requires model ${VALID_MODELS.flash}.`);
   }
 }
