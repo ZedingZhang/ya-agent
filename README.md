@@ -213,10 +213,15 @@ The application does not start a local web server. The renderer cannot access No
 
 ## Development
 
+The shared core is written in Rust and compiled to a Node-API addon, so a Rust
+toolchain is required (see [native/README.md](native/README.md)):
+
 ```sh
 npm ci
+npm run build:native
 npm run typecheck
 npm test
+npm run test:parity
 npm run build
 npm run smoke:gui
 npm run check
@@ -228,6 +233,8 @@ Useful commands:
 
 ```sh
 npm start -- --help        # build and run the CLI
+npm run build:native       # compile the Rust core for this host
+npm run test:parity        # compare the Rust core against the TypeScript one
 npm run gui                # build and run Electron
 npm run smoke:gui          # load IPC/preload/renderer and verify navigation
 npm run test:watch         # watch unit tests

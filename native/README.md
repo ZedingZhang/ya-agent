@@ -75,6 +75,26 @@ Rust default. Each one was found by the parity harness rather than assumed:
   auto-detection writes `(?-u:\b)` so a keyword next to a Han character still
   matches, which a Unicode boundary would block.
 
+## Packaging
+
+The binding is a build artifact, so every packaging path has to carry it.
+
+- **Desktop** (`electron-builder`). `node_modules/ya-core` is a production
+  dependency, so the module is copied automatically; `asarUnpack: ["**/*.node"]`
+  keeps the addon outside the asar archive, because `process.dlopen` cannot load
+  a library from inside one. The crate's `target/` directory must stay excluded:
+  it is 520 MB of build output that would otherwise be packed into the app.
+- **CLI** (`pkg`). pkg packs JavaScript into a virtual filesystem inside the
+  executable, and a native addon cannot be loaded from there. The binding is
+  listed in `pkg.assets`, and `src/native-binding.ts` — the first import of
+  `cli.ts` — reads it out of the snapshot to a stable temporary path and points
+  `NAPI_RS_NATIVE_LIBRARY_PATH` at it before the loader runs. That keeps the
+  single-executable distribution the top-level README promises.
+- **CI**. `ci.yml` and `release.yml` install a Rust toolchain and run
+  `npm run build:native` before anything that needs the binding, then run
+  `npm run test:parity`. The release matrix builds each platform's binding on its
+  own runner rather than cross-compiling.
+
 ## What deliberately stays in TypeScript
 
 Two parts of `local.ts` are not ported, on purpose:
