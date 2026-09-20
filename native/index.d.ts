@@ -29,6 +29,17 @@ export declare function assertImageCount(count: number): void
 /** Builds the chat-completions request body. */
 export declare function buildChatPayload(messagesJson: string, model: string, thinkingEnabled: boolean, reasoningEffort: string, maxTokens: number, toolsJson: string | undefined | null, stream: boolean): string
 
+export declare function buildIcmInstruction(priorDraft: string): string
+
+export declare function buildIcmSupplement(prior: string, supplement: string): string
+
+export declare function buildSynthesisInstruction(packetsJson: string): string
+
+/** Builds the system and user messages for one task. */
+export declare function buildTaskMessages(task: string, memoryContext: string, extraInstruction: string, localEnabled: boolean, imagesJson: string): string
+
+export declare function corePrompt(): string
+
 export declare function currentPlatform(): string
 
 export declare function defaultModel(): string
@@ -51,6 +62,9 @@ export declare function externalImageUrl(source: string): string
 export declare function fileApiImageId(source: string): string
 
 export declare function hanNgramTokens(text: string, width: number): Array<string>
+
+/** The ICM marker is matched case-insensitively, mirroring `toLocaleLowerCase`. */
+export declare function icmFollowUpNeeded(content: string): boolean
 
 export declare function imageDataUrlPart(source: string): ImageDataUrlPart
 
@@ -78,6 +92,8 @@ export declare function keychainAccount(): string
 export declare function keychainService(): string
 
 export declare function loadApiKey(): string | null
+
+export declare function localPrompt(): string
 
 export declare function macosKeychainAvailable(platform: string, securityPath?: string | undefined | null): boolean
 
@@ -112,6 +128,16 @@ export interface SearchResult {
   url: string
 }
 
+export declare function shouldUseWeb(task: string, webMode: string): boolean
+
+export declare function singleAgentBudget(toaTokenBudget: number): SingleBudget
+
+/** Token budget for a single answer. */
+export interface SingleBudget {
+  reserve: number
+  maxTokens: number
+}
+
 /** One interpreted server-sent event. */
 export interface StreamChunk {
   done: boolean
@@ -120,4 +146,23 @@ export interface StreamChunk {
   usageJson?: string
 }
 
+/** Removes the first ICM marker, as `replace` with a non-global pattern does. */
+export declare function stripIcmMarker(content: string): string
+
 export declare function supportedModels(): Array<string>
+
+export declare function toaAgentBudget(toaTokenBudget: number, workers: number): ToaBudget
+
+/** Token budget split for a Tree of Agents run. */
+export interface ToaBudget {
+  icmReserve: number
+  workingBudget: number
+  allocation: number
+  synthesisBudget: number
+}
+
+/** Appends the explicit-web notice when the caller forced web search on. */
+export declare function webRequiredInstruction(instruction: string, webMode: string): string
+
+/** The instruction handed to one ToA worker. */
+export declare function workerPrompt(role: string): string

@@ -70,6 +70,10 @@ Rust default. Each one was found by the parity harness rather than assumed:
   `String.fromCodePoint` produces for `&#xD800;`. Rust strings are valid UTF-8
   and cannot, so the code point becomes U+FFFD. This is the one permanent
   behavioural difference and it is recorded as a golden check.
+- ASCII word boundaries — JavaScript's `\b` is defined on `\w` = `[A-Za-z0-9_]`,
+  while a Rust regex uses Unicode word boundaries by default. The web-search
+  auto-detection writes `(?-u:\b)` so a keyword next to a Han character still
+  matches, which a Unicode boundary would block.
 
 ## Milestones
 
@@ -82,8 +86,8 @@ Rust default. Each one was found by the parity harness rather than assumed:
 | 4 | `images` — signature sniffing, data URLs, source validation | done: ported, parity verified pre-switch, TS delegates; file inspection stays in TS |
 | 5 | `web` — search-result parsing, redirect unwrapping, HTML entities | done: ported, parity verified pre-switch, TS delegates; the HTTP call stays in TS |
 | 6 | `deepseek` — request body, reply parsing, stream chunks, SSE framing | done: ported, parity verified pre-switch, TS delegates; transport and the retry loop stay in TS |
-| 7 | `orchestrator` — single agent, tool rounds, ToA workers | next |
-| 8 | `local` — workspace confinement, audit rotation, unified diff | not started |
+| 7 | `orchestrator` — prompts, token budgets, ICM rules | done: ported, parity verified pre-switch, TS delegates; the agent calls stay in TS |
+| 8 | `local` — workspace confinement, audit rotation, unified diff | next |
 | 9 | `service` + CLI front end | not started |
 | 10 | Packaging: prebuilt bindings per platform, `electron-builder` + `pkg` | not started |
 

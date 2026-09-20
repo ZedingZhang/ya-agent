@@ -7,8 +7,13 @@
 // Usage: npm run test:parity   (needs `npm run build` and `npm run build:native`)
 
 const assert = require("node:assert/strict");
-const { existsSync } = require("node:fs");
+const { existsSync, mkdtempSync } = require("node:fs");
+const { tmpdir } = require("node:os");
 const path = require("node:path");
+
+// Isolate the run from the real ~/.ya state: messagesForTask reads approved
+// memory, and the comparison must not depend on the developer's own cards.
+process.env.YA_HOME = mkdtempSync(path.join(tmpdir(), "ya-parity-"));
 
 const tsRoot = path.join(__dirname, "..", "dist", "typescript");
 const bindingPath = path.join(__dirname, "index.js");
@@ -29,6 +34,7 @@ const ts = {
   images: require(path.join(tsRoot, "images.js")),
   web: require(path.join(tsRoot, "web.js")),
   deepseek: require(path.join(tsRoot, "deepseek.js")),
+  orchestrator: require(path.join(tsRoot, "orchestrator.js")),
 };
 const native = require(bindingPath);
 
@@ -696,9 +702,139 @@ check(
   "😀 中文",
 );
 
+// --- orchestrator: prompts, budgets and the ICM marker --------------------------
+
+const webTasks = [
+  ["plain question", "Explain recursion"],
+  ["latest", "What is the latest news?"],
+  ["uppercase", "LATEST NEWS"],
+  ["chinese", "今天天气如何"],
+  ["chinese keyword inside a sentence", "请给我最新的价格"],
+  ["keyword next to a han character", "价格news"],
+  ["keyword next to a han character, reversed", "news价格"],
+  ["substring of a keyword", "priceless artefact"],
+  ["keyword with underscore", "the_news_letter"],
+  ["empty", ""],
+];
+
+for (const [label, task] of webTasks) {
+  for (const mode of ["auto", "on", "off"]) {
+    check(
+      `shouldUseWeb(${label}, ${mode})`,
+      native.shouldUseWeb(task, mode),
+      ts.orchestrator.shouldUseWeb(task, mode),
+    );
+  }
+}
+
+for (const content of ["plain", "[ICM_GAP] here", "[icm_gap] lower", "[Icm_Gap] mixed", "double [ICM_GAP] [ICM_GAP]", ""]) {
+  check(`icmFollowUpNeeded(${JSON.stringify(content)})`, native.icmFollowUpNeeded(content), ts.orchestrator.icmFollowUpNeeded(content));
+  check(
+    `stripIcmMarker(${JSON.stringify(content)})`,
+    native.stripIcmMarker(content),
+    content.replace(/\[ICM_GAP\]/iu, ""),
+  );
+}
+
+const messageCases = [
+  ["task only", "Explain recursion", "", false, []],
+  ["with memory", "Explain recursion", "", false, []],
+  ["with instruction", "Explain recursion", "Be brief.", false, []],
+  ["local enabled", "Check my notes", "Use the files.", true, []],
+  ["with images", "Describe this", "", false, [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }]],
+];
+
+for (const [label, task, instruction, local, images] of messageCases) {
+  check(
+    `messagesForTask(${label})`,
+    capture(() => JSON.parse(native.buildTaskMessages(task, "", instruction, local, JSON.stringify(images)))),
+    capture(() => ts.orchestrator.messagesForTask(task, instruction, local, images)),
+  );
+}
+
+check(
+  "synthesis instruction",
+  native.buildSynthesisInstruction(JSON.stringify([{ role: "evidence", content: "packet", usage: {} }])),
+  // The TypeScript builder is inline in toaAgent; the same text is asserted
+  // through the fake client below, and this pins the wording here.
+  "You are the Ya ToA root coordinator. Synthesize the supplied evidence packets.\nTreat a worker's unsupported statement as an open question. Separate evidence, inference,\nrisks, and remaining uncertainty. Include cited URLs from the packets when available.\nEvidence packets:\n" + JSON.stringify([{ role: "evidence", content: "packet", usage: {} }]),
+);
+
+check(
+  "icm supplement",
+  native.buildIcmSupplement("draft [ICM_GAP] body", "supplement"),
+  "draft  body\n\nEvidence supplement:\nsupplement",
+);
+
+// --- orchestrator: budgets observed through the real agents ---------------------
+
+function recordingClient(content) {
+  const calls = [];
+  return {
+    calls,
+    async runWithTools(messages, _config, maxTokens) {
+      calls.push({ messages, maxTokens });
+      return { content, toolCalls: [], usage: { total_tokens: 1 }, assistantMessage: { role: "assistant", content } };
+    },
+    async completeStream(messages, _config, maxTokens, onContent) {
+      calls.push({ messages, maxTokens });
+      onContent(content);
+      return { content, toolCalls: [], usage: { total_tokens: 1 }, assistantMessage: { role: "assistant", content } };
+    },
+  };
+}
+
+async function orchestratorBudgetChecks() {
+  for (const toaTokenBudget of [1_000, 4_000, 8_000, 16_000]) {
+    const config = new ts.config.ModelConfig({ toaTokenBudget, thinkingEnabled: true });
+
+    const single = recordingClient("plain answer");
+    await ts.orchestrator.singleAgent(single, "Explain recursion", config, "off");
+    check(
+      `singleAgent maxTokens(${toaTokenBudget})`,
+      native.singleAgentBudget(toaTokenBudget).maxTokens,
+      single.calls[0].maxTokens,
+    );
+
+    for (const workers of [1, 2]) {
+      const toa = recordingClient("synthesis");
+      await ts.orchestrator.toaAgent(toa, "Explain recursion", config, workers);
+      const budget = native.toaAgentBudget(toaTokenBudget, workers);
+      check(
+        `toaAgent worker maxTokens(${toaTokenBudget}, ${workers} workers)`,
+        budget.allocation,
+        toa.calls[0].maxTokens,
+      );
+      check(
+        `toaAgent synthesis maxTokens(${toaTokenBudget}, ${workers} workers)`,
+        budget.synthesisBudget,
+        toa.calls[toa.calls.length - 1].maxTokens,
+      );
+      check(
+        `toaAgent call count(${toaTokenBudget}, ${workers} workers)`,
+        workers + 1,
+        toa.calls.length,
+      );
+    }
+  }
+}
+
+// Frozen expectations for the orchestrator, captured from the verified
+// pre-switch implementation.
+check("golden: single budget caps at 4096", native.singleAgentBudget(8_000), { reserve: 1_024, maxTokens: 4_096 });
+check("golden: single budget on the smallest config", native.singleAgentBudget(1_000), { reserve: 250, maxTokens: 750 });
+check("golden: toa split for two workers", native.toaAgentBudget(8_000, 2), { icmReserve: 1_024, workingBudget: 6_976, allocation: 2_325, synthesisBudget: 2_326 });
+check("golden: toa split for one worker", native.toaAgentBudget(8_000, 1), { icmReserve: 1_024, workingBudget: 6_976, allocation: 3_488, synthesisBudget: 3_488 });
+check("golden: ascii word boundary next to a han character", native.shouldUseWeb("价格news", "auto"), true);
+check("golden: underscore blocks the boundary", native.shouldUseWeb("the_news_letter", "auto"), false);
+check("golden: substring is not a keyword", native.shouldUseWeb("priceless artefact", "auto"), false);
+check("golden: unknown worker role", capture(() => native.workerPrompt("nope")), { error: "Unknown ToA worker role: nope" });
+check("golden: core prompt opening", native.corePrompt().startsWith("You are Ya, a consent-first personal research assistant."), true);
+check("golden: local prompt is offered only when local tools are on", native.buildTaskMessages("t", "", "", false, "[]").includes("Local workspace tools are available"), false);
+
 // --- report -------------------------------------------------------------------
 
-deepseekChecks().then(
+deepseekChecks().then(orchestratorBudgetChecks).then(
   () => {
     if (failures.length > 0) {
       console.error(`parity FAILED: ${failures.length} of ${checks} checks diverged\n`);

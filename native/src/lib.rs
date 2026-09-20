@@ -11,4 +11,5 @@ mod deepseek;
 mod images;
 mod keychain;
 mod memory;
+mod orchestrator;
 mod web;
