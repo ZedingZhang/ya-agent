@@ -54,6 +54,23 @@ path on any host. `tests/keychain.test.ts` fails a genuine subprocess by pointin
 `securityPath` at a real non-executable file, which is stronger than the mock it
 replaced.
 
+## JavaScript compatibility
+
+`src/compat.rs` collects the places where JavaScript semantics differ from the
+Rust default. Each one was found by the parity harness rather than assumed:
+
+- `is_js_space` — JavaScript's `\s` also matches `\uFEFF` and the line and
+  paragraph separators, which `char::is_whitespace` does not.
+- `utf16_len` — `String.prototype.length` counts UTF-16 code units, so
+  length-based guards disagree with `chars().count()` on astral characters.
+- `decode_base64_lenient` — `Buffer.from(value, "base64")` ignores padding and
+  trailing characters that do not complete a group of four; the `base64` crate
+  rejects what Node accepts, so it is used for encoding only.
+- Lone surrogates — JavaScript strings can hold the lone surrogate that
+  `String.fromCodePoint` produces for `&#xD800;`. Rust strings are valid UTF-8
+  and cannot, so the code point becomes U+FFFD. This is the one permanent
+  behavioural difference and it is recorded as a golden check.
+
 ## Milestones
 
 | # | Scope | State |
@@ -63,8 +80,8 @@ replaced.
 | 2 | `keychain` — macOS `security` shell-out, `DEEPSEEK_API_KEY` fallback | done: ported, parity verified pre-switch, TS delegates |
 | 3 | `memory` — ranking: NFKC folding, English words/phrases, Han n-grams | done: ranking ported, parity verified pre-switch, TS delegates; card file I/O stays in TS |
 | 4 | `images` — signature sniffing, data URLs, source validation | done: ported, parity verified pre-switch, TS delegates; file inspection stays in TS |
-| 5 | `web` — result parsing and normalisation | next |
-| 6 | `deepseek` — payload/response/SSE logic; transport stays in TS | not started |
+| 5 | `web` — search-result parsing, redirect unwrapping, HTML entities | done: ported, parity verified pre-switch, TS delegates; the HTTP call stays in TS |
+| 6 | `deepseek` — payload/response/SSE logic; transport stays in TS | next |
 | 7 | `orchestrator` — single agent, tool rounds, ToA workers | not started |
 | 8 | `local` — workspace confinement, audit rotation, unified diff | not started |
 | 9 | `service` + CLI front end | not started |

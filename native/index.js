@@ -799,6 +799,7 @@ module.exports.macosKeychainAvailable = nativeBinding.macosKeychainAvailable
 module.exports.memoryScore = nativeBinding.memoryScore
 module.exports.normalizeApiKey = nativeBinding.normalizeApiKey
 module.exports.normalizeMemoryText = nativeBinding.normalizeMemoryText
+module.exports.parseSearchResults = nativeBinding.parseSearchResults
 module.exports.resolveModel = nativeBinding.resolveModel
 module.exports.saveApiKey = nativeBinding.saveApiKey
 module.exports.supportedModels = nativeBinding.supportedModels

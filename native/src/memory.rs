@@ -8,35 +8,34 @@ use std::collections::BTreeSet;
 use napi_derive::napi;
 use unicode_normalization::UnicodeNormalization;
 
+use crate::compat::{collapse_js_space, utf16_len};
+
 const ENGLISH_STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "is", "it", "of",
     "on", "or", "the", "this", "that", "to", "what", "when", "where", "with",
 ];
 
 const CHINESE_STOP_PHRASES: &[&str] = &[
-    "什么", "如何", "为什", "什么是", "怎么", "可以", "请问", "一个", "这个", "那个", "我们", "你们",
-    "他们", "关于", "以及", "进行", "一下", "是否", "需要",
+    "什么",
+    "如何",
+    "为什",
+    "什么是",
+    "怎么",
+    "可以",
+    "请问",
+    "一个",
+    "这个",
+    "那个",
+    "我们",
+    "你们",
+    "他们",
+    "关于",
+    "以及",
+    "进行",
+    "一下",
+    "是否",
+    "需要",
 ];
-
-/// JavaScript's `\s`, which is wider than Rust's `char::is_whitespace`.
-fn is_js_space(character: char) -> bool {
-    matches!(
-        character,
-        '\t' | '\n'
-            | '\u{000B}'
-            | '\u{000C}'
-            | '\r'
-            | ' '
-            | '\u{00A0}'
-            | '\u{1680}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202F}'
-            | '\u{205F}'
-            | '\u{3000}'
-            | '\u{FEFF}'
-    ) || ('\u{2000}'..='\u{200A}').contains(&character)
-}
 
 fn is_word_start(character: char) -> bool {
     character.is_ascii_lowercase() || character.is_ascii_digit()
@@ -123,20 +122,7 @@ fn shared(left: &[String], right: &[String]) -> usize {
 pub fn normalize_memory_text(text: String) -> String {
     let normalized: String = text.nfkc().collect();
     let folded = normalized.to_lowercase().replace('ß', "ss");
-    let mut collapsed = String::with_capacity(folded.len());
-    let mut pending_space = false;
-    for character in folded.chars() {
-        if is_js_space(character) {
-            pending_space = !collapsed.is_empty();
-        } else {
-            if pending_space {
-                collapsed.push(' ');
-                pending_space = false;
-            }
-            collapsed.push(character);
-        }
-    }
-    collapsed
+    collapse_js_space(&folded)
 }
 
 #[napi]
@@ -166,10 +152,14 @@ pub fn memory_score(task: String, card_text: String) -> i32 {
     let shared_bigrams = shared(&han_ngrams(&task_text, 2), &han_ngrams(&card_text, 2));
     let shared_phrases = shared(&english_phrases(&task_text), &english_phrases(&card_text)) > 0
         || shared(&han_ngrams(&task_text, 3), &han_ngrams(&card_text, 3)) > 0;
-    let task_length = task_text.encode_utf16().count();
-    let card_length = card_text.encode_utf16().count();
+    let task_length = utf16_len(&task_text);
+    let card_length = utf16_len(&card_text);
     let exact_containment = task_length.min(card_length) >= 4
         && (task_text.contains(&card_text) || card_text.contains(&task_text));
-    let phrase_score = if shared_phrases || exact_containment { 5 } else { 0 };
+    let phrase_score = if shared_phrases || exact_containment {
+        5
+    } else {
+        0
+    };
     phrase_score + 3 * shared_words as i32 + shared_bigrams as i32
 }

@@ -105,8 +105,10 @@ pub fn save_api_key(
         return Err(napi::Error::from_reason(EMPTY_KEY_ERROR));
     };
     let security_path = security_path.unwrap_or_else(|| DEFAULT_SECURITY_PATH.to_string());
-    if !security_available(&platform.unwrap_or_else(|| node_platform().to_string()), &security_path)
-    {
+    if !security_available(
+        &platform.unwrap_or_else(|| node_platform().to_string()),
+        &security_path,
+    ) {
         return Err(napi::Error::from_reason(NOT_MACOS_ERROR));
     }
     match Command::new(&security_path)

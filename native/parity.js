@@ -27,6 +27,7 @@ const ts = {
   keychain: require(path.join(tsRoot, "keychain.js")),
   memory: require(path.join(tsRoot, "memory.js")),
   images: require(path.join(tsRoot, "images.js")),
+  web: require(path.join(tsRoot, "web.js")),
 };
 const native = require(bindingPath);
 
@@ -58,8 +59,8 @@ function capture(fn) {
 // the regression value.
 const intentionalDivergences = [];
 
-function checkWithDivergences(label, actual, expected) {
-  const exception = intentionalDivergences.find((entry) => entry.label === label);
+function checkWithDivergences(label, actual, expected, key = label) {
+  const exception = intentionalDivergences.find((entry) => entry.key === key);
   if (!exception) {
     check(label, actual, expected);
     return;
@@ -369,6 +370,62 @@ for (const source of ["DATA:IMAGE/PNG;BASE64,AAAA", "FILE-API-abc", "/tmp/does-n
     { http: false, scheme: false },
   );
 }
+
+// --- web: search-result parsing -------------------------------------------------
+
+const webSamples = [
+  `<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=x">Example &amp; Page</a>`,
+  `<a class="result__a" href="https://example.com/direct">Direct</a>`,
+  `<a class="other result__a" href="https://example.com/a">  Spaced   Title  </a>`,
+  `<a class='result__a' href='https://example.com/single'>Single quoted</a>`,
+  `<a class=result__a href=https://example.com/unquoted>Unquoted</a>`,
+  `<a class="result__a">No href</a>`,
+  `<a class="result__b" href="https://example.com/skip">Wrong class</a>`,
+  `<a class="result__a" href="javascript:alert(1)">Blocked</a>`,
+  `<a class="result__a" href="ftp://example.com/f">FTP</a>`,
+  `<a class="result__a" href="https://example.com/tags"><b>Bold</b> and <i>italic</i></a>`,
+  `<a class="result__a" href="https://example.com/entities">&#72;&#x69; &nbsp; &unknown; &lt;tag&gt;</a>`,
+  `<a class="result__a" href="https://example.com/a">One</a><a class="result__a" href="https://example.com/b">Two</a>`,
+  "",
+  "<p>no anchors here</p>",
+  `<a class="result__a"\u00a0href="https://example.com/nbsp">NBSP attribute separator</a>`,
+  `<a class="result__a" href="https://example.com/bad">Unterminated</a`,
+  `<a class="result__a" href="://nope">Malformed href</a>`,
+  `<a class="result__a" href="https://example.com/x">&#x110000;</a>`,
+  `<a class="result__a" href="https://example.com/z">&#xD800;</a>`,
+  `<a class="result__a" href="https://example.com/y">Trailing text`,
+  `<a class="result__a" href="HTTPS://EXAMPLE.com/UP">Scheme case</a>`,
+];
+
+for (const html of webSamples) {
+  const label = html.length > 58 ? `${html.slice(0, 55)}...` : html;
+  checkWithDivergences(
+    `parseSearchResults(${JSON.stringify(label)})`,
+    capture(() => native.parseSearchResults(html)),
+    capture(() => ts.web.parseSearchResults(html)),
+    html,
+  );
+}
+
+// Frozen expectations for the search parser, captured from the verified
+// pre-switch implementation.
+const anchor = (attributes, inner) => `<a class="result__a" ${attributes}>${inner}</a>`;
+check("golden: plain link", native.parseSearchResults(anchor('href="https://example.com/direct"', "Direct")), [{ title: "Direct", url: "https://example.com/direct" }]);
+check(
+  "golden: redirect wrapper unwrapped",
+  native.parseSearchResults(anchor('href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpage&amp;rut=x"', "Wrapped")),
+  [{ title: "Wrapped", url: "https://example.com/page" }],
+);
+check(
+  "golden: entities, unknown entities and tags",
+  native.parseSearchResults(anchor('href="https://example.com/e"', "&#72;&#x69; &nbsp; &unknown; &lt;tag&gt; <b>bold</b>")),
+  [{ title: "Hi &unknown; <tag> bold", url: "https://example.com/e" }],
+);
+check("golden: whitespace collapsed", native.parseSearchResults(anchor('href="https://example.com/s"', "  Spaced   Title  ")), [{ title: "Spaced Title", url: "https://example.com/s" }]);
+check("golden: non-web schemes dropped", native.parseSearchResults(anchor('href="javascript:alert(1)"', "Blocked")), []);
+check("golden: ftp dropped", native.parseSearchResults(anchor('href="ftp://example.com/f"', "FTP")), []);
+check("golden: lone surrogate becomes U+FFFD", native.parseSearchResults(anchor('href="https://example.com/z"', "&#xD800;")), [{ title: "\uFFFD", url: "https://example.com/z" }]);
+check("golden: invalid code point rejected", capture(() => native.parseSearchResults(anchor('href="https://example.com/x"', "&#x110000;"))), { error: "Invalid code point 1114112" });
 
 // --- report -------------------------------------------------------------------
 
