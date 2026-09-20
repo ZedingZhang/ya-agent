@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", default-features = false, features = ["napi6"] }
 napi-derive = "3"
+unicode-normalization = "0.1.25"
 
 [build-dependencies]
 napi-build = "2"

@@ -7,3 +7,4 @@
 
 mod config;
 mod keychain;
+mod memory;

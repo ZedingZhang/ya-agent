@@ -25,6 +25,7 @@ if (!existsSync(bindingPath)) {
 const ts = {
   config: require(path.join(tsRoot, "config.js")),
   keychain: require(path.join(tsRoot, "keychain.js")),
+  memory: require(path.join(tsRoot, "memory.js")),
 };
 const native = require(bindingPath);
 
@@ -130,6 +131,72 @@ for (const key of ["", "   ", "test-key"]) {
     `saveApiKey(${JSON.stringify(key)})`,
     capture(() => native.saveApiKey(key)),
     capture(() => ts.keychain.saveApiKey(key)),
+  );
+}
+
+// --- memory: text normalisation and ranking -----------------------------------
+
+const memoryTexts = [
+  "",
+  "   ",
+  "Hello World",
+  "  Multiple   spaces\tand\nnewlines  ",
+  "ß straße STRASSE",
+  "ＡＢＣ１２３",
+  "foo-bar_baz 42",
+  "İstanbul",
+  "café CAFÉ",
+  "混合 mixed 内容 content",
+  "什么是 Ya 的记忆？",
+  "知识 卡片 排列",
+  "emoji 😀 test",
+  "a",
+  "ab",
+  "\u00a0non\u2009breaking\u3000space\ufeff",
+];
+
+for (const text of memoryTexts) {
+  check(
+    `normalizeMemoryText(${JSON.stringify(text)})`,
+    native.normalizeMemoryText(text),
+    ts.memory.normalizeMemoryText(text),
+  );
+}
+
+const memoryCard = (text) => ({
+  id: "card",
+  kind: "knowledge",
+  text,
+  evidence: "",
+  status: "approved",
+  createdAt: "2026-01-01T00:00:00.000Z",
+  version: 1,
+});
+
+const memoryPairs = [
+  ["Explain recursion", "recursion is a technique"],
+  ["Explain recursion", "Recursion technique explained"],
+  ["what is recursion", "recursion"],
+  ["数据结构 排序", "排序 算法 数据结构"],
+  ["什么是排序", "排序算法"],
+  ["abcd", "abcd"],
+  ["abc", "abcdef"],
+  ["", "anything"],
+  ["anything", ""],
+  ["foo bar baz", "baz bar foo"],
+  ["机器 学习 模型", "机器学习模型"],
+  ["😀 test", "😀"],
+  ["如何配置 DeepSeek API key", "配置 DeepSeek API key 的步骤"],
+  ["the quick brown fox", "quick brown foxes"],
+  ["a-b_c 12", "a-b_c 12"],
+  ["知识卡片", "知识 卡片"],
+];
+
+for (const [task, text] of memoryPairs) {
+  check(
+    `memoryScore(${JSON.stringify(task)}, ${JSON.stringify(text)})`,
+    native.memoryScore(task, text),
+    ts.memory.memoryScore(task, memoryCard(text)),
   );
 }
 
