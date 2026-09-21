@@ -1,0 +1,24 @@
+{
+  "name": "ya-core",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Shared Rust core for the Ya CLI and desktop application",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "binaryName": "ya-core",
+    "targets": [
+      "x86_64-pc-windows-msvc",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.10.4"
+  }
+}

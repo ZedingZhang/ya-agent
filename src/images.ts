@@ -1,6 +1,16 @@
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import {
+  assertImageCount as nativeAssertImageCount,
+  detectImageMimeType as nativeDetectImageMimeType,
+  externalImageUrl as nativeExternalImageUrl,
+  fileApiImageId as nativeFileApiImageId,
+  imageDataUrlPart as nativeImageDataUrlPart,
+  isHttpUrl as nativeIsHttpUrl,
+  isImageDetail as nativeIsImageDetail,
+  isSchemeUrl as nativeIsSchemeUrl,
+} from "ya-core";
 import type { ImageDetail, UserImageContentPart } from "./types";
 
 export const MAX_IMAGES_PER_REQUEST = 600;
@@ -22,22 +32,13 @@ export interface ImageFileInfo {
 }
 
 export function isImageDetail(value: unknown): value is ImageDetail {
-  return value === "low" || value === "high" || value === "original" || value === "auto";
+  return typeof value === "string" && nativeIsImageDetail(value);
 }
 
+/** The file signature decides the type; the extension is never trusted. */
 export function detectImageMimeType(bytes: Uint8Array): SupportedImageMimeType | undefined {
-  const buffer = Buffer.from(bytes);
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
-    return "image/png";
-  }
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
-  if (buffer.length >= 6 && (buffer.subarray(0, 6).toString("ascii") === "GIF87a" || buffer.subarray(0, 6).toString("ascii") === "GIF89a")) {
-    return "image/gif";
-  }
-  if (buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP") {
-    return "image/webp";
-  }
-  return undefined;
+  const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  return (nativeDetectImageMimeType(buffer) ?? undefined) as SupportedImageMimeType | undefined;
 }
 
 function expandHome(value: string): string {
@@ -58,9 +59,7 @@ function imageHeader(path: string): Buffer {
 }
 
 export function assertImageCount(count: number): void {
-  if (count > MAX_IMAGES_PER_REQUEST) {
-    throw new Error(`DeepSeek accepts at most ${MAX_IMAGES_PER_REQUEST} images per request.`);
-  }
+  nativeAssertImageCount(count);
 }
 
 function assertInlineTotal(bytes: number): void {
@@ -117,16 +116,10 @@ function assertSameImageFile(selected: ImageFileInfo, current: ImageFileInfo): v
 }
 
 function imagePartFromDataUrl(source: string, detail: ImageDetail): { part: UserImageContentPart; bytes: number } {
-  const match = source.match(/^data:image\/(?:jpeg|png|gif|webp);base64,([a-z0-9+/]+={0,2})$/iu);
-  if (!match?.[1]) throw new Error("Image data URLs must contain base64-encoded JPEG, PNG, GIF, or WebP data.");
-  const estimatedBytes = Math.floor(match[1].length * 3 / 4);
-  if (estimatedBytes > MAX_INLINE_IMAGE_BYTES) throw new Error("Image data URL exceeds DeepSeek's 32 MiB inline limit.");
-  const bytes = Buffer.from(match[1], "base64");
-  const mimeType = detectImageMimeType(bytes);
-  if (!mimeType) throw new Error("Image data URL does not contain supported JPEG, PNG, GIF, or WebP content.");
+  const inline = nativeImageDataUrlPart(source);
   return {
-    part: { type: "image_url", image_url: { url: `data:${mimeType};base64,${bytes.toString("base64")}`, detail } },
-    bytes: bytes.length,
+    part: { type: "image_url", image_url: { url: inline.url, detail } },
+    bytes: inline.bytes,
   };
 }
 
@@ -146,8 +139,7 @@ export function imageContentPartsFromSources(sources: string[], detail: ImageDet
     const source = rawSource.trim();
     if (!source) throw new Error("Image source cannot be empty.");
     if (source.startsWith("file-api-")) {
-      if (!/^file-api-[a-z0-9_-]+$/iu.test(source)) throw new Error(`Invalid DeepSeek Files API image ID: ${source}`);
-      parts.push({ type: "file", file_id: source });
+      parts.push({ type: "file", file_id: nativeFileApiImageId(source) });
       continue;
     }
     if (source.startsWith("data:")) {
@@ -157,16 +149,11 @@ export function imageContentPartsFromSources(sources: string[], detail: ImageDet
       parts.push(inline.part);
       continue;
     }
-    if (/^https?:\/\//iu.test(source)) {
-      if (source.length > MAX_IMAGE_URL_LENGTH) throw new Error("External image URLs may contain at most 8192 characters.");
-      const url = new URL(source);
-      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("External images require an HTTP(S) URL.");
-      const normalizedUrl = url.toString();
-      if (normalizedUrl.length > MAX_IMAGE_URL_LENGTH) throw new Error("External image URLs may contain at most 8192 characters.");
-      parts.push({ type: "image_url", image_url: { url: normalizedUrl, detail } });
+    if (nativeIsHttpUrl(source)) {
+      parts.push({ type: "image_url", image_url: { url: nativeExternalImageUrl(source), detail } });
       continue;
     }
-    if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(source)) {
+    if (nativeIsSchemeUrl(source)) {
       throw new Error("External images require an HTTP(S) URL.");
     }
     const file = inspectImageFile(source);
