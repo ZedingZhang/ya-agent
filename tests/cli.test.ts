@@ -102,7 +102,7 @@ describe("CLI", () => {
   it("sets validated configuration values", async () => {
     const capture = fakeIo();
     expect(await main(["config", "set", "model", "pro"], { io: capture.io })).toBe(0);
-    expect(capture.stdout.output).toContain("deepseek-v4-pro-0813");
+    expect(capture.stdout.output).toContain("deepseek-v4-pro");
     expect(await main(["config", "set", "unknown", "max"], { io: capture.io })).toBe(2);
     expect(capture.stderr.output).toContain("config key");
   });
@@ -201,7 +201,7 @@ describe("CLI", () => {
       "does-not-need-to-exist.png",
       "--no-feedback",
     ], context(capture.io, client))).toBe(2);
-    expect(capture.stderr.output).toContain("deepseek-v4.1-flash");
+    expect(capture.stderr.output).toContain("deepseek-flash");
   });
 
   it("honors explicit Markdown and terminal output formats", async () => {

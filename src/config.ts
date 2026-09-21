@@ -7,8 +7,8 @@ import {
 } from "ya-core";
 
 export const VALID_MODELS = {
-  flash: "deepseek-v4.1-flash",
-  pro: "deepseek-v4-pro-0813",
+  flash: "deepseek-flash",
+  pro: "deepseek-v4-pro",
 } as const;
 
 export type ModelAlias = keyof typeof VALID_MODELS;
