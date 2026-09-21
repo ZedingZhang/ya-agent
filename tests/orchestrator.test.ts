@@ -95,13 +95,13 @@ describe("agent orchestration", () => {
     await expect(singleAgent(
       new FakeClient(),
       "Explain the chart",
-      new ModelConfig({ model: "deepseek-v4-pro-0813" }),
+      new ModelConfig({ model: "deepseek-v4-pro" }),
       "off",
       undefined,
       undefined,
       undefined,
       [image],
-    )).rejects.toThrow(/deepseek-v4\.1-flash/u);
+    )).rejects.toThrow(/deepseek-flash/u);
   });
 
   it("buffers local mode and combines local and web tools", async () => {
@@ -159,7 +159,7 @@ describe("agent orchestration", () => {
     await toaAgent(
       client,
       "Explain the chart",
-      new ModelConfig({ model: "deepseek-v4.1-flash" }),
+      new ModelConfig({ model: "deepseek-flash" }),
       2,
       async () => "[]",
       [image],

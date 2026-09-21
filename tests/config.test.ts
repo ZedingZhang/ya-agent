@@ -20,7 +20,7 @@ describe("configuration", () => {
 
   it("defaults to flash without thinking", () => {
     const config = loadConfig();
-    expect(config.model).toBe("deepseek-v4.1-flash");
+    expect(config.model).toBe("deepseek-flash");
     expect(config.thinkingEnabled).toBe(false);
     expect(config.reasoningEffort).toBe("high");
     expect(config.toaTokenBudget).toBe(8_000);
@@ -33,7 +33,7 @@ describe("configuration", () => {
     expect(loadConfig()).toEqual(config);
     const stored = JSON.parse(readFileSync(configPath(), "utf8")) as Record<string, unknown>;
     expect(stored).toMatchObject({
-      model: "deepseek-v4-pro-0813",
+      model: "deepseek-v4-pro",
       thinking_enabled: false,
       reasoning_effort: "max",
       toa_token_budget: 8_000,
@@ -41,7 +41,7 @@ describe("configuration", () => {
     });
   });
 
-  it("loads the existing snake-case Python configuration and migrates its model", () => {
+  it("loads the existing snake-case Python configuration", () => {
     writeFileSync(configPath(), JSON.stringify({
       model: "deepseek-v4-pro",
       thinking_enabled: true,
@@ -50,7 +50,7 @@ describe("configuration", () => {
       toa_timeout: 120,
     }));
     expect(loadConfig()).toEqual(new ModelConfig({
-      model: "deepseek-v4-pro-0813",
+      model: "deepseek-v4-pro",
       thinkingEnabled: true,
       reasoningEffort: "max",
       toaTokenBudget: 12_000,
@@ -58,8 +58,8 @@ describe("configuration", () => {
     }));
   });
 
-  it("migrates every model retired by the V4.1 line-up", () => {
-    for (const retired of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "vision"]) {
+  it("migrates every model id that is no longer served", () => {
+    for (const retired of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "vision", "deepseek-v4.1-flash"]) {
       writeFileSync(configPath(), JSON.stringify({
         model: retired,
         thinking_enabled: false,
@@ -67,8 +67,19 @@ describe("configuration", () => {
         toa_token_budget: 8_000,
         toa_timeout: 90,
       }));
-      expect(loadConfig().model).toBe("deepseek-v4.1-flash");
+      expect(loadConfig().model).toBe("deepseek-flash");
     }
+  });
+
+  it("migrates the pro id this project briefly shipped", () => {
+    writeFileSync(configPath(), JSON.stringify({
+      model: "deepseek-v4-pro-0813",
+      thinking_enabled: false,
+      reasoning_effort: "high",
+      toa_token_budget: 8_000,
+      toa_timeout: 90,
+    }));
+    expect(loadConfig().model).toBe("deepseek-v4-pro");
   });
 
   it("rejects unsupported models and invalid budgets", () => {
@@ -79,7 +90,7 @@ describe("configuration", () => {
   });
 
   it("treats V4.1-Flash as the vision model and keeps pro text-only", () => {
-    const flash = "deepseek-v4.1-flash";
+    const flash = "deepseek-flash";
     expect(modelId("flash")).toBe(flash);
     expect(modelId("vision")).toBe(flash);
     expect(isVisionModel(modelId("flash"))).toBe(true);

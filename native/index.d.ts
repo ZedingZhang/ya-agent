@@ -162,7 +162,7 @@ export declare function parseStreamChunk(data: string): StreamChunk
 
 export declare function renderMarkdown(text: string, color: boolean): string
 
-/** Resolves an alias, a current model id, or one retired by the V4.1 line-up. */
+/** Resolves an alias, a current model id, or one that is no longer served. */
 export declare function resolveModel(value: string): string
 
 export declare function saveApiKey(apiKey: string, platform?: string | undefined | null, securityPath?: string | undefined | null): void

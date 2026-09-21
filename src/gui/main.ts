@@ -376,7 +376,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
     const model = document.querySelector('#task-model');
     const reasoning = document.querySelector('#task-reasoning');
-    const visionOption = document.querySelector('#task-model option[value="deepseek-v4.1-flash"]') !== null;
+    const visionOption = document.querySelector('#task-model option[value="deepseek-flash"]') !== null;
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
