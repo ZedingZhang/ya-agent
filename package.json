@@ -1,6 +1,6 @@
 {
   "name": "ya-agent",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "A consent-first personal research agent with a CLI and desktop GUI",
   "author": "Zeding Zhang",
   "license": "MIT",
