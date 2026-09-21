@@ -159,12 +159,13 @@ try {
   else process.env.DEEPSEEK_API_KEY = originalApiKey;
 }
 
-// Validation only; neither side reaches a real Keychain on a non-macOS host.
+// Validation only. The platform and the security path are explicit so neither
+// side touches a real Keychain on any host.
 for (const key of ["", "   ", "test-key"]) {
   check(
     `saveApiKey(${JSON.stringify(key)})`,
-    capture(() => native.saveApiKey(key)),
-    capture(() => ts.keychain.saveApiKey(key)),
+    capture(() => native.saveApiKey(key, "linux", "/usr/bin/security")),
+    capture(() => ts.keychain.saveApiKey(key, "linux", "/usr/bin/security")),
   );
 }
 
