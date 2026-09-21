@@ -47,11 +47,13 @@ describe("API key storage", () => {
   });
 
   it("explains the portable environment-variable fallback", () => {
-    expect(() => saveApiKey("test-key")).toThrow(/DEEPSEEK_API_KEY/u);
+    // The platform is explicit: on macOS `/usr/bin/security` really exists, so
+    // an implicit platform would take the Keychain branch instead of this one.
+    expect(() => saveApiKey("test-key", "linux", "/usr/bin/security")).toThrow(/DEEPSEEK_API_KEY/u);
   });
 
   it("rejects an empty API key before accessing Keychain", () => {
-    expect(() => saveApiKey("  ")).toThrow(/cannot be empty/u);
+    expect(() => saveApiKey("  ", "linux", "/usr/bin/security")).toThrow(/cannot be empty/u);
   });
 
   it("never exposes the API key when the security command fails", () => {
