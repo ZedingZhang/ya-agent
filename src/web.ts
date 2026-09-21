@@ -1,3 +1,4 @@
+import { parseSearchResults as nativeParseSearchResults } from "ya-core";
 import type { ToolArguments, ToolDefinition } from "./types";
 import { VERSION } from "./version";
 
@@ -11,49 +12,14 @@ export interface SearchResult {
   url: string;
 }
 
-function decodeHtml(value: string): string {
-  const named: Record<string, string> = {
-    amp: "&",
-    apos: "'",
-    gt: ">",
-    lt: "<",
-    nbsp: " ",
-    quot: '"',
-  };
-  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/giu, (entity, code: string) => {
-    if (code.startsWith("#x") || code.startsWith("#X")) return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
-    if (code.startsWith("#")) return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
-    return named[code.toLocaleLowerCase("und")] ?? entity;
-  });
-}
-
-function attribute(attributes: string, name: string): string | undefined {
-  const match = attributes.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"));
-  return match?.[1] ?? match?.[2] ?? match?.[3];
-}
-
+/**
+ * Parses DuckDuckGo result markup into title/URL pairs.
+ *
+ * Entity decoding, tag stripping, and redirect unwrapping live in the Rust
+ * core; untrusted or malformed links are dropped there.
+ */
 export function parseSearchResults(html: string): SearchResult[] {
-  const results: SearchResult[] = [];
-  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/giu)) {
-    const attributes = match[1] ?? "";
-    const classes = attribute(attributes, "class") ?? "";
-    if (!classes.split(/\s+/u).includes("result__a")) continue;
-    const href = decodeHtml(attribute(attributes, "href") ?? "");
-    if (!href) continue;
-    let url: string;
-    try {
-      const parsed = new URL(href, "https://html.duckduckgo.com");
-      const target = new URL(parsed.searchParams.get("uddg") ?? parsed.toString());
-      if (target.protocol !== "https:" && target.protocol !== "http:") continue;
-      url = target.toString();
-    } catch {
-      // Search-result links are untrusted; omit malformed and non-web targets.
-      continue;
-    }
-    const title = decodeHtml((match[2] ?? "").replace(/<[^>]+>/gu, "")).replace(/\s+/gu, " ").trim();
-    results.push({ title, url });
-  }
-  return results;
+  return nativeParseSearchResults(html) as SearchResult[];
 }
 
 export async function search(

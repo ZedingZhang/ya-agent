@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  memoryScore as nativeMemoryScore,
+  normalizeMemoryText as nativeNormalizeMemoryText,
+} from "ya-core";
 import { dataHome } from "./config";
 
 export const MAX_MEMORY_CARDS = 100;
@@ -31,14 +35,6 @@ export interface MemoryMatch {
 
 const ACTIVE_STATUSES = new Set<MemoryStatus>(["candidate", "approved"]);
 const DEFAULT_PRUNE_STATUSES = new Set<MemoryStatus>(["rejected", "revoked"]);
-const ENGLISH_STOP_WORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "is", "it", "of", "on",
-  "or", "the", "this", "that", "to", "what", "when", "where", "with",
-]);
-const CHINESE_STOP_PHRASES = new Set([
-  "什么", "如何", "为什", "什么是", "怎么", "可以", "请问", "一个", "这个", "那个", "我们", "你们", "他们",
-  "关于", "以及", "进行", "一下", "是否", "需要",
-]);
 
 export class DuplicateMemoryError extends Error {
   readonly card: MemoryCard;
@@ -101,8 +97,9 @@ export function saveMemoryCards(cards: readonly MemoryCard[]): void {
   renameSync(temporary, path);
 }
 
+/** NFKC, case folding, `ß` to `ss`, and collapsed whitespace; implemented in Rust. */
 export function normalizeMemoryText(text: string): string {
-  return text.normalize("NFKC").toLocaleLowerCase("und").replaceAll("ß", "ss").replace(/\s+/gu, " ").trim();
+  return nativeNormalizeMemoryText(text);
 }
 
 export function createCandidate(text: string, evidence: string, kind: MemoryKind = "procedure"): MemoryCard {
@@ -166,43 +163,12 @@ export function pruneCards(includeCandidates = false): MemoryCard[] {
   return removed;
 }
 
-function englishWords(text: string): Set<string> {
-  return new Set((text.match(/[a-z0-9][a-z0-9_-]*/g) ?? []).filter((word) => word.length >= 2 && !ENGLISH_STOP_WORDS.has(word)));
-}
-
-function englishPhrases(text: string): Set<string> {
-  const words = (text.match(/[a-z0-9][a-z0-9_-]*/g) ?? []).filter((word) => !ENGLISH_STOP_WORDS.has(word));
-  return new Set(words.slice(0, -1).map((word, index) => `${word} ${words[index + 1]}`));
-}
-
-function hanNgrams(text: string, width: number): Set<string> {
-  const grams = new Set<string>();
-  for (const run of text.match(/[\u4e00-\u9fff]+/g) ?? []) {
-    for (let index = 0; index <= run.length - width; index += 1) {
-      const gram = run.slice(index, index + width);
-      if (!CHINESE_STOP_PHRASES.has(gram)) grams.add(gram);
-    }
-  }
-  return grams;
-}
-
-function intersectionSize(left: Set<string>, right: Set<string>): number {
-  let count = 0;
-  for (const value of left) if (right.has(value)) count += 1;
-  return count;
-}
-
+/**
+ * Scores a task against a card: shared English words, shared Han bigrams, and a
+ * phrase or containment bonus. Implemented in Rust.
+ */
 export function memoryScore(task: string, card: MemoryCard): number {
-  const taskText = normalizeMemoryText(task);
-  const cardText = normalizeMemoryText(card.text);
-  if (!taskText || !cardText) return 0;
-  const sharedWords = intersectionSize(englishWords(taskText), englishWords(cardText));
-  const sharedBigrams = intersectionSize(hanNgrams(taskText, 2), hanNgrams(cardText, 2));
-  const sharedPhrases = intersectionSize(englishPhrases(taskText), englishPhrases(cardText)) > 0
-    || intersectionSize(hanNgrams(taskText, 3), hanNgrams(cardText, 3)) > 0;
-  const exactContainment = Math.min(taskText.length, cardText.length) >= 4
-    && (taskText.includes(cardText) || cardText.includes(taskText));
-  return (sharedPhrases || exactContainment ? 5 : 0) + 3 * sharedWords + sharedBigrams;
+  return nativeMemoryScore(task, card.text);
 }
 
 export function selectRelevantCards(task: string, limit = MAX_RELEVANT_MEMORY_CARDS): MemoryMatch[] {
