@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 use crate::config::vision_capable;
 use crate::images::check_image_count;
 
-const MODEL_FLASH: &str = "deepseek-v4.1-flash";
+const MODEL_FLASH: &str = "deepseek-flash";
 
 /// Counts inline image parts and enforces DeepSeek's role rule.
 pub(crate) fn validate_image_messages(messages: &Value) -> Result<usize, String> {

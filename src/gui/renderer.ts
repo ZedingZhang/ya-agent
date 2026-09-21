@@ -29,7 +29,7 @@ interface AppState {
   stream: boolean;
   hasApiKey: boolean;
   config: {
-    model: "deepseek-v4.1-flash" | "deepseek-v4-pro-0813";
+    model: "deepseek-flash" | "deepseek-v4-pro";
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     toaTokenBudget: number;
@@ -145,7 +145,7 @@ let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
-const VISION_MODEL = "deepseek-v4.1-flash";
+const VISION_MODEL = "deepseek-flash";
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);

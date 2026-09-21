@@ -96,11 +96,12 @@ const resolutionCases = [
   "flash",
   "pro",
   "vision",
+  "deepseek-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+  "deepseek-v4-flash-vision-exp",
   "deepseek-v4.1-flash",
   "deepseek-v4-pro-0813",
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-v4-flash-vision-exp",
   "legacy",
   "",
   "Flash",
@@ -458,7 +459,7 @@ const payloadCases = [
     [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }],
     false,
   ],
-  ["pro model", [{ role: "user", content: "hi" }], payloadConfig({ model: "deepseek-v4-pro-0813" }), 100, undefined, false],
+  ["pro model", [{ role: "user", content: "hi" }], payloadConfig({ model: "deepseek-v4-pro" }), 100, undefined, false],
 ];
 
 for (const [label, messages, config, maxTokens, tools, stream] of payloadCases) {
@@ -481,7 +482,7 @@ const pngPart = { type: "image_url", image_url: { url: "https://example.com/a.pn
 const imagePayloadCases = [
   ["image in a user message", [{ role: "user", content: [pngPart] }], payloadConfig({})],
   ["image in a system message", [{ role: "system", content: [pngPart] }], payloadConfig({})],
-  ["image with the pro model", [{ role: "user", content: [pngPart] }], payloadConfig({ model: "deepseek-v4-pro-0813" })],
+  ["image with the pro model", [{ role: "user", content: [pngPart] }], payloadConfig({ model: "deepseek-v4-pro" })],
   ["file part in a user message", [{ role: "user", content: [{ type: "file", file_id: "file-api-x" }] }], payloadConfig({})],
   ["text-only parts", [{ role: "user", content: [{ type: "text", text: "hi" }] }], payloadConfig({})],
 ];
@@ -642,24 +643,24 @@ function captureAsync(fn) {
 // Frozen expectations for the DeepSeek client, captured from the verified
 // pre-switch implementation.
 const userMessage = [{ role: "user", content: "hi" }];
-check("golden: payload with thinking and max effort", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", true, "max", 42, undefined, false)), {
-  model: "deepseek-v4.1-flash",
+check("golden: payload with thinking and max effort", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-flash", true, "max", 42, undefined, false)), {
+  model: "deepseek-flash",
   messages: userMessage,
   thinking: { type: "enabled" },
   stream: false,
   max_tokens: 42,
   reasoning_effort: "max",
 });
-check("golden: payload omits effort when thinking is off", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, undefined, false)), {
-  model: "deepseek-v4.1-flash",
+check("golden: payload omits effort when thinking is off", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-flash", false, "high", 42, undefined, false)), {
+  model: "deepseek-flash",
   messages: userMessage,
   thinking: { type: "disabled" },
   stream: false,
   max_tokens: 42,
 });
-check("golden: streaming payload asks for usage", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, undefined, true)).stream_options, { include_usage: true });
-check("golden: empty tool list is omitted", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-v4.1-flash", false, "high", 42, "[]", false)), {
-  model: "deepseek-v4.1-flash",
+check("golden: streaming payload asks for usage", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-flash", false, "high", 42, undefined, true)).stream_options, { include_usage: true });
+check("golden: empty tool list is omitted", JSON.parse(native.buildChatPayload(JSON.stringify(userMessage), "deepseek-flash", false, "high", 42, "[]", false)), {
+  model: "deepseek-flash",
   messages: userMessage,
   thinking: { type: "disabled" },
   stream: false,
@@ -667,13 +668,13 @@ check("golden: empty tool list is omitted", JSON.parse(native.buildChatPayload(J
 });
 check(
   "golden: image in a system message rejected",
-  capture(() => native.buildChatPayload(JSON.stringify([{ role: "system", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-v4.1-flash", false, "high", 10, undefined, false)),
+  capture(() => native.buildChatPayload(JSON.stringify([{ role: "system", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-flash", false, "high", 10, undefined, false)),
   { error: "DeepSeek image content is supported only in user messages." },
 );
 check(
   "golden: image with the pro model rejected",
-  capture(() => native.buildChatPayload(JSON.stringify([{ role: "user", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-v4-pro-0813", false, "high", 10, undefined, false)),
-  { error: "Image input requires model deepseek-v4.1-flash." },
+  capture(() => native.buildChatPayload(JSON.stringify([{ role: "user", content: [{ type: "image_url", image_url: { url: "https://e.com/a.png" } }] }]), "deepseek-v4-pro", false, "high", 10, undefined, false)),
+  { error: "Image input requires model deepseek-flash." },
 );
 check(
   "golden: reply parsing",

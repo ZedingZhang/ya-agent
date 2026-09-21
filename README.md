@@ -4,7 +4,7 @@
 
 Ya is a consent-first personal research and decision agent with a command-line interface and a native desktop application. The project is implemented in strict TypeScript on Node.js; the desktop application uses Electron while sharing the same typed service layer as the CLI.
 
-Ya uses the DeepSeek V4.1 API—`deepseek-v4.1-flash` by default, with `deepseek-v4-pro-0813` for the hardest tasks—stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files.
+Ya uses the DeepSeek V4.1 API—`deepseek-flash` by default, with `deepseek-v4-pro` for the hardest tasks—stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ Ya uses the DeepSeek V4.1 API—`deepseek-v4.1-flash` by default, with `deepseek
 - **ICM curiosity loop:** when a response marks one material evidence gap, Ya performs at most one bounded, source-seeking follow-up.
 - **Bounded ToA:** one root coordinator uses at most two temporary workers with explicit token and timeout limits.
 - **Shared typed core:** the CLI and desktop application use the same configuration, memory, orchestration, API, web-search, and local-workspace modules.
-- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-v4.1-flash`, which has native vision support, through the same OpenAI-compatible chat-completions path.
+- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support, through the same OpenAI-compatible chat-completions path.
 - **Isolated desktop renderer:** the Electron renderer has no Node.js or direct filesystem access. Privileged operations pass through a narrow preload bridge into the main process.
 
 ## Platform support
@@ -117,7 +117,7 @@ Simple tool-free answers stream by default in an interactive terminal. Web resea
 
 ### Vision input
 
-Vision is native to `deepseek-v4.1-flash`, the default model, so images work without switching models; the text-only `deepseek-v4-pro-0813` rejects them. `--image` is repeatable and accepts a local file, an HTTP(S) URL, a base64 data URL, or an existing DeepSeek Files API ID:
+Vision is native to `deepseek-flash`, the default model, so images work without switching models; the text-only `deepseek-v4-pro` rejects them. `--image` is repeatable and accepts a local file, an HTTP(S) URL, a base64 data URL, or an existing DeepSeek Files API ID:
 
 ```sh
 ya ask --image ./chart.png \
@@ -128,7 +128,7 @@ ya ask --image ./chart.png \
 ya ask --image file-api-EXISTING_ID "Read this uploaded image"
 ```
 
-`--image-detail` accepts `auto` (the default), `low`, `high`, or `original`. `low` downsizes an image to 512×512 before inference; the other values currently preserve the original image. Local files are checked by their actual file signature—not their extension—and converted to canonical data URLs only after validation. JPEG, PNG, GIF, and WebP are supported. Image content is allowed only with `deepseek-v4.1-flash` and is placed only in the user message, as required by DeepSeek's [vision guide](https://api-docs.deepseek.com/guides/vision/) and [chat-completions schema](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/).
+`--image-detail` accepts `auto` (the default), `low`, `high`, or `original`. `low` downsizes an image to 512×512 before inference; the other values currently preserve the original image. Local files are checked by their actual file signature—not their extension—and converted to canonical data URLs only after validation. JPEG, PNG, GIF, and WebP are supported. Image content is allowed only with `deepseek-flash` and is placed only in the user message, as required by DeepSeek's [vision guide](https://api-docs.deepseek.com/guides/vision/) and [chat-completions schema](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/).
 
 Ya enforces DeepSeek's limit of 600 images and 8,192 characters per external URL. A single local or data-URL image may contain at most 32 MiB; Ya conservatively caps all inline image bytes at 32 MiB so base64 expansion and the prompt stay below the API's 48 MiB request-body limit. A `file-api-*` value must refer to an image already uploaded through DeepSeek's Files API; Ya does not upload it for you.
 
@@ -183,7 +183,7 @@ ya config set thinking on
 ya config set reasoning-effort max
 ```
 
-Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory. Model IDs retired by the V4.1 line-up—`deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-v4-flash-vision-exp`, and the `vision` alias—are migrated to their V4.1 equivalents when the file is loaded.
+Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory. Model ids that are no longer served—`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, the `vision` alias, and the `deepseek-v4.1-flash` and `deepseek-v4-pro-0813` names this project briefly shipped before the API rejected them—are migrated when the file is loaded.
 
 ### Long-term memory
 
@@ -207,7 +207,7 @@ The desktop application is a workspace-first three-column workbench:
 - a session-only task timeline;
 - relevant memory, local activity metadata, and inline file-change approval.
 
-It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-v4.1-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
+It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 
 The application does not start a local web server. The renderer cannot access Node.js directly; API calls and filesystem operations run in the Electron main process behind validated IPC handlers.
 

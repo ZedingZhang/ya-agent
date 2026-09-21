@@ -26,3 +26,8 @@ venv/
 native/target/
 native/*.node
 native/npm/
+
+# napi-rs swaps build outputs through a transaction directory and leaves
+# retired binaries behind when a build replaces one.
+native/.napi-rs-filesystem-transaction.swp/
+native/.*.tmp
