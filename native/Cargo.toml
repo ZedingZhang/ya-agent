@@ -1,6 +1,6 @@
 [package]
 name = "ya-core"
-version = "0.7.2"
+version = "0.8.0"
 edition = "2021"
 license = "MIT"
 description = "Shared Rust core for the Ya CLI and desktop application"
