@@ -38,7 +38,12 @@ import type {
 
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
-const pendingActions = new Map<string, (approved: boolean) => void>();
+const LOCAL_ACTION_TIMEOUT_MS = 120_000;
+const pendingActions = new Map<string, {
+  resolve: (approved: boolean) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}>();
 const selectedImages = new Map<string, ImageFileInfo>();
 const rendererFile = join(__dirname, "index.html");
 const rendererUrl = pathToFileURL(rendererFile).toString();
@@ -81,7 +86,17 @@ function appState(): AppState {
 }
 
 function sendTaskEvent(event: TaskEvent): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("task:event", event);
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send("task:event", event);
+  }
+}
+
+function rejectPendingActions(error: Error): void {
+  for (const pending of pendingActions.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(error);
+  }
+  pendingActions.clear();
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
@@ -241,10 +256,24 @@ function registerIpc(): void {
       return await controller.run({ ...options, images }, {
         onContent: (content) => sendTaskEvent({ type: "content", content }),
         onLocalActivity: (activity) => sendTaskEvent({ type: "activity", activity }),
-        onLocalAction: (action) => new Promise<boolean>((resolvePromise) => {
+        onLocalAction: (action) => new Promise<boolean>((resolvePromise, reject) => {
+          if (event.sender.isDestroyed()) {
+            reject(new Error("The renderer is no longer available."));
+            return;
+          }
           const id = randomUUID();
-          pendingActions.set(id, resolvePromise);
-          sendTaskEvent({ type: "local-action", id, action });
+          const timer = setTimeout(() => {
+            pendingActions.delete(id);
+            reject(new Error("Local action approval timed out after 120 seconds."));
+          }, LOCAL_ACTION_TIMEOUT_MS);
+          pendingActions.set(id, { resolve: resolvePromise, reject, timer });
+          try {
+            event.sender.send("task:event", { type: "local-action", id, action });
+          } catch (error) {
+            clearTimeout(timer);
+            pendingActions.delete(id);
+            reject(error);
+          }
         }),
       });
     } finally {
@@ -256,10 +285,11 @@ function registerIpc(): void {
   ipcMain.on("local-action:response", (event, raw: unknown) => {
     const url = event.senderFrame?.url ?? event.sender.getURL();
     if (!isTrustedRendererUrl(url) || !isRecord(raw) || typeof raw.id !== "string") return;
-    const resolver = pendingActions.get(raw.id);
-    if (!resolver) return;
+    const pending = pendingActions.get(raw.id);
+    if (!pending) return;
     pendingActions.delete(raw.id);
-    resolver(Boolean(raw.approved));
+    clearTimeout(pending.timer);
+    pending.resolve(Boolean(raw.approved));
   });
 
   ipcMain.handle("memory:relevant", (event, task: unknown) => {
@@ -333,10 +363,15 @@ async function createWindow(show = true): Promise<BrowserWindow> {
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
+  mainWindow.webContents.on("destroyed", () => {
+    rejectPendingActions(new Error("The renderer was destroyed while awaiting local action approval."));
+  });
+  mainWindow.webContents.on("render-process-gone", () => {
+    rejectPendingActions(new Error("The renderer exited while awaiting local action approval."));
+  });
   mainWindow.on("closed", () => {
     mainWindow = undefined;
-    for (const resolvePromise of pendingActions.values()) resolvePromise(false);
-    pendingActions.clear();
+    rejectPendingActions(new Error("The window was closed while awaiting local action approval."));
     selectedImages.clear();
   });
   await mainWindow.loadFile(rendererFile);
