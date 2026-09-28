@@ -1,8 +1,9 @@
 import { PassThrough, Writable } from "node:stream";
 import { join } from "node:path";
-import { writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, localConfirm, type CliIo } from "../src/cli";
+import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
@@ -145,6 +146,25 @@ describe("CLI", () => {
     expect(await main(["config", "set", "unknown", "max"], { io: capture.io })).toBe(2);
     expect(capture.stderr.output).toContain("config key");
   });
+
+  it.each([["ask", "test"], ["config", "set", "model", "pro"]])(
+    "reports corrupt configuration for %j and supports the suggested recovery",
+    async (...args) => {
+      const path = configPath();
+      const contents = '{"model":';
+      writeFileSync(path, contents);
+      const capture = fakeIo();
+      expect(await main(args, context(capture.io))).toBe(2);
+      expect(capture.stderr.output).toContain(`Ya error: Could not load Ya configuration from "${path}"`);
+      expect(capture.stderr.output).toContain("rename it to a backup");
+      expect(capture.stderr.output).toContain("ya config set model flash");
+      expect(capture.stdout.output).toBe("");
+      renameSync(path, `${path}.bak`);
+      expect(await main(["config", "set", "model", "flash"], context(capture.io))).toBe(0);
+      expect(loadConfig().model).toBe("deepseek-flash");
+      expect(readFileSync(`${path}.bak`, "utf8")).toBe(contents);
+    },
+  );
 
   it("requires thinking when a one-off reasoning effort is supplied", async () => {
     const capture = fakeIo();

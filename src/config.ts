@@ -135,7 +135,17 @@ export function configPath(): string {
 export function loadConfig(): ModelConfig {
   const path = configPath();
   if (!existsSync(path)) return new ModelConfig();
-  return ModelConfig.fromJSON(JSON.parse(readFileSync(path, "utf8")) as unknown);
+  try {
+    return ModelConfig.fromJSON(JSON.parse(readFileSync(path, "utf8")) as unknown);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Could not load Ya configuration from "${path}": ${reason}\n` +
+      `Fix the file, or rename it to a backup (for example, "${path}.bak") ` +
+      'and then run "ya config set model flash" to create a new configuration.',
+      { cause: error },
+    );
+  }
 }
 
 export function saveConfig(config: ModelConfig): void {

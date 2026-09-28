@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { defaultModel, supportedModels } from "ya-core";
 import {
@@ -39,6 +39,24 @@ describe("configuration", () => {
       toa_token_budget: 8_000,
       toa_timeout: 90,
     });
+  });
+
+  it.each([
+    ["malformed JSON", '{"model":'],
+    ["a non-object value", "null"],
+    ["an invalid configuration", '{"toa_timeout":181}'],
+  ])("explains how to recover from %s without changing the file", (_description, contents) => {
+    writeFileSync(configPath(), contents);
+    expect(loadConfig).toThrow(configPath());
+    expect(loadConfig).toThrow("rename it to a backup");
+    expect(loadConfig).toThrow("ya config set model flash");
+    expect(readFileSync(configPath(), "utf8")).toBe(contents);
+  });
+
+  it("includes the path and underlying cause when the configuration cannot be read", () => {
+    mkdirSync(configPath());
+    expect(loadConfig).toThrow(configPath());
+    expect(loadConfig).toThrow(expect.objectContaining({ cause: expect.any(Error) }));
   });
 
   it("loads the existing snake-case Python configuration", () => {
