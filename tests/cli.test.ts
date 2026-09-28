@@ -1,7 +1,7 @@
 import { PassThrough, Writable } from "node:stream";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, localConfirm, type CliIo } from "../src/cli";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, type LocalAction } from "../src/local";
@@ -88,6 +88,45 @@ describe("CLI", () => {
     expect(await main(["--help"], context(capture.io))).toBe(0);
     expect(capture.stdout.output).toContain("Usage: ya");
     expect(capture.stdout.output).toContain("ask");
+  });
+
+  it.each(["win32", "linux"] as const)("directs %s auth users to the environment without requesting a key", async (platform) => {
+    const capture = fakeIo();
+    const saveApiKey = vi.fn();
+    expect(await main(["auth", "deepseek"], {
+      io: capture.io,
+      runtime: { platform, saveApiKey },
+    })).toBe(2);
+    expect(capture.stderr.output).toContain("Set DEEPSEEK_API_KEY instead.");
+    expect(capture.stdout.output).toBe("");
+    expect(capture.prompts).toEqual([]);
+    expect(saveApiKey).not.toHaveBeenCalled();
+  });
+
+  it("confirms Keychain storage after a successful macOS save", async () => {
+    const capture = fakeIo(true, ["test-key"]);
+    const saveApiKey = vi.fn();
+    expect(await main(["auth", "deepseek"], {
+      io: capture.io,
+      runtime: { platform: "darwin", saveApiKey },
+    })).toBe(0);
+    expect(saveApiKey).toHaveBeenCalledExactlyOnceWith("test-key");
+    expect(capture.stdout.output).toBe("DeepSeek API key saved to the macOS Keychain.\n");
+    expect(capture.stderr.output).toBe("");
+  });
+
+  it("does not claim credentials were saved when macOS Keychain fails", async () => {
+    const capture = fakeIo(true, ["test-key"]);
+    expect(await main(["auth", "deepseek"], {
+      io: capture.io,
+      runtime: {
+        platform: "darwin",
+        saveApiKey: () => { throw new Error("Could not save the API key to macOS Keychain."); },
+      },
+    })).toBe(2);
+    expect(capture.stdout.output).toBe("");
+    expect(capture.stderr.output).toContain("Could not save");
+    expect(capture.stderr.output).not.toContain("test-key");
   });
 
   it("advertises the V4.1 model aliases and repeatable image input", async () => {

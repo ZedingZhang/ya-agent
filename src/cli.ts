@@ -52,6 +52,7 @@ export interface CliIo {
 }
 
 interface CliRuntime {
+  platform: NodeJS.Platform;
   loadApiKey: () => string | undefined;
   saveApiKey: (apiKey: string) => void;
   createClient: (apiKey: string) => DeepSeekClient;
@@ -84,6 +85,7 @@ interface AskOptions {
 }
 
 const defaultRuntime: CliRuntime = {
+  platform: process.platform,
   loadApiKey,
   saveApiKey,
   createClient: (apiKey) => new DeepSeekClient(apiKey),
@@ -399,10 +401,13 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .action(async (task: string, options: AskOptions) => ask(task, options, io, runtime));
 
   program.command("auth")
-    .description("Store credentials")
+    .description("Store credentials in macOS Keychain (other platforms: set DEEPSEEK_API_KEY)")
     .argument("<provider>", "credential provider")
     .action(async (provider: string) => {
       if (provider !== "deepseek") throw new Error("provider must be 'deepseek'.");
+      if (runtime.platform !== "darwin") {
+        throw new Error("ya auth deepseek is available only on macOS. Set DEEPSEEK_API_KEY instead.");
+      }
       const apiKey = await io.prompt("DeepSeek API key: ", true);
       runtime.saveApiKey(apiKey);
       write(io.stdout, "DeepSeek API key saved to the macOS Keychain.\n");
