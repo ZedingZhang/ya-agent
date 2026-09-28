@@ -23,9 +23,9 @@
   Linux x64. The Linux desktop download is an AppImage named `ya-gui-linux-x64`.
 - Existing configuration and user data remain compatible; obsolete model names
   are migrated automatically.
-- The release pipeline requires signed macOS and Windows applications and Apple
-  notarization for macOS. Compare downloaded files with `checksums.txt` from this
-  release. The npm package tarball is also provided as a GitHub Release asset.
+- These builds have no publisher code signing or Apple notarization. macOS may
+  use ad-hoc signatures for execution. Gatekeeper and SmartScreen may warn about
+  or block downloads. Compare files with `checksums.txt` from this release. The npm package tarball is also provided as a GitHub Release asset.
 
 ---
 
@@ -50,5 +50,5 @@
 - 分别提供 macOS ARM64/x64、Windows x64 和 Linux x64 的 CLI 与桌面下载。
   Linux 桌面下载为名叫 `ya-gui-linux-x64` 的 AppImage。
 - 现有配置和用户数据继续兼容，过时模型名称会自动迁移。
-- 发布流程要求 macOS/Windows 应用签名及 macOS 公证。下载后请核对同一
+- 此版本无发布者代码签名或 Apple 公证，系统可能提示或阻止运行。下载后请核对同一
   release 中的 `checksums.txt`；npm 包 tarball 也作为 GitHub Release 附件提供。
