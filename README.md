@@ -82,9 +82,9 @@ Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/downlo
 
 The portable desktop application is `ya-gui-windows-x64.exe`.
 
-### Verify unsigned downloads
+### Verify downloads
 
-macOS and Windows artifacts are currently unsigned. Download `checksums.txt` from the same release and compare the matching SHA-256 value before overriding an operating-system warning:
+The release workflow requires signed macOS and Windows CLI and GUI artifacts, plus Apple notarization for macOS. Maintainers must configure the credentials in [release signing](docs/release-signing.md) before publishing a new release. Older releases may still be unsigned; this change does not replace existing downloads. Download `checksums.txt` from the same release and compare the matching SHA-256 value:
 
 ```sh
 shasum -a 256 ya-macos-arm64
