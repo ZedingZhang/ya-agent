@@ -20,8 +20,9 @@ into it.
   dry-run, and the Electron renderer smoke test pass.
 - The Chinese workspace layout was also checked in a live, isolated GUI session
   against the reported screenshot.
-- macOS and Windows applications remain unsigned; verify `checksums.txt` before
-  overriding an operating-system warning.
+- New releases require signed macOS and Windows CLI and GUI artifacts and macOS
+  notarization. Older downloads are unchanged. See `docs/release-signing.md` for
+  credential setup; verify downloads against `checksums.txt`.
 
 ---
 
@@ -43,5 +44,6 @@ into it.
 - TypeScript 类型检查、全部 110 项自动化测试、生产构建、npm 打包预检和
   Electron renderer 烟测均已通过。
 - 另使用隔离配置的真实中文 GUI，对照反馈截图检查了工作区布局。
-- macOS 与 Windows 应用仍未签名；绕过系统警告前请先核对
-  `checksums.txt`。
+- 新发布流程要求 macOS 与 Windows 的 CLI 和 GUI 签名，并要求 macOS
+  通过公证；旧下载保持不变。凭据配置见 `docs/release-signing.md`，下载后
+  请核对 `checksums.txt`。

@@ -82,9 +82,9 @@ Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/downlo
 
 便携桌面端文件名为 `ya-gui-windows-x64.exe`。
 
-### 校验未签名下载
+### 校验下载
 
-macOS 与 Windows 产物目前未签名。绕过操作系统警告前，请从同一 Release 下载 `checksums.txt` 并核对 SHA-256：
+发布流程要求 macOS 与 Windows 的 CLI 和 GUI 产物通过签名验证，macOS 还须通过 Apple 公证。维护者发布新版本前须按[签名配置说明](docs/release-signing.md)配置凭据。旧版本可能仍未签名，本次变更不会替换已有下载。请从同一 Release 下载 `checksums.txt` 并核对 SHA-256：
 
 ```sh
 shasum -a 256 ya-macos-arm64

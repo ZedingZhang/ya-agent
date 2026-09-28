@@ -92,12 +92,19 @@
       "LICENSE"
     ],
     "mac": {
+      "hardenedRuntime": true,
+      "notarize": true,
       "category": "public.app-category.productivity",
       "target": [
         "zip"
       ]
     },
     "win": {
+      "signExts": [".dll", ".node"],
+      "signtoolOptions": {
+        "signingHashAlgorithms": ["sha256"],
+        "rfc3161TimeStampServer": "http://timestamp.digicert.com"
+      },
       "target": [
         "portable"
       ]

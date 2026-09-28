@@ -48,6 +48,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Require release signing credentials
+        if: runner.os != 'Linux'
+        shell: bash
+        env:
+          MAC_CERTIFICATE: ${{ secrets.MAC_CSC_LINK }}
+          MAC_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          WIN_CERTIFICATE: ${{ secrets.WIN_CSC_LINK }}
+          WIN_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            required=(MAC_CERTIFICATE MAC_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID)
+          else
+            required=(WIN_CERTIFICATE WIN_PASSWORD)
+          fi
+          for name in "${required[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing signing credential: $name. See docs/release-signing.md."
+              exit 1
+            fi
+          done
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -98,9 +122,41 @@ jobs:
       - name: Build desktop application
         shell: bash
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
           ELECTRON_ARGS: ${{ matrix.electron_args }}
-        run: npx electron-builder $ELECTRON_ARGS --publish never
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            npx electron-builder $ELECTRON_ARGS --publish never
+          else
+            npx electron-builder $ELECTRON_ARGS --publish never --config.forceCodeSigning=true
+          fi
+
+      - name: Sign and notarize macOS CLI and verify desktop archive
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CLI_ASSET: ${{ matrix.cli_asset }}
+        run: bash .github/scripts/sign-macos.sh
+
+      - name: Sign Windows CLI and verify desktop signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CLI_ASSET: ${{ matrix.cli_asset }}
+        run: ./.github/scripts/sign-windows.ps1
 
       - name: Smoke test CLI on Unix
         if: runner.os != 'Windows'
