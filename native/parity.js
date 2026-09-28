@@ -528,13 +528,8 @@ function nativeStreamReply(byteChunks) {
   const usage = {};
   let done = false;
   const handle = (data) => {
-    let parsed;
-    try {
-      parsed = native.parseStreamChunk(data);
-    } catch (error) {
-      // completeStream wraps a chunk that keeps failing after its retries.
-      throw new Error(`DeepSeek API request failed: ${error.message}`);
-    }
+    // Parse failures propagate directly; only transport failures are retried.
+    const parsed = native.parseStreamChunk(data);
     if (parsed.done) {
       done = true;
       return;
@@ -695,7 +690,7 @@ check(
 check(
   "golden: malformed chunk fails the stream instead of dropping deltas",
   capture(() => nativeStreamReply([new TextEncoder().encode("data: {not json}\ndata: [DONE]\n")])),
-  { error: "DeepSeek API request failed: Invalid streaming chunk: key must be a string at line 1 column 2" },
+  { error: "Invalid streaming chunk: key must be a string at line 1 column 2" },
 );
 check(
   "golden: multibyte character split across chunks survives",

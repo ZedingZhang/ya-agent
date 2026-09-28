@@ -126,6 +126,18 @@ describe("DeepSeek client", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry or wrap invalid streaming JSON as a network error", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => streamResponse(["data: {not json}\n\n"]));
+    const sleep = vi.fn(async () => undefined);
+    const output = vi.fn();
+    await expect(new DeepSeekClient("key", fetcher, sleep).completeStream(
+      [], new ModelConfig(), 100, output,
+    )).rejects.toThrow(/^Invalid streaming chunk:/u);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(output).not.toHaveBeenCalled();
+  });
+
   it("sends explicit thinking settings and reasoning effort", async () => {
     let seen: Record<string, unknown> = {};
     const fetcher: FetchLike = async (_url, init) => {
