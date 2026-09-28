@@ -27,6 +27,105 @@ function payloadFrom(init?: RequestInit): Record<string, unknown> {
 }
 
 describe("DeepSeek client", () => {
+  for (const streaming of [false, true]) {
+    describe(streaming ? "stream retries" : "completion retries", () => {
+      const success = () => streaming
+        ? streamResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n', 'data: [DONE]\n'])
+        : jsonResponse({ choices: [{ message: { content: "ok" } }] });
+      const invoke = (fetcher: FetchLike, sleep = vi.fn(async (_ms: number) => undefined), onContent = vi.fn()) => {
+        const client = new DeepSeekClient("key", fetcher, sleep);
+        return streaming ? client.completeStream([], new ModelConfig(), 100, onContent)
+          : client.complete([], new ModelConfig(), 100);
+      };
+
+      it.each([429, 500, 503, 599])("retries HTTP %i and retains final status", async (status) => {
+        const fetcher = vi.fn<FetchLike>(async () => new Response("failure", { status }));
+        const sleep = vi.fn(async (_ms: number) => undefined);
+        await expect(invoke(fetcher, sleep)).rejects.toMatchObject({ status });
+        expect(fetcher).toHaveBeenCalledTimes(3);
+        expect(sleep.mock.calls).toEqual([[500], [1000]]);
+      });
+
+      it.each([400, 401, 403, 404, 408, 422])("does not retry HTTP %i", async (status) => {
+        const fetcher = vi.fn<FetchLike>(async () => new Response("failure", { status }));
+        const sleep = vi.fn(async (_ms: number) => undefined);
+        await expect(invoke(fetcher, sleep)).rejects.toMatchObject({ status });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+        expect(sleep).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ["3", 3000], ["0", 500], ["invalid", 500], ["-1", 500],
+        ["Tue, 29 Sep 2026 00:00:04 GMT", 4000],
+        ["Mon, 28 Sep 2026 00:00:00 GMT", 500],
+      ])("handles Retry-After %s", async (header, delay) => {
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 8, 29));
+        try {
+          const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(new Response("busy", {
+            status: 429, headers: { "Retry-After": String(header) },
+          })).mockImplementation(async () => success());
+          const sleep = vi.fn(async (_ms: number) => undefined);
+          await expect(invoke(fetcher, sleep)).resolves.toMatchObject({ content: "ok" });
+          expect(sleep.mock.calls).toEqual([[delay]]);
+        } finally {
+          clock.mockRestore();
+        }
+      });
+
+      it("retries transport failures without inspecting error messages", async () => {
+        const failure = new TypeError("wrapped HTTP 401 text");
+        const fetcher = vi.fn<FetchLike>().mockRejectedValue(failure);
+        await expect(invoke(fetcher)).rejects.toMatchObject({ cause: failure });
+        expect(fetcher).toHaveBeenCalledTimes(3);
+      });
+
+      it("retries a body transport failure before output", async () => {
+        const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(new Response(new ReadableStream({
+          start(controller) { controller.error(new TypeError("connection reset")); },
+        }))).mockImplementation(async () => success());
+        await expect(invoke(fetcher)).resolves.toMatchObject({ content: "ok" });
+        expect(fetcher).toHaveBeenCalledTimes(2);
+      });
+
+      it("preserves HTTP status when the error body fails", async () => {
+        const fetcher = vi.fn<FetchLike>(async () => new Response(new ReadableStream({
+          start(controller) { controller.error(new TypeError("connection reset")); },
+        }), { status: 401 }));
+        await expect(invoke(fetcher)).rejects.toMatchObject({ status: 401 });
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      });
+    });
+  }
+
+  it("does not replay a stream after delivering content", async () => {
+    let reads = 0;
+    const fetcher = vi.fn<FetchLike>(async () => new Response(new ReadableStream({
+      pull(controller) {
+        if (reads++ === 0) controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'));
+        else controller.error(new TypeError("connection reset"));
+      },
+    })));
+    const output = vi.fn();
+    const sleep = vi.fn(async () => undefined);
+    await expect(new DeepSeekClient("key", fetcher, sleep).completeStream([], new ModelConfig(), 100, output)).rejects.toThrow("connection reset");
+    expect(output).toHaveBeenCalledExactlyOnceWith("hello");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("does not retry callback exceptions", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => streamResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n']));
+    const failure = new TypeError("callback failed");
+    await expect(new DeepSeekClient("key", fetcher).completeStream([], new ModelConfig(), 100, () => { throw failure; })).rejects.toBe(failure);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry invalid JSON", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => new Response("invalid JSON"));
+    await expect(new DeepSeekClient("key", fetcher).complete([], new ModelConfig(), 100)).rejects.toThrow(SyntaxError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("sends explicit thinking settings and reasoning effort", async () => {
     let seen: Record<string, unknown> = {};
     const fetcher: FetchLike = async (_url, init) => {

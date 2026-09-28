@@ -25,6 +25,34 @@ const defaultSleep: Sleep = (milliseconds) => new Promise((resolve) => setTimeou
 
 export class DeepSeekError extends Error {
   override readonly name = "DeepSeekError";
+
+  constructor(message: string, readonly status?: number, readonly retryAfterMs?: number, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+class NetworkError extends DeepSeekError {}
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const trimmed = value.trim();
+  if (/^\d+$/u.test(trimmed)) {
+    const milliseconds = Number(trimmed) * 1_000;
+    return Number.isSafeInteger(milliseconds) ? milliseconds : undefined;
+  }
+  // Only HTTP dates, not negative numbers or other Date.parse shortcuts.
+  if (!/^[A-Za-z]/u.test(trimmed)) return undefined;
+  const date = Date.parse(trimmed);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+async function readNetwork<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new NetworkError(`DeepSeek API request failed: ${error instanceof Error ? error.message : String(error)}`,
+      undefined, undefined, { cause: error });
+  }
 }
 
 export interface ModelReply {
@@ -82,7 +110,7 @@ export class DeepSeekClient {
   }
 
   private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
-    return this.fetcher(API_URL, {
+    return readNetwork(() => this.fetcher(API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
@@ -90,35 +118,40 @@ export class DeepSeekClient {
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(timeoutSeconds * 1_000),
-    });
+    }));
   }
 
   private async httpError(response: Response): Promise<DeepSeekError> {
-    const detail = await response.text();
-    return new DeepSeekError(`DeepSeek API returned HTTP ${response.status}: ${detail}`);
-  }
-
-  private networkError(error: unknown): DeepSeekError {
-    return new DeepSeekError(`DeepSeek API request failed: ${error instanceof Error ? error.message : String(error)}`);
+    // A broken error body must not discard the status (e.g. turn a 401 into a retry).
+    const detail = await response.text().catch(() => response.statusText);
+    return new DeepSeekError(`DeepSeek API returned HTTP ${response.status}: ${detail}`,
+      response.status, retryAfterMilliseconds(response.headers.get("Retry-After")));
   }
 
   private async request(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
-    let lastError: unknown;
-    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+    const response = await this.requestOnce(payload, timeoutSeconds);
+    if (!response.ok) throw await this.httpError(response);
+    return response;
+  }
+
+  private async withRetry<T>(operation: (markDelivered: () => void) => Promise<T>): Promise<T> {
+    let delivered = false;
+    for (let attempt = 0; ; attempt += 1) {
       try {
-        const response = await this.requestOnce(payload, timeoutSeconds);
-        if (response.ok) return response;
-        const error = await this.httpError(response);
-        if (response.status < 500 || attempt === MAX_REQUEST_ATTEMPTS - 1) throw error;
-        lastError = error;
+        return await operation(() => { delivered = true; });
       } catch (error) {
-        if (error instanceof DeepSeekError && (error.message.includes("HTTP 4") || attempt === MAX_REQUEST_ATTEMPTS - 1)) throw error;
-        lastError = error;
-        if (attempt === MAX_REQUEST_ATTEMPTS - 1) throw this.networkError(error);
+        const retryable = error instanceof NetworkError || error instanceof DeepSeekError &&
+          (error.status === 429 || error.status !== undefined && error.status >= 500 && error.status < 600);
+        if (delivered || !retryable || attempt >= MAX_REQUEST_ATTEMPTS - 1) throw error;
+        let delay = Math.max(500 * 2 ** attempt, (error as DeepSeekError).retryAfterMs ?? 0);
+        // Node timers overflow above a signed 32-bit millisecond delay.
+        while (delay > 0) {
+          const interval = Math.min(delay, 2_147_483_647);
+          await this.sleep(interval);
+          delay -= interval;
+        }
       }
-      await this.sleep(500 * (attempt + 1));
     }
-    throw this.networkError(lastError);
   }
 
   async complete(
@@ -128,12 +161,15 @@ export class DeepSeekClient {
     tools?: ToolDefinition[],
   ): Promise<ModelReply> {
     config.validate();
-    const response = await this.request(this.payload(messages, config, maxTokens, tools, false), config.toaTimeout);
-    // Parsing the body here keeps a non-JSON response failing exactly where it
-    // did before; the Rust core receives the same re-serialised JSON that the
-    // TypeScript original embedded in its error message.
-    const body = await response.json() as unknown;
-    return JSON.parse(parseModelReply(JSON.stringify(body))) as ModelReply;
+    const payload = this.payload(messages, config, maxTokens, tools, false);
+    return this.withRetry(async () => {
+      const response = await this.request(payload, config.toaTimeout);
+      // Parsing the body here keeps a non-JSON response failing exactly where it
+      // did before; the Rust core receives the same re-serialised JSON that the
+      // TypeScript original embedded in its error message.
+      const body = JSON.parse(await readNetwork(() => response.text())) as unknown;
+      return JSON.parse(parseModelReply(JSON.stringify(body))) as ModelReply;
+    });
   }
 
   async completeStream(
@@ -144,50 +180,34 @@ export class DeepSeekClient {
   ): Promise<ModelReply> {
     config.validate();
     const payload = this.payload(messages, config, maxTokens, undefined, true);
-    let lastError: unknown;
-    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+    return this.withRetry(async (markDelivered) => {
       const content: string[] = [];
       const reasoning: string[] = [];
       const usage: TokenUsage = {};
-      try {
-        const response = await this.requestOnce(payload, config.toaTimeout);
-        if (!response.ok) {
-          const error = await this.httpError(response);
-          if (response.status < 500 || attempt === MAX_REQUEST_ATTEMPTS - 1) throw error;
-          lastError = error;
-          await this.sleep(500 * (attempt + 1));
-          continue;
+      const response = await this.request(payload, config.toaTimeout);
+      const done = await readServerSentEvents(response, (data) => {
+        const chunk = parseStreamChunk(data);
+        if (chunk.done) return true;
+        if (chunk.usageJson) Object.assign(usage, JSON.parse(chunk.usageJson) as TokenUsage);
+        if (chunk.reasoningContent != null) reasoning.push(chunk.reasoningContent);
+        if (chunk.content != null) {
+          content.push(chunk.content);
+          markDelivered();
+          onContent(chunk.content);
         }
-        const done = await readServerSentEvents(response, (data) => {
-          const chunk = parseStreamChunk(data);
-          if (chunk.done) return true;
-          if (chunk.usageJson) Object.assign(usage, JSON.parse(chunk.usageJson) as TokenUsage);
-          if (chunk.reasoningContent != null) reasoning.push(chunk.reasoningContent);
-          if (chunk.content != null) {
-            content.push(chunk.content);
-            onContent(chunk.content);
-          }
-          return false;
-        });
-        void done;
-        const joinedContent = content.join("");
-        const joinedReasoning = reasoning.join("");
-        return {
-          content: joinedContent,
-          ...(joinedReasoning ? { reasoningContent: joinedReasoning } : {}),
-          toolCalls: [],
-          usage,
-          assistantMessage: { role: "assistant", content: joinedContent },
-        };
-      } catch (error) {
-        lastError = error;
-        if (content.length > 0 || attempt === MAX_REQUEST_ATTEMPTS - 1 || error instanceof DeepSeekError && error.message.includes("HTTP 4")) {
-          throw error instanceof DeepSeekError ? error : this.networkError(error);
-        }
-        await this.sleep(500 * (attempt + 1));
-      }
-    }
-    throw this.networkError(lastError);
+        return false;
+      });
+      void done;
+      const joinedContent = content.join("");
+      const joinedReasoning = reasoning.join("");
+      return {
+        content: joinedContent,
+        ...(joinedReasoning ? { reasoningContent: joinedReasoning } : {}),
+        toolCalls: [],
+        usage,
+        assistantMessage: { role: "assistant", content: joinedContent },
+      };
+    });
   }
 
   async runWithTools(
@@ -242,7 +262,7 @@ async function readServerSentEvents(response: Response, onData: (data: string) =
   const reader = response.body.getReader();
   const frames = new SseReader();
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readNetwork(() => reader.read());
     if (value) {
       for (const data of frames.push(Buffer.from(value))) {
         if (onData(data)) {
