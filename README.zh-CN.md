@@ -2,9 +2,9 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya（丫丫）是一个“用户授权优先”的个人研究与决策 Agent，同时提供命令行与原生桌面应用。项目已使用 Node.js 上的严格 TypeScript 重构；桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
+Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命令行与原生桌面应用。项目内核采用 Rust，桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
 
-Ya 使用 DeepSeek V4.1 API（默认 `deepseek-flash`，困难任务可切换到 `deepseek-v4-pro`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
+Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
 
 ## 架构
 
