@@ -415,7 +415,22 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
-    return { memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker, workspaceControls, formOverflow, keychainVisible };
+    const ribbon = document.querySelector('.workspace-ribbon');
+    const ribbonOrder = ribbon ? Array.from(ribbon.children).map((child) => (child.id || child.querySelector('input')?.id) ?? '') : [];
+    const workspaceRibbon = ribbonOrder.join(',') === 'local-enabled,refresh-files,choose-workspace,workspace-path';
+    // A long path must stay inside the ribbon instead of widening the page, so probe it before capture.
+    const pathLabel = document.querySelector('#workspace-path');
+    const main = document.querySelector('main');
+    const probeText = 'C:\\\\' + 'workspace-folder\\\\'.repeat(24) + 'final-folder';
+    const restoreText = pathLabel ? pathLabel.textContent : null;
+    if (pathLabel) pathLabel.textContent = probeText;
+    void document.documentElement.offsetWidth; // Force a reflow so the probe is measured.
+    const workspaceOverflow = main instanceof HTMLElement ? Math.round(main.getBoundingClientRect().width - window.innerWidth) : 0;
+    if (pathLabel && restoreText !== null) pathLabel.textContent = restoreText;
+    return {
+      memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker,
+      workspaceControls, workspaceRibbon, workspaceOverflow, formOverflow, keychainVisible,
+    };
   })()`) as {
     memoryActive?: boolean;
     settingsActive?: boolean;
@@ -424,12 +439,20 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     visionOption?: boolean;
     imagePicker?: boolean;
     workspaceControls?: boolean;
+    workspaceRibbon?: boolean;
+    workspaceOverflow?: number;
     formOverflow?: number;
     keychainVisible?: boolean;
   };
   if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
     || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls) {
     throw new Error("Renderer navigation or vision controls failed.");
+  }
+  if (!pages.workspaceRibbon) {
+    throw new Error("Workspace ribbon controls must be ordered as local tools, refresh, choose, and path.");
+  }
+  if ((pages.workspaceOverflow ?? 0) > 0) {
+    throw new Error(`A long workspace path overflows the window by ${pages.workspaceOverflow}px.`);
   }
   if ((pages.formOverflow ?? 0) > 0) {
     throw new Error(`The memory candidate form overflows its card by ${pages.formOverflow}px.`);
