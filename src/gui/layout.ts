@@ -16,9 +16,13 @@ export function initialWindowGeometry(screenWidth: number, screenHeight: number)
   };
 }
 
+/**
+ * Mirrors the `.workbench` grid in `styles.css`: the file panel is twice as wide as it used to be
+ * (a 380px minimum against the former 190px) and the center and context columns keep their floors,
+ * so a window narrower than the three columns need leans on the center column's minimum.
+ */
 export function initialWorkbenchColumns(width: number): [number, number, number] {
-  if (width >= 1_400) return [10, 75, 15];
-  const left = Math.max(190, Math.min(260, Math.round(width * 0.1)));
-  const right = Math.max(260, Math.min(300, Math.round(width * 0.2)));
-  return [left, Math.max(570, width - left - right), right];
+  if (width >= 1_400) return [20, 65, 15];
+  const center = width > 1_180 ? 570 : 560;
+  return [380, Math.max(center, width - 380 - 260), 260];
 }
