@@ -162,8 +162,11 @@ describe("GUI presentation helpers", () => {
   it("chooses a spacious centered initial geometry", () => {
     expect(initialWindowGeometry(2_048, 1_280)).toEqual({ width: 1_884, height: 1_152, x: 82, y: 64 });
     expect(initialWindowGeometry(1_280, 800)).toEqual({ width: 1_178, height: 720, x: 51, y: 40 });
-    expect(initialWorkbenchColumns(1_720)).toEqual([10, 75, 15]);
-    expect(initialWorkbenchColumns(1_020).reduce((sum, value) => sum + value, 0)).toBe(1_020);
+    expect(initialWorkbenchColumns(1_720)).toEqual([20, 65, 15]);
+    // The file panel is twice the width it had before the split was widened (380px against 190px).
+    expect(initialWorkbenchColumns(1_020)).toEqual([380, 560, 260]);
+    // Wide windows keep the proportions: a 20% file panel is the doubled default of the former 10%.
+    expect(initialWorkbenchColumns(1_400)).toEqual([20, 65, 15]);
   });
 
   it("parses headings, inline styles, links, lists, quotes, code, and tables", () => {
