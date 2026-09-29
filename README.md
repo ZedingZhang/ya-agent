@@ -2,9 +2,15 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya is a consent-first personal research and decision agent with a command-line interface and a native desktop application. The project is implemented in strict TypeScript on Node.js; the desktop application uses Electron while sharing the same typed service layer as the CLI.
+Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The project has a Rust core; the desktop application uses Electron and shares the same typed service layer as the CLI.
 
-Ya uses the DeepSeek V4.1 API—`deepseek-flash` by default, with `deepseek-v4-pro` for the hardest tasks—stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files.
+Ya uses the DeepSeek API (`deepseek-flash` by default, with the option to switch to `deepseek-v4-pro`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files through local tools.
+
+## Desktop preview
+
+Browse local files, chat with Ya, and view relevant memory, tool activity, and file operations awaiting approval in the workspace.
+
+![Ya desktop workspace: file list on the left, conversation and task input in the center, and relevant memory and tool activity on the right](assets/ya-gui-workspace-screenshot.png)
 
 ## Architecture
 
