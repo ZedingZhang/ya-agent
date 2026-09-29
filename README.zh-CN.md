@@ -6,6 +6,12 @@ Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命�
 
 Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
 
+## 桌面界面
+
+在工作区中浏览本地文件、与 Ya 对话，并查看相关记忆、工具执行记录和待审批的文件操作。
+
+![Ya 桌面工作区：左侧文件列表、中间对话与任务输入区、右侧相关记忆和工具执行记录](assets/ya-gui-workspace-screenshot.png)
+
 ## 架构
 
 - **SEA 受控学习**：显式用户反馈先成为候选记忆卡；只有已批准的卡片才会影响后续任务。
