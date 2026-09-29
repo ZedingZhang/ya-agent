@@ -4,7 +4,7 @@
 
 Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The project has a Rust core; the desktop application uses Electron and shares the same typed service layer as the CLI.
 
-Ya uses the DeepSeek API (`deepseek-flash` by default, with the option to switch to `deepseek-v4-pro`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files through local tools.
+Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files through local tools.
 
 ## Desktop preview
 
