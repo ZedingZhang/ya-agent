@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_COMMAND_OUTPUT_BYTES, runCommand, type CommandEvent, type CommandResult } from "../src/commands";
@@ -16,12 +16,90 @@ describe("command execution and verification", () => {
     home = tempHome();
     root = join(home.path, "workspace with spaces");
     mkdirSync(root);
+    root = realpathSync(root);
   });
   afterEach(() => { vi.unstubAllEnvs(); home.cleanup(); });
 
   const nodeCommand = (file: string): string => `"${process.execPath}" "${file}"`;
   const execute = (command: string, options: Partial<Parameters<typeof runCommand>[0]> = {}) =>
     runCommand({ command, cwd: root, displayCwd: ".", timeoutSeconds: 10, ...options });
+
+  const toolClient = (call: ToolCall, signal?: AbortSignal): DeepSeekClient => {
+    let first = true;
+    const fetcher: FetchLike = async () => {
+      const message = first ? { role: "assistant", tool_calls: [call] } : { role: "assistant", content: "Done" };
+      first = false;
+      return Response.json({ choices: [{ message }] });
+    };
+    return new DeepSeekClient("key", fetcher, undefined, signal);
+  };
+
+  it("rejects disguised approval text even when calling the runner directly", () => {
+    const onEvent = vi.fn();
+    expect(() => execute("echo visible & rem \x1b[2K\recho visible", { onEvent })).toThrow("unsafe control");
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("passes runTask cancellation to commands without a separate workspace signal", async () => {
+    writeFileSync(join(root, "wait.cjs"), 'console.log("ready"); setTimeout(() => require("node:fs").writeFileSync("late.txt", "bad"), 1500);');
+    const controller = new AbortController();
+    const events: CommandEvent[] = [];
+    const workspace = new LocalWorkspace(root, () => true, undefined, {
+      commandsEnabled: true,
+      onCommandEvent: (event) => {
+        events.push(event);
+        if (event.type === "output" && event.text.includes("ready")) controller.abort(new Error("Stop"));
+      },
+    });
+    const call: ToolCall = { id: "run", function: { name: "local_run", arguments: JSON.stringify({ command: nodeCommand("wait.cjs") }) } };
+    await expect(runTask("key", "Check", new ModelConfig(), {
+      webMode: "off", localWorkspace: workspace, signal: controller.signal,
+      clientFactory: (_key, signal) => toolClient(call, signal),
+    })).rejects.toThrow("Stop");
+    expect(events.at(-1)).toMatchObject({ type: "finish", result: { status: "cancelled" } });
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    expect(existsSync(join(root, "late.txt"))).toBe(false);
+  }, 10_000);
+
+  it("cancels service approval, ignores late consent and allows workspace reuse", async () => {
+    let approve!: (value: boolean) => void;
+    let notify!: () => void;
+    const requested = new Promise<void>((resolve) => { notify = resolve; });
+    const confirm = vi.fn().mockImplementationOnce(() => {
+      notify();
+      return new Promise<boolean>((resolve) => { approve = resolve; });
+    }).mockReturnValue(true);
+    const workspace = new LocalWorkspace(root, confirm);
+    const controller = new AbortController();
+    const call: ToolCall = { id: "write", function: { name: "local_write", arguments: JSON.stringify({ path: "late.txt", content: "bad" }) } };
+    const task = runTask("key", "Write", new ModelConfig(), {
+      webMode: "off", localWorkspace: workspace, signal: controller.signal,
+      clientFactory: (_key, signal) => toolClient(call, signal),
+    });
+    const rejected = expect(task).rejects.toThrow("Stop");
+    await requested;
+    controller.abort(new Error("Stop"));
+    await rejected;
+    approve(true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(existsSync(join(root, "late.txt"))).toBe(false);
+    const next: ToolCall = { id: "write", function: { name: "local_write", arguments: JSON.stringify({ path: "next.txt", content: "ok" }) } };
+    await runTask("key", "Write", new ModelConfig(), {
+      webMode: "off", localWorkspace: workspace, signal: new AbortController().signal,
+      clientFactory: (_key, signal) => toolClient(next, signal),
+    });
+    expect(readFileSync(join(root, "next.txt"), "utf8")).toBe("ok");
+  });
+
+  it("preserves the workspace cancellation signal when binding a task signal", async () => {
+    const controller = new AbortController();
+    const workspace = new LocalWorkspace(root, () => new Promise<boolean>(() => {}), undefined, { signal: controller.signal });
+    const bound = workspace.withSignal(new AbortController().signal);
+    const task = bound.write({ path: "late.txt", content: "bad" });
+    controller.abort(new Error("Workspace stopped"));
+    await expect(task).rejects.toThrow("Workspace stopped");
+    expect(existsSync(join(root, "late.txt"))).toBe(false);
+  });
 
   it("runs in the requested directory, captures UTF-8 streams and nonzero exit codes", async () => {
     writeFileSync(join(root, "check.cjs"), 'process.stdout.write(process.cwd() + "\\n你好🙂"); process.stderr.write("check failed"); process.exitCode = 7;');
@@ -118,6 +196,8 @@ describe("command execution and verification", () => {
 
   it.each([
     { command: "" }, { command: "a\0b" }, { command: "x".repeat(8_193) },
+    { command: "echo safe & rem \x1b[2K\recho safe" }, { command: "echo a\bb" },
+    { command: "echo \x9b2K" },
     { command: "echo ok", cwd: ".." }, { command: "echo ok", cwd: "missing" },
     { command: "echo ok", timeout_seconds: 0 }, { command: "echo ok", timeout_seconds: 601 },
     { command: "echo ok", timeout_seconds: 1.5 }, { command: "echo ok", timeout_seconds: "30" },

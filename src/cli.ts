@@ -27,7 +27,7 @@ import {
   type MemoryKind,
 } from "./memory";
 import { shouldUseWeb, singleAgent, toaAgent, type RunResult } from "./orchestrator";
-import { StreamingMarkdownRenderer, formatOutput } from "./terminal";
+import { StreamingMarkdownRenderer, escapeTerminalControls, formatOutput } from "./terminal";
 import type { ImageDetail, OutputFormat, WebMode } from "./types";
 import { VERSION } from "./version";
 import { abortable } from "./cancellation";
@@ -249,8 +249,8 @@ function showMemory(task: string, io: CliIo): void {
 
 export async function localConfirm(action: LocalAction, approveNoninteractive: boolean, io: CliIo, signal?: AbortSignal): Promise<boolean> {
   signal?.throwIfAborted();
-  write(io.stdout, `\n[Ya local action]\n  ${action.summary}\n`);
-  if (action.diff) write(io.stdout, `\n${action.diff}${action.diff.endsWith("\n") ? "" : "\n"}`);
+  write(io.stdout, `\n[Ya local action]\n  ${escapeTerminalControls(action.summary)}\n`);
+  if (action.diff) write(io.stdout, `\n${escapeTerminalControls(action.diff)}${action.diff.endsWith("\n") ? "" : "\n"}`);
   if (!io.stdin.isTTY) {
     const flag = action.operation === "run" ? "--approve-commands" : "--approve";
     if (approveNoninteractive) {
@@ -265,7 +265,7 @@ export async function localConfirm(action: LocalAction, approveNoninteractive: b
 }
 
 function showCommandEvent(event: CommandEvent, io: CliIo): void {
-  if (event.type === "start") write(io.stderr, `\n[Ya command] ${event.command}\n  cwd: ${event.cwd}\n`);
+  if (event.type === "start") write(io.stderr, `\n[Ya command] ${escapeTerminalControls(event.command)}\n  cwd: ${escapeTerminalControls(event.cwd)}\n`);
   else if (event.type === "output") write(io.stderr, event.text);
   else {
     const result = event.result;

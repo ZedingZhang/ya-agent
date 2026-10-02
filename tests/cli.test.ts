@@ -348,6 +348,14 @@ describe("CLI", () => {
     expect(capture.stdout.output).toContain("npm test");
   });
 
+  it("renders controls visibly in approval summaries and diffs", async () => {
+    const capture = fakeIo(true, ["n"]);
+    await localConfirm({ operation: "write", paths: [home.path], summary: "hidden\x1b[2K\rvisible", diff: "removed\badded\x9b2K" }, false, capture.io);
+    expect(capture.stdout.output).toContain("hidden\\u001b[2K\\u000dvisible");
+    expect(capture.stdout.output).toContain("removed\\u0008added\\u009b2K");
+    expect(capture.stdout.output).not.toMatch(/[\x1b\r\b\x9b]/u);
+  });
+
   it("cancels an interactive approval with SIGINT and cleans up its signal handler", async () => {
     const capture = fakeIo(true);
     const before = process.listenerCount("SIGINT");

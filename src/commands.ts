@@ -8,6 +8,16 @@ export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 600;
 export const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
 
+export function validateCommand(command: unknown): asserts command is string {
+  if (typeof command !== "string" || !command.trim() || command.length > 8_192) {
+    throw new Error("Command must be a non-empty string with at most 8192 characters.");
+  }
+  // LF and tab are visible shell whitespace; other controls can disguise approval text.
+  if (/[\x00-\x08\x0B-\x1F\x7F-\x9F]/u.test(command)) {
+    throw new Error("Command contains unsafe control characters. Use printable text, LF and tab only.");
+  }
+}
+
 export interface CommandResult {
   status: "success" | "failed" | "timed_out" | "cancelled" | "error";
   command: string;
@@ -58,9 +68,7 @@ class OutputTail {
 /** Runs an explicitly approved shell command. cwd confinement is not a sandbox. */
 export function runCommand(options: CommandOptions): Promise<CommandResult> {
   options.signal?.throwIfAborted();
-  if (!options.command.trim() || options.command.includes("\0") || options.command.length > 8_192) {
-    throw new Error("Command must be non-empty, contain no NUL bytes, and be at most 8192 characters.");
-  }
+  validateCommand(options.command);
   if (!Number.isInteger(options.timeoutSeconds) || options.timeoutSeconds < 1 || options.timeoutSeconds > MAX_COMMAND_TIMEOUT_SECONDS) {
     throw new Error(`Command timeout must be an integer from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds.`);
   }

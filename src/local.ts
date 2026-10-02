@@ -24,7 +24,7 @@ import {
 import { createTwoFilesPatch } from "diff";
 import { dataHome } from "./config";
 import { abortable } from "./cancellation";
-import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, type CommandEvent, type CommandResult } from "./commands";
+import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
 export const MAX_TEXT_BYTES = 1024 * 1024;
@@ -225,6 +225,15 @@ export class LocalWorkspace {
 
   get commandsEnabled(): boolean { return this.options.commandsEnabled === true; }
 
+  /** Bind cancellation without changing the workspace supplied by the caller. */
+  withSignal(signal?: AbortSignal): LocalWorkspace {
+    if (!signal || signal === this.options.signal) return this;
+    return new LocalWorkspace(this.root, this.confirm, this.onActivity, {
+      ...this.options,
+      signal: this.options.signal ? AbortSignal.any([this.options.signal, signal]) : signal,
+    });
+  }
+
   get tools(): ToolDefinition[] { return this.commandsEnabled ? [...LOCAL_TOOLS, LOCAL_RUN_TOOL] : [...LOCAL_TOOLS]; }
 
   get toolHandlers(): Record<string, ToolHandler> {
@@ -321,9 +330,7 @@ export class LocalWorkspace {
   async run(arguments_: ToolArguments): Promise<string> {
     if (!this.commandsEnabled) throw new Error("Command execution is not enabled for this task.");
     const command = arguments_.command;
-    if (typeof command !== "string" || !command.trim() || command.includes("\0") || command.length > 8_192) {
-      throw new Error("Command must be non-empty, contain no NUL bytes, and be at most 8192 characters.");
-    }
+    validateCommand(command);
     const timeout = arguments_.timeout_seconds ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
     if (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 1 || timeout > MAX_COMMAND_TIMEOUT_SECONDS) {
       throw new Error(`Command timeout must be an integer from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds.`);

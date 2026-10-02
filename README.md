@@ -192,6 +192,8 @@ ya ask --local --exec --workspace "$PWD" "Fix the bug and run the relevant tests
 
 Each command approval displays the exact shell command, absolute working directory and timeout. The desktop equivalent is **Allow command execution** in the workspace; command cards display live stdout/stderr, completion status, exit code and duration. **Stop** cancels pending approvals, API requests and the running command's process tree. The CLI uses Ctrl+C.
 
+Commands containing terminal control characters are rejected before approval; LF and tab are allowed. CLI approvals show controls in file paths and diffs as visible escapes. Library callers can pass `signal` to `runTask` to cancel local tools and pending approvals without configuring a second signal on `LocalWorkspace`.
+
 For an unattended task, file changes and commands have separate authorizations:
 
 ```sh
