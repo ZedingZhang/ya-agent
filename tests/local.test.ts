@@ -58,6 +58,24 @@ describe("local workspace", () => {
     expect(nameResults[0]).toMatchObject({ match: "filename" });
   });
 
+  it("preserves UTF-8 BOM bytes when reading and writing back a file", async () => {
+    const path = join(root, "script.ps1");
+    const content = '\ufeffWrite-Output "你好"\n';
+    const original = Buffer.from(content, "utf8");
+    writeFileSync(path, original);
+    const result = JSON.parse(workspace.read({ path: "script.ps1" })) as { content: string };
+    expect(result.content).toBe(content);
+    await workspace.write({ path: "script.ps1", content: result.content });
+    expect(readFileSync(path)).toEqual(original);
+  });
+
+  it("includes the original BOM in approval diffs when it is explicitly removed", async () => {
+    writeFileSync(join(root, "script.ps1"), '\ufeffWrite-Output "你好"\n', "utf8");
+    await workspace.write({ path: "script.ps1", content: 'Write-Output "你好"\n' });
+    expect(actions.at(-1)?.diff).toContain('-\ufeffWrite-Output "你好"');
+    expect(actions.at(-1)?.diff).toContain('+Write-Output "你好"');
+  });
+
   it("reports activity metadata without file contents", () => {
     writeFileSync(join(root, "notes.txt"), "very private local text", "utf8");
     const observed: LocalActivity[] = [];

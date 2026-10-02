@@ -20,14 +20,5 @@ venv/
 .vscode/
 .idea/
 
-# Rust native core: the .node binary is a build artifact, while the generated
-# index.js loader and index.d.ts stay in the repository so typechecking works
-# without a Rust toolchain.
-native/target/
-native/*.node
-native/npm/
-
-# napi-rs swaps build outputs through a transaction directory and leaves
-# retired binaries behind when a build replaces one.
-native/.napi-rs-filesystem-transaction.swp/
-native/.*.tmp
+# Legacy build outputs from the former native core.
+/native/

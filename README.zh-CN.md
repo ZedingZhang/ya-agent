@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命令行与原生桌面应用。项目内核采用 Rust，桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
+Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命令行与原生桌面应用。项目内核采用 TypeScript，桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
 
 Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
 
@@ -218,6 +218,8 @@ Ya 最多保存 100 张本地记忆卡。候选卡片在批准前不会进入模
 应用不会启动本地 Web 服务。渲染器不能直接访问 Node.js；API 与文件系统操作在 Electron 主进程内通过校验后的 IPC 处理。
 
 ## 开发
+
+共享核心、CLI 与 Electron 桌面端均采用 TypeScript；源码开发需要 Node.js 22 或更高版本。
 
 ```sh
 npm ci

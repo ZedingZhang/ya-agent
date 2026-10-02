@@ -1,15 +1,15 @@
-# Ya v0.8.0 — Rust core and reliability fixes
+# Ya v0.8.0 — TypeScript core and reliability fixes
 
 ## What changed
 
-- Introduced a Rust core with a Node.js binding for configuration, memory ranking,
+- Restored the shared TypeScript core for configuration, memory ranking,
   Keychain integration, image validation, web-result parsing, DeepSeek response
-  processing, orchestration policies, local-operation policies, and terminal
-  Markdown rendering. CLI and desktop packages include the native binding.
+  processing, orchestration, local-operation policies, and terminal Markdown.
+  Source builds and packages no longer require Rust or a Node-API binding.
 - Updated model identifiers to those accepted by the API and migrated stored
   legacy model names when loading configuration.
 - Improved DeepSeek retry classification and support for `Retry-After`. Malformed
-  streaming responses fail without retrying; parity tests reflect this behavior.
+  streaming responses fail without retrying; regression tests cover this behavior.
 - Added actionable configuration-load errors and recovery guidance, and checked
   platform support before prompting for Keychain credentials in the CLI.
 - Fixed desktop approval requests that could leave tasks stuck indefinitely.
@@ -29,16 +29,16 @@
 
 ---
 
-# Ya v0.8.0 — Rust 核心与稳定性修复
+# Ya v0.8.0 — TypeScript 核心与稳定性修复
 
 ## 主要变化
 
-- 引入 Rust 核心及 Node.js 绑定，涵盖配置、记忆排序、钥匙串、图片验证、
-  网页结果解析、DeepSeek 响应处理、任务编排策略、本地操作策略和终端
-  Markdown 渲染。CLI 和桌面安装包均包含原生绑定。
+- 恢复共享 TypeScript 核心，涵盖配置、记忆排序、钥匙串、图片验证、
+  网页结果解析、DeepSeek 响应处理、任务编排、本地操作策略和终端 Markdown 渲染。
+  源码构建和安装包不再依赖 Rust 或 Node-API 绑定。
 - 使用 API 实际支持的模型标识，加载配置时自动迁移旧模型名称。
 - 完善 DeepSeek 重试分类并遵循 `Retry-After`；流式响应解析失败时直接报错，
-  不再重试，同时更新行为一致性测试。
+  不再重试，回归测试覆盖这些行为。
 - 为配置加载失败提供具体原因和恢复指引；CLI 在提示输入钥匙串凭据前
   先检查平台支持情况。
 - 修复桌面审批请求可能导致任务一直占用的问题：审批等待超过 120 秒会

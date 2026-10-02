@@ -293,6 +293,26 @@ describe("DeepSeek client", () => {
     expect(reply.usage.total_tokens).toBe(3);
   });
 
+  it("decodes split UTF-8 bytes, CRLF frames, and an unterminated final frame", async () => {
+    const bytes = new TextEncoder().encode(
+      ': heartbeat\r\ndata: {"choices":[{"delta":{"content":"你好🙂"}}]}\r\n\r\n' +
+      'data: {"usage":{"total_tokens":3}}',
+    );
+    const fetcher: FetchLike = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+        controller.close();
+      },
+    }));
+    const output: string[] = [];
+    const reply = await new DeepSeekClient("key", fetcher).completeStream(
+      [], new ModelConfig(), 100, (content) => output.push(content),
+    );
+    expect(output).toEqual(["你好🙂"]);
+    expect(reply.content).toBe("你好🙂");
+    expect(reply.usage.total_tokens).toBe(3);
+  });
+
   it("retries transient request failures", async () => {
     let attempts = 0;
     const fetcher: FetchLike = async () => {

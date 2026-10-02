@@ -1,4 +1,3 @@
-import { parseSearchResults as nativeParseSearchResults } from "ya-core";
 import type { ToolArguments, ToolDefinition } from "./types";
 import { VERSION } from "./version";
 
@@ -12,14 +11,56 @@ export interface SearchResult {
   url: string;
 }
 
-/**
- * Parses DuckDuckGo result markup into title/URL pairs.
- *
- * Entity decoding, tag stripping, and redirect unwrapping live in the Rust
- * core; untrusted or malformed links are dropped there.
- */
+function decodeHtml(value: string): string {
+  const named: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    gt: ">",
+    lt: "<",
+    nbsp: " ",
+    quot: '"',
+  };
+  return value.replace(/&(#(?:x[0-9a-f]+|[0-9]+)|[a-z]+);/giu, (entity, code: string) => {
+    if (code.startsWith("#")) {
+      const hex = code[1]?.toLowerCase() === "x";
+      const point = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10);
+      if (!Number.isInteger(point) || point < 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+        return entity;
+      }
+      return String.fromCodePoint(point);
+    }
+    const name = code.toLocaleLowerCase("und");
+    return Object.hasOwn(named, name) ? named[name]! : entity;
+  });
+}
+
+function attribute(attributes: string, name: string): string | undefined {
+  const match = attributes.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"));
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
 export function parseSearchResults(html: string): SearchResult[] {
-  return nativeParseSearchResults(html) as SearchResult[];
+  const results: SearchResult[] = [];
+  for (const match of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/giu)) {
+    const attributes = match[1] ?? "";
+    const classes = attribute(attributes, "class") ?? "";
+    if (!classes.split(/\s+/u).includes("result__a")) continue;
+    const href = decodeHtml(attribute(attributes, "href") ?? "");
+    if (!href) continue;
+    let url: string;
+    try {
+      const parsed = new URL(href, "https://html.duckduckgo.com");
+      const target = new URL(parsed.searchParams.get("uddg") ?? parsed.toString());
+      if (target.protocol !== "https:" && target.protocol !== "http:") continue;
+      url = target.toString();
+    } catch {
+      // Search-result links are untrusted; omit malformed and non-web targets.
+      continue;
+    }
+    const title = decodeHtml((match[2] ?? "").replace(/<[^>]+>/gu, "")).replace(/\s+/gu, " ").trim();
+    results.push({ title, url });
+  }
+  return results;
 }
 
 export async function search(
