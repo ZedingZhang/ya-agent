@@ -31,6 +31,28 @@ describe("vision image inputs", () => {
     expect(detectImageMimeType(Buffer.from("not an image"))).toBeUndefined();
   });
 
+  it.each([
+    ["GIF87a", Buffer.from("GIF87a")],
+    ["GIF89a", GIF],
+    ["WebP", WEBP],
+  ])("rejects high-bit corruption in %s signatures for files and data URLs", (_format, valid) => {
+    expect(detectImageMimeType(valid)).toBeDefined();
+    const corrupt = Buffer.from(valid);
+    corrupt[0] = corrupt[0]! | 0x80;
+    expect(detectImageMimeType(corrupt)).toBeUndefined();
+    const path = join(home.path, "corrupt.img");
+    writeFileSync(path, corrupt);
+    expect(() => inspectImageFile(path)).toThrow(/Unsupported image content/u);
+    expect(() => imageContentPartsFromSources([`data:image/gif;base64,${corrupt.toString("base64")}`]))
+      .toThrow(/does not contain supported/u);
+  });
+
+  it("rejects high-bit corruption in the WEBP marker after a valid RIFF header", () => {
+    const corrupt = Buffer.from(WEBP);
+    corrupt[8] = corrupt[8]! | 0x80;
+    expect(detectImageMimeType(corrupt)).toBeUndefined();
+  });
+
   it("encodes a verified local image and applies the requested detail", () => {
     const path = join(home.path, "actually-a-png.txt");
     writeFileSync(path, PNG);

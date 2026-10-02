@@ -16,6 +16,26 @@ describe("web search", () => {
     ]);
   });
 
+  it("decodes valid named, decimal, and hexadecimal entities in titles and URLs", () => {
+    expect(parseSearchResults('<a class="result__a" href="https://example.com/?a=1&amp;b=2">&AMP; &#20320; &#x1F642; &#X597D;</a>'))
+      .toEqual([{ title: "& 你 🙂 好", url: "https://example.com/?a=1&b=2" }]);
+  });
+
+  it.each(["&#face;", "&#12abc;", "&#x110000;", "&#999999999999999999999;", "&#xD800;", "&constructor;", "&unknown;"])(
+    "preserves invalid or unknown entity %s without losing other search results", async (entity) => {
+      const html = `<a class="result__a" href="https://example.com">Result ${entity}</a>` +
+        '<a class="result__a" href="https://valid.example">Valid</a>';
+      const fetcher = vi.fn<FetchLike>(async () => new Response(html));
+      const sleep = vi.fn(async () => undefined);
+      expect(JSON.parse(await search({ query: "test" }, fetcher, sleep))).toEqual([
+        { title: `Result ${entity}`, url: "https://example.com/" },
+        { title: "Valid", url: "https://valid.example/" },
+      ]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    },
+  );
+
   it("returns at most five JSON results with an encoded query", async () => {
     let requestUrl = "";
     let userAgent = "";

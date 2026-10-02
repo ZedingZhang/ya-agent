@@ -255,7 +255,8 @@ export class LocalWorkspace {
     const data = readFileSync(path);
     if (data.includes(0)) throw new Error("Binary files cannot be read in local mode.");
     try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(data);
+      // Preserve the BOM as content so reads, approval diffs, and writes agree.
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
     } catch {
       throw new Error("Only UTF-8 text files can be read in local mode.");
     }

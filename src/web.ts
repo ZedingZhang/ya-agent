@@ -20,10 +20,17 @@ function decodeHtml(value: string): string {
     nbsp: " ",
     quot: '"',
   };
-  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/giu, (entity, code: string) => {
-    if (code.startsWith("#x") || code.startsWith("#X")) return String.fromCodePoint(Number.parseInt(code.slice(2), 16));
-    if (code.startsWith("#")) return String.fromCodePoint(Number.parseInt(code.slice(1), 10));
-    return named[code.toLocaleLowerCase("und")] ?? entity;
+  return value.replace(/&(#(?:x[0-9a-f]+|[0-9]+)|[a-z]+);/giu, (entity, code: string) => {
+    if (code.startsWith("#")) {
+      const hex = code[1]?.toLowerCase() === "x";
+      const point = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10);
+      if (!Number.isInteger(point) || point < 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+        return entity;
+      }
+      return String.fromCodePoint(point);
+    }
+    const name = code.toLocaleLowerCase("und");
+    return Object.hasOwn(named, name) ? named[name]! : entity;
   });
 }
 
