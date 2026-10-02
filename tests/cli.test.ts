@@ -7,7 +7,7 @@ import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
-import type { ChatMessage } from "../src/types";
+import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
 class CaptureStream extends Writable {
@@ -307,6 +307,64 @@ describe("CLI", () => {
     await expect(localConfirm(action, false, capture.io)).resolves.toBe(false);
     await expect(localConfirm(action, true, capture.io)).resolves.toBe(true);
     expect(capture.stdout.output).toContain("require --approve");
+  });
+
+  it.each([
+    [["--exec"], "--exec requires --local"],
+    [["--local", "--approve-commands"], "--approve-commands requires --exec"],
+  ])("validates command authorization flags %j", async (flags, error) => {
+    const capture = fakeIo();
+    expect(await main(["ask", "test", ...flags], context(capture.io))).toBe(2);
+    expect(capture.stderr.output).toContain(error);
+  });
+
+  it.each([false, true])("keeps command authorization separate from --approve and --yes (approve commands: %s)", async (approved) => {
+    const capture = fakeIo();
+    writeFileSync(join(home.path, "check.cjs"), 'require("node:fs").writeFileSync("checked.txt", "yes"); console.log("check passed");');
+    let check: Record<string, unknown> = {};
+    const client = {
+      runWithTools: async (_messages: ChatMessage[], _config: unknown, _tokens: number, tools: ToolDefinition[], handlers: Record<string, ToolHandler>) => {
+        expect(tools.map((tool) => tool.function.name)).toContain("local_run");
+        check = JSON.parse(await handlers.local_run!({ command: `"${process.execPath}" "check.cjs"` }));
+        return modelReply("Checked");
+      },
+    } as unknown as DeepSeekClient;
+    const flags = ["--local", "--exec", "--workspace", home.path, "--approve", "--yes", "--web", "off", "--no-feedback"];
+    if (approved) flags.push("--approve-commands");
+    expect(await main(["ask", "Run a check", ...flags], context(capture.io, client))).toBe(0);
+    expect(check.status).toBe(approved ? "success" : "denied");
+    if (approved) {
+      expect(readFileSync(join(home.path, "checked.txt"), "utf8")).toBe("yes");
+      expect(capture.stderr.output).toContain("check passed");
+      expect(capture.stderr.output).toContain("exit=0");
+    } else expect(capture.stdout.output).toContain("require --approve-commands");
+  });
+
+  it("prompts interactively for each exact command even with an automatic approval flag", async () => {
+    const capture = fakeIo(true, ["n"]);
+    const action: LocalAction = { operation: "run", paths: [home.path], summary: "Run command: npm test" };
+    expect(await localConfirm(action, true, capture.io)).toBe(false);
+    expect(capture.prompts).toEqual(["Run this command? [y/N] "]);
+    expect(capture.stdout.output).toContain("npm test");
+  });
+
+  it("cancels an interactive approval with SIGINT and cleans up its signal handler", async () => {
+    const capture = fakeIo(true);
+    const before = process.listenerCount("SIGINT");
+    capture.io.prompt = async () => {
+      process.emit("SIGINT");
+      return "y";
+    };
+    const client = {
+      runWithTools: async (_messages: ChatMessage[], _config: unknown, _tokens: number, _tools: ToolDefinition[], handlers: Record<string, ToolHandler>) => {
+        await handlers.local_run!({ command: "echo must-not-run" });
+        return modelReply("must not finish");
+      },
+    } as unknown as DeepSeekClient;
+    expect(await main(["ask", "Check", "--local", "--exec", "--workspace", home.path, "--web", "off"], context(capture.io, client))).toBe(2);
+    expect(capture.stderr.output).toContain("cancelled");
+    expect(capture.stderr.output).not.toContain("[Ya command]");
+    expect(process.listenerCount("SIGINT")).toBe(before);
   });
 
   it("requires --yes to prune memory non-interactively", async () => {

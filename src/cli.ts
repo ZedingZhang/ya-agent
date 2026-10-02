@@ -30,6 +30,9 @@ import { shouldUseWeb, singleAgent, toaAgent, type RunResult } from "./orchestra
 import { StreamingMarkdownRenderer, formatOutput } from "./terminal";
 import type { ImageDetail, OutputFormat, WebMode } from "./types";
 import { VERSION } from "./version";
+import { abortable } from "./cancellation";
+import type { CommandEvent } from "./commands";
+import { search } from "./web";
 
 interface InputStream extends NodeJS.ReadableStream {
   isTTY?: boolean;
@@ -45,14 +48,14 @@ export interface CliIo {
   stdin: InputStream;
   stdout: OutputStream;
   stderr: OutputStream;
-  prompt: (question: string, hidden?: boolean) => Promise<string>;
+  prompt: (question: string, hidden?: boolean, signal?: AbortSignal) => Promise<string>;
 }
 
 interface CliRuntime {
   platform: NodeJS.Platform;
   loadApiKey: () => string | undefined;
   saveApiKey: (apiKey: string) => void;
-  createClient: (apiKey: string) => DeepSeekClient;
+  createClient: (apiKey: string, signal?: AbortSignal) => DeepSeekClient;
 }
 
 export interface CliContext {
@@ -77,6 +80,8 @@ interface AskOptions {
   local: boolean;
   workspace?: string;
   approve: boolean;
+  exec: boolean;
+  approveCommands: boolean;
   image: string[];
   imageDetail: ImageDetail;
 }
@@ -85,19 +90,26 @@ const defaultRuntime: CliRuntime = {
   platform: process.platform,
   loadApiKey,
   saveApiKey,
-  createClient: (apiKey) => new DeepSeekClient(apiKey),
+  createClient: (apiKey, signal) => new DeepSeekClient(apiKey, undefined, undefined, signal),
 };
 
 function write(stream: OutputStream, value: string): void {
   stream.write(value);
 }
 
-function defaultPrompt(stdin: InputStream, stdout: OutputStream): (question: string, hidden?: boolean) => Promise<string> {
-  return async (question, hidden = false) => {
+function defaultPrompt(stdin: InputStream, stdout: OutputStream): CliIo["prompt"] {
+  return async (question, hidden = false, signal) => {
     if (hidden && stdin.isTTY && stdin.setRawMode) return readHidden(question, stdin, stdout);
     const prompt = createInterface({ input: stdin, output: stdout });
+    const inputCancellation = new AbortController();
+    const promptSignal = signal ? AbortSignal.any([signal, inputCancellation.signal]) : inputCancellation.signal;
+    // readline handles terminal Ctrl+C itself while a question is active.
+    prompt.once("SIGINT", () => {
+      inputCancellation.abort(new Error("Input cancelled."));
+      if (process.listenerCount("SIGINT") > 0) process.emit("SIGINT");
+    });
     try {
-      return await prompt.question(question);
+      return await prompt.question(question, { signal: promptSignal });
     } finally {
       prompt.close();
     }
@@ -171,7 +183,7 @@ function collectValue(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-export async function toaConfirm(options: AskOptions, config: ModelConfig, io: CliIo): Promise<boolean> {
+export async function toaConfirm(options: AskOptions, config: ModelConfig, io: CliIo, signal?: AbortSignal): Promise<boolean> {
   write(io.stdout, "\nToA preflight\n");
   write(io.stdout, `  model: ${config.model}\n`);
   write(io.stdout, `  thinking: ${config.thinkingEnabled ? "on" : "off"} (${config.reasoningEffort})\n`);
@@ -183,23 +195,24 @@ export async function toaConfirm(options: AskOptions, config: ModelConfig, io: C
   }
   if (options.yes) return true;
   if (!io.stdin.isTTY) throw new Error("--toa requires interactive confirmation or --yes in a non-interactive shell.");
-  return ["y", "yes"].includes((await io.prompt("Start ToA for this task? [y/N] ")).trim().toLocaleLowerCase("und"));
+  return ["y", "yes"].includes((await abortable(io.prompt("Start ToA for this task? [y/N] ", false, signal), signal)).trim().toLocaleLowerCase("und"));
 }
 
-export async function collectFeedback(result: RunResult, disabled: boolean, io: CliIo): Promise<void> {
+export async function collectFeedback(result: RunResult, disabled: boolean, io: CliIo, signal?: AbortSignal): Promise<void> {
   void result;
   if (disabled || !io.stdin.isTTY) return;
-  const learn = (await io.prompt("\nLearn from this answer? [y/N] ")).trim().toLocaleLowerCase("und");
+  const prompt = (question: string): Promise<string> => abortable(io.prompt(question, false, signal), signal);
+  const learn = (await prompt("\nLearn from this answer? [y/N] ")).trim().toLocaleLowerCase("und");
   if (learn !== "y" && learn !== "yes") return;
-  const text = (await io.prompt("Candidate preference or procedure: ")).trim();
+  const text = (await prompt("Candidate preference or procedure: ")).trim();
   if (!text) {
     write(io.stdout, "No candidate created.\n");
     return;
   }
-  const rawKind = (await io.prompt("Kind [preference/procedure/knowledge] (procedure): ")).trim() || "procedure";
+  const rawKind = (await prompt("Kind [preference/procedure/knowledge] (procedure): ")).trim() || "procedure";
   let evidence = "Explicit user feedback after Ya task";
   if (rawKind === "knowledge") {
-    const source = (await io.prompt("Source URL for this knowledge: ")).trim();
+    const source = (await prompt("Source URL for this knowledge: ")).trim();
     if (!source.startsWith("https://") && !source.startsWith("http://")) {
       write(io.stdout, "Knowledge candidates require a source URL.\n");
       return;
@@ -234,24 +247,40 @@ function showMemory(task: string, io: CliIo): void {
   }
 }
 
-export async function localConfirm(action: LocalAction, approveNoninteractive: boolean, io: CliIo): Promise<boolean> {
+export async function localConfirm(action: LocalAction, approveNoninteractive: boolean, io: CliIo, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
   write(io.stdout, `\n[Ya local action]\n  ${action.summary}\n`);
   if (action.diff) write(io.stdout, `\n${action.diff}${action.diff.endsWith("\n") ? "" : "\n"}`);
   if (!io.stdin.isTTY) {
+    const flag = action.operation === "run" ? "--approve-commands" : "--approve";
     if (approveNoninteractive) {
-      write(io.stdout, "  Approved by --approve for this non-interactive task.\n");
+      write(io.stdout, `  Approved by ${flag} for this non-interactive task.\n`);
       return true;
     }
-    write(io.stdout, "  Denied: non-interactive local changes require --approve.\n");
+    write(io.stdout, `  Denied: non-interactive ${action.operation === "run" ? "commands" : "local changes"} require ${flag}.\n`);
     return false;
   }
-  return ["y", "yes"].includes((await io.prompt("Apply this file change? [y/N] ")).trim().toLocaleLowerCase("und"));
+  const question = action.operation === "run" ? "Run this command? [y/N] " : "Apply this file change? [y/N] ";
+  return ["y", "yes"].includes((await abortable(io.prompt(question, false, signal), signal)).trim().toLocaleLowerCase("und"));
+}
+
+function showCommandEvent(event: CommandEvent, io: CliIo): void {
+  if (event.type === "start") write(io.stderr, `\n[Ya command] ${event.command}\n  cwd: ${event.cwd}\n`);
+  else if (event.type === "output") write(io.stderr, event.text);
+  else {
+    const result = event.result;
+    write(io.stderr, `\n[Ya command ${result.status}] exit=${result.exitCode ?? "null"} ${(result.durationMs / 1_000).toFixed(1)}s\n`);
+    if (result.stdoutTruncated || result.stderrTruncated) write(io.stderr, "  Output truncated; Ya receives the last 64 KiB of each stream.\n");
+    if (result.error) write(io.stderr, `  ${result.error}\n`);
+  }
 }
 
 async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRuntime): Promise<void> {
   if (options.local && options.toa) throw new Error("--local and --toa cannot be used together.");
   if (options.workspace && !options.local) throw new Error("--workspace requires --local.");
   if (options.approve && !options.local) throw new Error("--approve requires --local.");
+  if (options.exec && !options.local) throw new Error("--exec requires --local.");
+  if (options.approveCommands && !options.exec) throw new Error("--approve-commands requires --exec.");
   const config = resolveConfig(options);
   assertImageInputSupported(config.model, options.image.length);
   const apiKey = runtime.loadApiKey();
@@ -260,41 +289,54 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
   }
   if (options.showMemory) showMemory(task, io);
   const images = imageContentPartsFromSources(options.image, options.imageDetail);
+  const cancellation = new AbortController();
+  const interrupt = (): void => cancellation.abort(new Error("Task cancelled by the user."));
+  process.once("SIGINT", interrupt);
+  try {
+    const workspace = options.local
+      ? new LocalWorkspace(
+        resolve(options.workspace ? expandHome(options.workspace) : process.cwd()),
+        (action) => localConfirm(action, action.operation === "run" ? options.approveCommands : options.approve, io, cancellation.signal),
+        undefined,
+        { commandsEnabled: options.exec, signal: cancellation.signal, onCommandEvent: (event) => showCommandEvent(event, io) },
+      )
+      : undefined;
+    const canStream = options.stream === "auto"
+      && !options.toa
+      && !options.local
+      && !shouldUseWeb(task, options.web)
+      && options.format !== "markdown"
+      && Boolean(io.stdout.isTTY);
+    const renderer = canStream ? new StreamingMarkdownRenderer(!("NO_COLOR" in process.env)) : undefined;
+    const emit = renderer
+      ? (chunk: string): void => {
+        const rendered = renderer.write(chunk);
+        if (rendered) write(io.stdout, rendered);
+      }
+      : undefined;
+    if (renderer) write(io.stdout, "\n[Ya single result]\n\n");
 
-  const workspace = options.local
-    ? new LocalWorkspace(resolve(options.workspace ? expandHome(options.workspace) : process.cwd()), (action) => localConfirm(action, options.approve, io))
-    : undefined;
-  const canStream = options.stream === "auto"
-    && !options.toa
-    && !options.local
-    && !shouldUseWeb(task, options.web)
-    && options.format !== "markdown"
-    && Boolean(io.stdout.isTTY);
-  const renderer = canStream ? new StreamingMarkdownRenderer(!("NO_COLOR" in process.env)) : undefined;
-  const emit = renderer
-    ? (chunk: string): void => {
-      const rendered = renderer.write(chunk);
-      if (rendered) write(io.stdout, rendered);
+    const client = runtime.createClient(apiKey, cancellation.signal);
+    const webSearch = (arguments_: Parameters<typeof search>[0]): Promise<string> => search(arguments_, undefined, undefined, cancellation.signal);
+    let result: RunResult;
+    if (options.toa && await toaConfirm(options, config, io, cancellation.signal)) {
+      result = await toaAgent(client, task, config, Number(options.toaWorkers), webSearch, images);
+    } else {
+      result = await singleAgent(client, task, config, options.web, emit, workspace, webSearch, images);
     }
-    : undefined;
-  if (renderer) write(io.stdout, "\n[Ya single result]\n\n");
-
-  const client = runtime.createClient(apiKey);
-  let result: RunResult;
-  if (options.toa && await toaConfirm(options, config, io)) {
-    result = await toaAgent(client, task, config, Number(options.toaWorkers), undefined, images);
-  } else {
-    result = await singleAgent(client, task, config, options.web, emit, workspace, undefined, images);
+    cancellation.signal.throwIfAborted();
+    if (renderer) {
+      const tail = renderer.finish();
+      if (tail) write(io.stdout, `${tail}\n`);
+    } else {
+      write(io.stdout, `\n[Ya ${result.mode} result]\n\n`);
+      write(io.stdout, `${formatOutput(result.content, options.format, Boolean(io.stdout.isTTY))}\n`);
+    }
+    if (result.partial) write(io.stderr, "\n[Some ToA worker results were unavailable; the synthesis may be incomplete.]\n");
+    await collectFeedback(result, !options.feedback, io, cancellation.signal);
+  } finally {
+    process.removeListener("SIGINT", interrupt);
   }
-  if (renderer) {
-    const tail = renderer.finish();
-    if (tail) write(io.stdout, `${tail}\n`);
-  } else {
-    write(io.stdout, `\n[Ya ${result.mode} result]\n\n`);
-    write(io.stdout, `${formatOutput(result.content, options.format, Boolean(io.stdout.isTTY))}\n`);
-  }
-  if (result.partial) write(io.stderr, "\n[Some ToA worker results were unavailable; the synthesis may be incomplete.]\n");
-  await collectFeedback(result, !options.feedback, io);
 }
 
 function expandHome(value: string): string {
@@ -363,7 +405,7 @@ async function auditClear(yes: boolean, io: CliIo): Promise<void> {
 export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   const program = new Command()
     .name("ya")
-    .description("Ya personal research agent")
+    .description("Ya coding and research agent")
     .version(VERSION)
     .showHelpAfterError()
     .configureOutput({
@@ -375,7 +417,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   program.exitOverride();
 
   program.command("ask")
-    .description("Run a research task")
+    .description("Run a coding or research task")
     .argument("<task>")
     .addOption(new Option("--model <model>").choices(["flash", "pro"]))
     .addOption(new Option("--thinking <state>").choices(["on", "off"]))
@@ -393,6 +435,8 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .option("--local", "Allow workspace file tools for this task", false)
     .option("--workspace <path>", "Workspace root for --local (default: current directory)")
     .option("--approve", "Allow local file changes in a non-interactive shell", false)
+    .option("--exec", "Enable approved shell commands for tests, type checks and builds (requires --local)", false)
+    .option("--approve-commands", "Approve all commands for this non-interactive task (requires --exec)", false)
     .option("--image <source>", "Attach a local image, HTTP(S) URL, data URL, or file-api-* ID (repeatable)", collectValue, [])
     .addOption(new Option("--image-detail <detail>").choices(["low", "high", "original", "auto"]).default("auto"))
     .action(async (task: string, options: AskOptions) => ask(task, options, io, runtime));

@@ -23,6 +23,8 @@ import {
 } from "node:path";
 import { createTwoFilesPatch } from "diff";
 import { dataHome } from "./config";
+import { abortable } from "./cancellation";
+import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
 export const MAX_TEXT_BYTES = 1024 * 1024;
@@ -33,20 +35,44 @@ export let AUDIT_LOG_MAX_BYTES = 1024 * 1024;
 export const MAX_AUDIT_ARCHIVES = 3;
 
 export interface LocalAction {
-  operation: "mkdir" | "write" | "move";
+  operation: "mkdir" | "write" | "move" | "run";
   paths: string[];
   summary: string;
   diff?: string;
 }
 
 export interface LocalActivity {
-  operation: "list" | "read" | "search" | "mkdir" | "write" | "move";
+  operation: "list" | "read" | "search" | "mkdir" | "write" | "move" | "run";
   paths: string[];
   status: "success" | "denied" | "error";
 }
 
 export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boolean>;
 export type LocalActivityObserver = (activity: LocalActivity) => void;
+
+export interface LocalWorkspaceOptions {
+  commandsEnabled?: boolean;
+  signal?: AbortSignal;
+  onCommandEvent?: (event: CommandEvent) => void;
+}
+
+export const LOCAL_RUN_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "local_run",
+    description: "Run an approved shell command to check, test, or build the project. On Windows use cmd.exe syntax; on macOS/Linux use /bin/sh syntax. stdin is closed: use non-interactive, one-shot commands, not watch modes. Returns status, exit code, stdout and stderr tails (64 KiB each), truncation flags and duration. cwd must be inside the workspace; this is not a sandbox. Commands run with the user's permissions after separate approval.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", minLength: 1, maxLength: 8_192 },
+        cwd: { type: "string", description: "Working directory relative to the workspace (default: .)." },
+        timeout_seconds: { type: "integer", minimum: 1, maximum: MAX_COMMAND_TIMEOUT_SECONDS, description: "Timeout in seconds (default: 120, max: 600)." },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+  },
+};
 
 export const LOCAL_TOOLS: ToolDefinition[] = [
   {
@@ -185,8 +211,9 @@ export class LocalWorkspace {
   readonly root: string;
   confirm: LocalConfirmation;
   readonly onActivity?: LocalActivityObserver;
+  readonly commandResults: CommandResult[] = [];
 
-  constructor(root: string, confirm: LocalConfirmation, onActivity?: LocalActivityObserver) {
+  constructor(root: string, confirm: LocalConfirmation, onActivity?: LocalActivityObserver, private readonly options: LocalWorkspaceOptions = {}) {
     const expanded = resolve(expandHome(root));
     if (!existsSync(expanded)) throw new Error(`Workspace does not exist: ${expanded}`);
     const resolved = realpathSync(expanded);
@@ -196,6 +223,10 @@ export class LocalWorkspace {
     this.onActivity = onActivity;
   }
 
+  get commandsEnabled(): boolean { return this.options.commandsEnabled === true; }
+
+  get tools(): ToolDefinition[] { return this.commandsEnabled ? [...LOCAL_TOOLS, LOCAL_RUN_TOOL] : [...LOCAL_TOOLS]; }
+
   get toolHandlers(): Record<string, ToolHandler> {
     return {
       local_list: (arguments_) => this.list(arguments_),
@@ -204,6 +235,7 @@ export class LocalWorkspace {
       local_mkdir: (arguments_) => this.mkdir(arguments_),
       local_write: (arguments_) => this.write(arguments_),
       local_move: (arguments_) => this.move(arguments_),
+      ...(this.commandsEnabled ? { local_run: (arguments_: ToolArguments) => this.run(arguments_) } : {}),
     };
   }
 
@@ -217,6 +249,7 @@ export class LocalWorkspace {
   }
 
   private resolveInput(value: unknown): string {
+    this.options.signal?.throwIfAborted();
     if (typeof value !== "string" || !value.trim()) throw new Error("A non-empty path is required.");
     const expanded = expandHome(value);
     const candidate = resolve(isAbsolute(expanded) ? expanded : join(this.root, expanded));
@@ -262,23 +295,68 @@ export class LocalWorkspace {
     }
   }
 
-  private audit(operation: string, paths: string[], status: string, error?: string): void {
+  private audit(operation: string, paths: string[], status: string, error?: string, metadata: Record<string, unknown> = {}): void {
     const record: Record<string, unknown> = {
       timestamp: new Date().toISOString(),
       workspace: this.root,
       operation,
       paths: paths.map((path) => this.relativePath(path)),
       status,
+      ...metadata,
     };
     if (error) record.error = error;
     appendAuditRecord(record);
   }
 
   private async confirmed(action: LocalAction): Promise<boolean> {
-    if (await this.confirm(action)) return true;
+    this.options.signal?.throwIfAborted();
+    const approved = await abortable(Promise.resolve(this.confirm(action)), this.options.signal);
+    this.options.signal?.throwIfAborted();
+    if (approved) return true;
     this.audit(action.operation, action.paths, "denied");
     this.activity(action.operation, action.paths, "denied");
     return false;
+  }
+
+  async run(arguments_: ToolArguments): Promise<string> {
+    if (!this.commandsEnabled) throw new Error("Command execution is not enabled for this task.");
+    const command = arguments_.command;
+    if (typeof command !== "string" || !command.trim() || command.includes("\0") || command.length > 8_192) {
+      throw new Error("Command must be non-empty, contain no NUL bytes, and be at most 8192 characters.");
+    }
+    const timeout = arguments_.timeout_seconds ?? DEFAULT_COMMAND_TIMEOUT_SECONDS;
+    if (typeof timeout !== "number" || !Number.isInteger(timeout) || timeout < 1 || timeout > MAX_COMMAND_TIMEOUT_SECONDS) {
+      throw new Error(`Command timeout must be an integer from 1 to ${MAX_COMMAND_TIMEOUT_SECONDS} seconds.`);
+    }
+    const cwdInput = arguments_.cwd ?? ".";
+    const cwd = this.resolveInput(cwdInput);
+    try {
+      if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error(`Not a directory: ${cwd}`);
+      const action: LocalAction = {
+        operation: "run", paths: [cwd],
+        summary: `Run command:\n${command}\nDirectory: ${cwd}\nTimeout: ${timeout}s\nRuns with your account permissions and can modify files or access the network.`,
+      };
+      if (!(await this.confirmed(action))) {
+        return JSON.stringify({ status: "denied", command, cwd: this.relativePath(cwd), reason: "User declined this command. It was not executed." });
+      }
+      // Approval may take minutes; resolve the original path again before spawning.
+      if (this.resolveInput(cwdInput) !== cwd || this.resolveInput(cwd) !== cwd || !statSync(cwd).isDirectory()) {
+        throw new Error("Command directory changed while awaiting approval. Request approval again.");
+      }
+      const result = await runCommand({
+        command, cwd, displayCwd: this.relativePath(cwd), timeoutSeconds: timeout,
+        signal: this.options.signal, onEvent: this.options.onCommandEvent,
+      });
+      this.commandResults.push(result);
+      const status = result.status === "success" ? "success" : "error";
+      this.audit("run", [cwd], result.status, undefined, { exitCode: result.exitCode, durationMs: result.durationMs });
+      this.activity("run", [cwd], status);
+      return JSON.stringify(result);
+    } catch (error) {
+      this.audit("run", [cwd], "error", errorMessage(error));
+      this.activity("run", [cwd], "error");
+      throw error;
+    }
   }
 
   list(arguments_: ToolArguments): string {

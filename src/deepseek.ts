@@ -8,9 +8,11 @@ import type {
 } from "./types";
 import { assertImageInputSupported, ModelConfig } from "./config";
 import { assertImageCount } from "./images";
+import { abortable, delay as waitDelay } from "./cancellation";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
 export const MAX_TOOL_CALL_ROUNDS = 6;
+export const MAX_CODING_TOOL_CALL_ROUNDS = 20;
 export const MAX_REQUEST_ATTEMPTS = 3;
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -114,7 +116,7 @@ export class DeepSeekClient {
   private readonly fetcher: FetchLike;
   private readonly sleep: Sleep;
 
-  constructor(apiKey: string, fetcher: FetchLike = fetch, sleep: Sleep = defaultSleep) {
+  constructor(apiKey: string, fetcher: FetchLike = fetch, sleep: Sleep = defaultSleep, private readonly signal?: AbortSignal) {
     this.apiKey = apiKey;
     this.fetcher = fetcher;
     this.sleep = sleep;
@@ -142,20 +144,21 @@ export class DeepSeekClient {
   }
 
   private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
-    return readNetwork(() => this.fetcher(API_URL, {
+    const timeout = AbortSignal.timeout(timeoutSeconds * 1_000);
+    return readNetwork(() => abortable(this.fetcher(API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(timeoutSeconds * 1_000),
-    }));
+      signal: this.signal ? AbortSignal.any([timeout, this.signal]) : timeout,
+    }), this.signal));
   }
 
   private async httpError(response: Response): Promise<DeepSeekError> {
     // A broken error body must not discard the status (e.g. turn a 401 into a retry).
-    const detail = await response.text().catch(() => response.statusText);
+    const detail = await abortable(response.text(), this.signal).catch(() => response.statusText);
     return new DeepSeekError(`DeepSeek API returned HTTP ${response.status}: ${detail}`,
       response.status, retryAfterMilliseconds(response.headers.get("Retry-After")));
   }
@@ -169,9 +172,13 @@ export class DeepSeekClient {
   private async withRetry<T>(operation: (markDelivered: () => void) => Promise<T>): Promise<T> {
     let delivered = false;
     for (let attempt = 0; ; attempt += 1) {
+      this.signal?.throwIfAborted();
       try {
-        return await operation(() => { delivered = true; });
+        const result = await operation(() => { delivered = true; });
+        this.signal?.throwIfAborted();
+        return result;
       } catch (error) {
+        this.signal?.throwIfAborted();
         const retryable = error instanceof NetworkError || error instanceof DeepSeekError &&
           (error.status === 429 || error.status !== undefined && error.status >= 500 && error.status < 600);
         if (delivered || !retryable || attempt >= MAX_REQUEST_ATTEMPTS - 1) throw error;
@@ -179,7 +186,7 @@ export class DeepSeekClient {
         // Node timers overflow above a signed 32-bit millisecond delay.
         while (delay > 0) {
           const interval = Math.min(delay, 2_147_483_647);
-          await this.sleep(interval);
+          await (this.sleep === defaultSleep ? waitDelay(interval, this.signal) : abortable(this.sleep(interval), this.signal));
           delay -= interval;
         }
       }
@@ -196,7 +203,7 @@ export class DeepSeekClient {
     const payload = this.payload(messages, config, maxTokens, tools, false);
     return this.withRetry(async () => {
       const response = await this.request(payload, config.toaTimeout);
-      const body = JSON.parse(await readNetwork(() => response.text())) as unknown;
+      const body = JSON.parse(await readNetwork(() => abortable(response.text(), this.signal))) as unknown;
       return replyFromBody(body);
     });
   }
@@ -235,7 +242,7 @@ export class DeepSeekClient {
           onContent(delta.content);
         }
         return false;
-      });
+      }, this.signal);
       void done;
       const joinedContent = content.join("");
       const joinedReasoning = reasoning.join("");
@@ -255,14 +262,17 @@ export class DeepSeekClient {
     maxTokens: number,
     tools?: ToolDefinition[],
     toolHandlers: Record<string, ToolHandler> = {},
+    maxRounds = MAX_TOOL_CALL_ROUNDS,
   ): Promise<ModelReply> {
+    if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 40) throw new Error("Tool rounds must be an integer from 1 to 40.");
     const transientMessages = [...messages];
-    for (let round = 0; round <= MAX_TOOL_CALL_ROUNDS; round += 1) {
+    for (let round = 0; round <= maxRounds; round += 1) {
       const reply = await this.complete(transientMessages, config, maxTokens, tools);
       if (reply.toolCalls.length === 0) return reply;
-      if (round === MAX_TOOL_CALL_ROUNDS) break;
+      if (round === maxRounds) break;
       transientMessages.push(reply.assistantMessage);
       for (const call of reply.toolCalls) {
+        this.signal?.throwIfAborted();
         let result: string;
         const handler = toolHandlers[call.function.name];
         if (!handler) {
@@ -274,7 +284,9 @@ export class DeepSeekClient {
               throw new Error("Tool arguments must be a JSON object.");
             }
             result = await handler(parsed as ToolArguments);
+            this.signal?.throwIfAborted();
           } catch (error) {
+            this.signal?.throwIfAborted();
             result = JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
           }
         }
@@ -287,33 +299,36 @@ export class DeepSeekClient {
     });
     const reply = await this.complete(transientMessages, config, maxTokens);
     if (reply.toolCalls.length === 0) return reply;
-    throw new DeepSeekError(`Tool-call limit (${MAX_TOOL_CALL_ROUNDS} rounds) reached before a final answer.`);
+    throw new DeepSeekError(`Tool-call limit (${maxRounds} rounds) reached before a final answer.`);
   }
 }
 
-async function readServerSentEvents(response: Response, onData: (data: string) => boolean): Promise<boolean> {
+async function readServerSentEvents(response: Response, onData: (data: string) => boolean, signal?: AbortSignal): Promise<boolean> {
   if (!response.body) throw new DeepSeekError("DeepSeek streaming response had no body.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = "";
-  while (true) {
-    const { done, value } = await readNetwork(() => reader.read());
-    pending += decoder.decode(value, { stream: !done });
-    let newline = pending.indexOf("\n");
-    while (newline >= 0) {
-      const rawLine = pending.slice(0, newline).replace(/\r$/u, "").trim();
-      pending = pending.slice(newline + 1);
-      if (rawLine.startsWith("data:")) {
-        const data = rawLine.slice(5).trim();
-        if (data && onData(data)) {
-          await reader.cancel();
-          return true;
+  try {
+    while (true) {
+      signal?.throwIfAborted();
+      const { done, value } = await readNetwork(() => abortable(reader.read(), signal));
+      pending += decoder.decode(value, { stream: !done });
+      let newline = pending.indexOf("\n");
+      while (newline >= 0) {
+        const rawLine = pending.slice(0, newline).replace(/\r$/u, "").trim();
+        pending = pending.slice(newline + 1);
+        if (rawLine.startsWith("data:")) {
+          const data = rawLine.slice(5).trim();
+          if (data && onData(data)) return true;
         }
+        newline = pending.indexOf("\n");
       }
-      newline = pending.indexOf("\n");
+      if (done) break;
     }
-    if (done) break;
+    const finalLine = pending.trim();
+    return finalLine.startsWith("data:") && onData(finalLine.slice(5).trim());
+  } finally {
+    void reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-  const finalLine = pending.trim();
-  return finalLine.startsWith("data:") && onData(finalLine.slice(5).trim());
 }

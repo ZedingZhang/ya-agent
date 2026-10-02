@@ -88,6 +88,11 @@ input, select { min-height: 34px; padding: 6px 9px; }
 .task-controls label:not(.check) { display: grid; gap: 3px; color: var(--muted); font-size: 11px; }
 .task-controls > .check { min-height: 32px; align-self: flex-end; }
 .task-controls select { min-height: 32px; }
+.command-run { padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.command-run summary { cursor: pointer; white-space: pre-wrap; overflow-wrap: anywhere; font-family: monospace; }
+.command-run pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.command-run pre:empty { display: none; }
+.command-stderr { color: var(--danger); }
 #task-model { min-width: 220px; }
 #task-reasoning { min-width: 82px; }
 .control-spacer { flex: 1; }
@@ -122,7 +127,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .activity-row { display: grid; gap: 2px; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .activity-row strong { font-size: 11px; font-weight: 650; text-transform: uppercase; }
 .activity-row.denied strong, .activity-row.error strong { color: var(--danger); }
-.action-summary { margin-bottom: 6px; font-weight: 650; }
+.action-summary { margin-bottom: 6px; font-weight: 650; white-space: pre-wrap; overflow-wrap: anywhere; }
 .action-paths { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .action-diff { max-height: 180px; padding: 8px; overflow: auto; font-size: 10px; background: var(--surface-muted); border-radius: 6px; white-space: pre; }
 .button-row { display: flex; justify-content: flex-end; gap: 7px; margin-top: 9px; }

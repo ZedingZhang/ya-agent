@@ -41,7 +41,7 @@ interface AppState {
 }
 
 interface LocalAction {
-  operation: "mkdir" | "write" | "move";
+  operation: "mkdir" | "write" | "move" | "run";
   paths: string[];
   summary: string;
   diff?: string;
@@ -56,7 +56,17 @@ interface LocalActivity {
 type TaskEvent =
   | { type: "content"; content: string }
   | { type: "activity"; activity: LocalActivity }
+  | { type: "command"; event: ShellCommandEvent }
   | { type: "local-action"; id: string; action: LocalAction };
+
+type ShellCommandEvent =
+  | { type: "start"; id: string; command: string; cwd: string }
+  | { type: "output"; id: string; stream: "stdout" | "stderr"; text: string }
+  | { type: "finish"; id: string; result: {
+    status: "success" | "failed" | "timed_out" | "cancelled" | "error";
+    exitCode: number | null; durationMs: number; stdout: string; stderr: string;
+    stdoutTruncated: boolean; stderrTruncated: boolean; error?: string;
+  } };
 
 interface RunResult {
   content: string;
@@ -77,6 +87,7 @@ interface YaRendererBridge {
   }): Promise<AppState>;
   saveSettings(settings: Record<string, unknown>): Promise<AppState>;
   runTask(options: Record<string, unknown>): Promise<RunResult>;
+  cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number }>>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;
@@ -95,9 +106,11 @@ const TEXT = {
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", choose: "Choose…", refresh: "Refresh",
     local: "Enable local tools", task: "Task", taskPlaceholder: "Ask Ya a question or describe a workspace task…", send: "Send",
     model: "Model", thinking: "Thinking", web: "Web", toa: "Tree of Agents", workers: "Workers", auto: "Auto", on: "On", off: "Off",
-    ready: "Ready", working: "Ya is working…", waiting: "Waiting for file-change confirmation…", done: "Done", relevant: "Relevant memory",
+    ready: "Ready", working: "Ya is working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
+    commands: "Allow command execution", stop: "Stop", stopping: "Stopping…", success: "Succeeded", failed: "Failed",
+    timed_out: "Timed out", cancelled: "Cancelled", error: "Error", truncated: "Output truncated; showing the tail.",
     noRelevant: "No approved memory meets the relevance threshold.", activity: "Activity", noActivity: "No local activity for this task.",
-    pendingAction: "Pending file action", noAction: "No file change is waiting for approval.", approve: "Approve", deny: "Deny",
+    pendingAction: "Pending action", noAction: "No action is waiting for approval.", approve: "Approve", deny: "Deny",
     noTasks: "Ask a question to begin.", answer: "Ya", learn: "Learn from this answer", noWorkspace: "Choose a workspace folder",
     status: "Status", kind: "Kind", text: "Text", evidence: "Evidence", actions: "Actions", candidateText: "What should Ya learn?",
     createCandidate: "Create candidate", prune: "Prune", includeCandidates: "Include candidates", reject: "Reject", revoke: "Revoke",
@@ -116,9 +129,11 @@ const TEXT = {
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
     local: "启用本地工具", task: "任务", taskPlaceholder: "向 Ya 提问，或描述一个工作区任务…", send: "发送",
     model: "模型", thinking: "思考", web: "网页", toa: "Tree of Agents", workers: "工作 Agent", auto: "自动", on: "开启", off: "关闭",
-    ready: "就绪", working: "Ya 正在处理…", waiting: "等待文件变更确认…", done: "完成", relevant: "相关记忆",
+    ready: "就绪", working: "Ya 正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
+    commands: "允许命令执行", stop: "停止", stopping: "正在停止…", success: "成功", failed: "失败",
+    timed_out: "超时", cancelled: "已取消", error: "错误", truncated: "输出已截断，显示末尾内容。",
     noRelevant: "没有达到相关性阈值的已批准记忆。", activity: "活动", noActivity: "本次任务还没有本地活动。",
-    pendingAction: "待确认文件操作", noAction: "当前没有等待确认的文件变更。", approve: "批准", deny: "拒绝",
+    pendingAction: "待确认操作", noAction: "当前没有等待确认的操作。", approve: "批准", deny: "拒绝",
     noTasks: "输入问题即可开始。", answer: "Ya", learn: "从此回答中学习", noWorkspace: "请选择工作区文件夹",
     status: "状态", kind: "类别", text: "内容", evidence: "依据", actions: "操作", candidateText: "Ya 应该学到什么？",
     createCandidate: "创建候选记忆", prune: "清理", includeCandidates: "包括候选项", reject: "拒绝", revoke: "撤销",
@@ -145,6 +160,7 @@ let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
+const commandLogs = new Map<string, { summary: HTMLElement; stdout: HTMLElement; stderr: HTMLElement; command: string; cwd: string }>();
 const VISION_MODEL = "deepseek-flash";
 
 function element<T extends HTMLElement>(id: string): T {
@@ -369,6 +385,7 @@ function appendTask(task: string, images: SelectedImage[]): HTMLElement {
 }
 
 async function runTask(): Promise<void> {
+  if (document.body.classList.contains("task-running") || workspaceModelSaving) return;
   const input = element<HTMLTextAreaElement>("task-input");
   const taskImages = [...selectedImages];
   const task = input.value.trim() || (taskImages.length > 0 ? t("defaultVisionTask") : "");
@@ -403,9 +420,12 @@ async function runTask(): Promise<void> {
   activeAnswerText = "";
   lastAnswer = "";
   activities = [];
+  commandLogs.clear();
+  pendingAction = undefined;
+  renderPendingAction();
   renderActivities();
-  await renderRelevant(task);
   setRunning(true);
+  void renderRelevant(task);
   setStatus(t("working"), "busy");
   try {
     const result = await bridge.runTask({
@@ -415,6 +435,7 @@ async function runTask(): Promise<void> {
       toaWorkers: Number(element<HTMLSelectElement>("toa-workers").value),
       stream: state.stream,
       local,
+      exec: local && element<HTMLInputElement>("commands-enabled").checked,
       workspace: state.validWorkspace,
       imageIds: taskImages.map((image) => image.id),
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
@@ -437,6 +458,8 @@ async function runTask(): Promise<void> {
     activeAnswer.textContent = `${t("taskError")}: ${errorText(error)}`;
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
+    pendingAction = undefined;
+    renderPendingAction();
     activeAnswer = undefined;
     selectedImages = [];
     void bridge.clearImages().catch(() => undefined);
@@ -447,8 +470,52 @@ async function runTask(): Promise<void> {
 function setRunning(running: boolean): void {
   element<HTMLTextAreaElement>("task-input").disabled = running;
   document.body.classList.toggle("task-running", running);
+  element<HTMLButtonElement>("stop-button").hidden = !running;
+  element<HTMLButtonElement>("stop-button").disabled = false;
   syncWorkspaceControls();
   renderImages();
+}
+
+function renderCommand(event: ShellCommandEvent): void {
+  if (event.type === "start") {
+    if (!activeAnswer) return;
+    const details = document.createElement("details");
+    details.className = "command-run";
+    details.open = true;
+    const summary = document.createElement("summary");
+    summary.textContent = `${event.command} · ${event.cwd} · ${t("working")}`;
+    const stdout = document.createElement("pre");
+    const stderr = document.createElement("pre");
+    stderr.className = "command-stderr";
+    details.append(summary, stdout, stderr);
+    activeAnswer.parentElement?.append(details);
+    commandLogs.set(event.id, { summary, stdout, stderr, command: event.command, cwd: event.cwd });
+    setStatus(t("working"), "busy");
+  } else {
+    const log = commandLogs.get(event.id);
+    if (!log) return;
+    if (event.type === "output") {
+      const output = log[event.stream];
+      output.textContent = `${output.textContent ?? ""}${event.text}`.slice(-65_536);
+    } else {
+      const result = event.result;
+      log.summary.textContent = `${log.command} · ${log.cwd} · ${t(result.status)} (exit ${result.exitCode ?? "—"}, ${(result.durationMs / 1_000).toFixed(1)}s)`;
+      log.summary.classList.toggle("error-copy", result.status !== "success");
+      const note = result.stdoutTruncated || result.stderrTruncated ? `${t("truncated")}\n` : "";
+      log.stdout.textContent = `${note}${result.stdout}`;
+      log.stderr.textContent = [result.stderr, result.error].filter(Boolean).join("\n");
+    }
+  }
+  const timeline = element<HTMLDivElement>("timeline");
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
+async function stopTask(): Promise<void> {
+  const button = element<HTMLButtonElement>("stop-button");
+  button.disabled = true;
+  setStatus(t("stopping"), "busy");
+  try { await bridge.cancelTask(); }
+  catch (error) { button.disabled = false; setStatus(errorText(error), "error"); }
 }
 
 async function renderRelevant(task: string): Promise<void> {
@@ -622,6 +689,11 @@ function syncWorkspaceControls(): void {
   element<HTMLButtonElement>("send-button").disabled = running || workspaceModelSaving;
   element<HTMLSelectElement>("task-model").disabled = running || workspaceModelSaving;
   element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving;
+  const local = element<HTMLInputElement>("local-enabled");
+  local.disabled = running;
+  const commands = element<HTMLInputElement>("commands-enabled");
+  commands.disabled = running || !local.checked;
+  if (!local.checked) commands.checked = false;
 }
 
 async function saveWorkspaceModelSelection(): Promise<void> {
@@ -832,6 +904,8 @@ function registerEvents(): void {
   element<HTMLSelectElement>("task-model").addEventListener("change", () => void saveWorkspaceModelSelection());
   element<HTMLSelectElement>("task-reasoning").addEventListener("change", () => void saveWorkspaceModelSelection());
   element<HTMLButtonElement>("send-button").addEventListener("click", () => void runTask());
+  element<HTMLButtonElement>("stop-button").addEventListener("click", () => void stopTask());
+  element<HTMLInputElement>("local-enabled").addEventListener("change", syncWorkspaceControls);
   element<HTMLTextAreaElement>("task-input").addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
@@ -858,6 +932,8 @@ function registerEvents(): void {
     } else if (event.type === "activity") {
       activities.push(event.activity);
       renderActivities();
+    } else if (event.type === "command") {
+      renderCommand(event.event);
     } else if (event.type === "local-action") {
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();

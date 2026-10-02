@@ -38,6 +38,7 @@ import type {
 
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
+let activeTaskController: AbortController | undefined;
 const LOCAL_ACTION_TIMEOUT_MS = 120_000;
 const pendingActions = new Map<string, {
   resolve: (approved: boolean) => void;
@@ -56,8 +57,8 @@ function createController(): GuiController {
     ...options,
     // Electron's network stack follows the operating system proxy and trust
     // configuration while the CLI continues to use Node's native fetch.
-    clientFactory: (key) => new DeepSeekClient(key, electronFetch),
-    webSearch: (arguments_) => search(arguments_, electronFetch),
+    clientFactory: (key, signal) => new DeepSeekClient(key, electronFetch, undefined, signal),
+    webSearch: (arguments_) => search(arguments_, electronFetch, undefined, options.signal),
   }));
 }
 
@@ -99,6 +100,11 @@ function rejectPendingActions(error: Error): void {
   pendingActions.clear();
 }
 
+function cancelTask(error: Error): void {
+  activeTaskController?.abort(error);
+  rejectPendingActions(error);
+}
+
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   const url = event.senderFrame?.url ?? event.sender.getURL();
   if (!isTrustedRendererUrl(url)) throw new Error("Untrusted renderer request.");
@@ -127,6 +133,8 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   if (new Set(imageIds).size !== imageIds.length) throw new Error("Duplicate image selection.");
   const imageDetail = value.imageDetail ?? "auto";
   if (!isImageDetail(imageDetail)) throw new Error("Invalid image detail.");
+  if (value.exec !== undefined && typeof value.exec !== "boolean") throw new Error("Invalid command execution setting.");
+  if (value.exec && !value.local) throw new Error("Command execution requires local workspace mode.");
   return {
     task: value.task.trim(),
     webMode,
@@ -134,6 +142,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     toaWorkers: workers,
     stream: Boolean(value.stream),
     local: Boolean(value.local),
+    exec: value.exec === true,
     imageIds,
     imageDetail,
     ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}),
@@ -252,10 +261,14 @@ function registerIpc(): void {
     });
     const images = imageContentPartsFromFiles(files, options.imageDetail);
     taskRunning = true;
+    const taskController = new AbortController();
+    activeTaskController = taskController;
     try {
       return await controller.run({ ...options, images }, {
+        signal: taskController.signal,
         onContent: (content) => sendTaskEvent({ type: "content", content }),
         onLocalActivity: (activity) => sendTaskEvent({ type: "activity", activity }),
+        onCommandEvent: (commandEvent) => sendTaskEvent({ type: "command", event: commandEvent }),
         onLocalAction: (action) => new Promise<boolean>((resolvePromise, reject) => {
           if (event.sender.isDestroyed()) {
             reject(new Error("The renderer is no longer available."));
@@ -277,9 +290,16 @@ function registerIpc(): void {
         }),
       });
     } finally {
+      activeTaskController = undefined;
+      rejectPendingActions(new Error("Task ended."));
       taskRunning = false;
       for (const id of options.imageIds) selectedImages.delete(id);
     }
+  });
+
+  ipcMain.handle("task:cancel", (event) => {
+    assertTrustedSender(event);
+    cancelTask(new Error("Task cancelled by the user."));
   });
 
   ipcMain.on("local-action:response", (event, raw: unknown) => {
@@ -364,14 +384,14 @@ async function createWindow(show = true): Promise<BrowserWindow> {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
   mainWindow.webContents.on("destroyed", () => {
-    rejectPendingActions(new Error("The renderer was destroyed while awaiting local action approval."));
+    cancelTask(new Error("The renderer was destroyed while running a task."));
   });
   mainWindow.webContents.on("render-process-gone", () => {
-    rejectPendingActions(new Error("The renderer exited while awaiting local action approval."));
+    cancelTask(new Error("The renderer exited while running a task."));
   });
   mainWindow.on("closed", () => {
     mainWindow = undefined;
-    rejectPendingActions(new Error("The window was closed while awaiting local action approval."));
+    cancelTask(new Error("The window was closed while running a task."));
     selectedImages.clear();
   });
   await mainWindow.loadFile(rendererFile);
@@ -415,6 +435,10 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
+    const commands = document.querySelector('#commands-enabled');
+    const stop = document.querySelector('#stop-button');
+    const commandControls = commands instanceof HTMLInputElement && !commands.checked
+      && stop instanceof HTMLButtonElement && stop.hidden && typeof window.ya.cancelTask === 'function';
     const ribbon = document.querySelector('.workspace-ribbon');
     const ribbonOrder = ribbon ? Array.from(ribbon.children).map((child) => (child.id || child.querySelector('input')?.id) ?? '') : [];
     const workspaceRibbon = ribbonOrder.join(',') === 'local-enabled,refresh-files,choose-workspace,workspace-path';
@@ -429,7 +453,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     if (pathLabel && restoreText !== null) pathLabel.textContent = restoreText;
     return {
       memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker,
-      workspaceControls, workspaceRibbon, workspaceOverflow, formOverflow, keychainVisible,
+      workspaceControls, commandControls, workspaceRibbon, workspaceOverflow, formOverflow, keychainVisible,
     };
   })()`) as {
     memoryActive?: boolean;
@@ -439,14 +463,15 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     visionOption?: boolean;
     imagePicker?: boolean;
     workspaceControls?: boolean;
+    commandControls?: boolean;
     workspaceRibbon?: boolean;
     workspaceOverflow?: number;
     formOverflow?: number;
     keychainVisible?: boolean;
   };
   if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
-    || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls) {
-    throw new Error("Renderer navigation or vision controls failed.");
+    || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls || !pages.commandControls) {
+    throw new Error("Renderer navigation, vision or command controls failed.");
   }
   if (!pages.workspaceRibbon) {
     throw new Error("Workspace ribbon controls must be ordered as local tools, refresh, choose, and path.");
@@ -460,6 +485,42 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
   if ((pages.keychainVisible ?? false) !== (process.platform === "darwin")) {
     throw new Error(`The keychain setting must be visible only on macOS (visible=${pages.keychainVisible} on ${process.platform}).`);
   }
+
+  const commandRendering = await window.webContents.executeJavaScript(`(() => {
+    const turn = document.createElement('div');
+    const priorAnswer = activeAnswer;
+    activeAnswer = document.createElement('div');
+    turn.append(activeAnswer);
+    document.querySelector('#timeline').append(turn);
+    try {
+      setRunning(true);
+      const stopVisible = !document.querySelector('#stop-button').hidden;
+      const commandDisabled = document.querySelector('#commands-enabled').disabled;
+      renderCommand({ type: 'start', id: 'smoke-command', command: 'npm test', cwd: '.' });
+      renderCommand({ type: 'output', id: 'smoke-command', stream: 'stdout', text: 'checking...' });
+      const liveOutput = turn.querySelector('.command-run pre').textContent === 'checking...';
+      const text = '<img src=x onerror=alert(1)> test failure';
+      renderCommand({ type: 'finish', id: 'smoke-command', result: {
+        status: 'failed', exitCode: 7, durationMs: 1234, stdout: text, stderr: 'expected true',
+        stdoutTruncated: true, stderrTruncated: false,
+      } });
+      const plainOutput = turn.querySelector('.command-run pre').textContent.includes(text)
+        && turn.querySelector('.command-run img') === null;
+      const finalStatus = turn.querySelector('.command-run summary').textContent.includes('exit 7, 1.2s');
+      const stderr = turn.querySelector('.command-stderr').textContent === 'expected true';
+      setRunning(false);
+      const stopHidden = document.querySelector('#stop-button').hidden;
+      return stopVisible && commandDisabled && liveOutput && plainOutput && finalStatus && stderr && stopHidden;
+    } finally {
+      setRunning(false);
+      activeAnswer = priorAnswer;
+      commandLogs.clear();
+      turn.remove();
+      document.querySelector('#timeline').scrollTop = 0;
+      setStatus(t('ready'));
+    }
+  })()`) as boolean;
+  if (!commandRendering) throw new Error("Command output, exit status or stop controls failed to render.");
 }
 
 /** YA_SMOKE_CAPTURE=<file> writes a PNG of one page (YA_SMOKE_CAPTURE_PAGE=workspace|memory|settings) during the smoke test. */

@@ -27,6 +27,74 @@ function payloadFrom(init?: RequestInit): Record<string, unknown> {
 }
 
 describe("DeepSeek client", () => {
+  it("aborts an in-flight request without retrying", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<FetchLike>(() => new Promise(() => undefined));
+    const task = new DeepSeekClient("key", fetcher, undefined, controller.signal).complete([], new ModelConfig(), 100);
+    controller.abort(new Error("Stop"));
+    await expect(task).rejects.toThrow("Stop");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("aborts during retry backoff", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<FetchLike>(async () => new Response("busy", { status: 503 }));
+    const sleep = vi.fn(async () => { controller.abort(new Error("Stop retry")); });
+    await expect(new DeepSeekClient("key", fetcher, sleep, controller.signal).complete([], new ModelConfig(), 100)).rejects.toThrow("Stop retry");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles a transport that rejects at the same time as cancellation", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<FetchLike>(() => {
+      controller.abort(new Error("Stop request"));
+      return Promise.reject(new Error("Transport aborted"));
+    });
+    await expect(new DeepSeekClient("key", fetcher, undefined, controller.signal).complete([], new ModelConfig(), 100)).rejects.toThrow("Stop request");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute subsequent tool calls or send cancellation back to the model as an ordinary error", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn<FetchLike>(async () => Response.json({ choices: [{ message: {
+      role: "assistant", tool_calls: [
+        { id: "a", function: { name: "cancel", arguments: "{}" } },
+        { id: "b", function: { name: "write", arguments: "{}" } },
+      ],
+    } }] }));
+    const write = vi.fn(() => "must not run");
+    await expect(new DeepSeekClient("key", fetcher, undefined, controller.signal).runWithTools([], new ModelConfig(), 100, [], {
+      cancel: () => { controller.abort(new Error("Stop tools")); return "cancelled"; }, write,
+    })).rejects.toThrow("Stop tools");
+    expect(write).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels a stalled stream and releases its reader", async () => {
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    const body = new ReadableStream({ cancel });
+    const fetcher: FetchLike = async () => new Response(body);
+    const task = new DeepSeekClient("key", fetcher, undefined, controller.signal).completeStream([], new ModelConfig(), 100, () => undefined);
+    await vi.waitFor(() => expect(body.locked).toBe(true));
+    controller.abort(new Error("Stop stream"));
+    await expect(task).rejects.toThrow("Stop stream");
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(body.locked).toBe(false);
+  });
+
+  it("supports a larger bounded tool budget for coding tasks", async () => {
+    let request = 0;
+    const handler = vi.fn(() => "checked");
+    const fetcher: FetchLike = async () => Response.json({ choices: [{ message: ++request <= 8
+      ? { tool_calls: [{ id: String(request), function: { name: "check", arguments: "{}" } }] }
+      : { content: "verified" } }] });
+    const result = await new DeepSeekClient("key", fetcher).runWithTools([], new ModelConfig(), 100, [], { check: handler }, 20);
+    expect(result.content).toBe("verified");
+    expect(handler).toHaveBeenCalledTimes(8);
+  });
+
   for (const streaming of [false, true]) {
     describe(streaming ? "stream retries" : "completion retries", () => {
       const success = () => streaming

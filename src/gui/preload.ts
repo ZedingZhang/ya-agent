@@ -10,6 +10,7 @@ const bridge: YaBridge = {
   saveWorkspaceModelSelection: (selection: WorkspaceModelSelection) => ipcRenderer.invoke("workspace:model-selection", selection),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
   runTask: (options: RendererTaskOptions) => ipcRenderer.invoke("task:run", options),
+  cancelTask: () => ipcRenderer.invoke("task:cancel"),
   relevantCards: (task: string) => ipcRenderer.invoke("memory:relevant", task),
   createMemory: (text, evidence, kind) => ipcRenderer.invoke("memory:create", { text, evidence, kind }),
   setMemoryStatus: (cardId, status) => ipcRenderer.invoke("memory:status", { cardId, status }),

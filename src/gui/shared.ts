@@ -1,4 +1,5 @@
 import type { ModelId, ReasoningEffort } from "../config";
+import type { CommandEvent } from "../commands";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
@@ -49,6 +50,7 @@ export interface RendererTaskOptions {
   toaWorkers: 1 | 2;
   stream: boolean;
   local: boolean;
+  exec?: boolean;
   workspace?: string;
   imageIds: string[];
   imageDetail: ImageDetail;
@@ -64,6 +66,7 @@ export interface SelectedImage {
 export type TaskEvent =
   | { type: "content"; content: string }
   | { type: "activity"; activity: LocalActivity }
+  | { type: "command"; event: CommandEvent }
   | { type: "local-action"; id: string; action: LocalAction };
 
 export interface YaBridge {
@@ -75,6 +78,7 @@ export interface YaBridge {
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   runTask(options: RendererTaskOptions): Promise<RunResult>;
+  cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;

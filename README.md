@@ -4,7 +4,7 @@
 
 Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The shared core is written in TypeScript; the desktop application uses Electron and shares the same typed service layer as the CLI.
 
-Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files through local tools.
+Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. Command execution is opt-in for each task and requires separate approval.
 
 ## Desktop preview
 
@@ -18,6 +18,7 @@ Browse local files, chat with Ya, and view relevant memory, tool activity, and f
 - **ICM curiosity loop:** when a response marks one material evidence gap, Ya performs at most one bounded, source-seeking follow-up.
 - **Bounded ToA:** one root coordinator uses at most two temporary workers with explicit token and timeout limits.
 - **Shared typed core:** the CLI and desktop application use the same configuration, memory, orchestration, API, web-search, and local-workspace modules.
+- **Code verification:** approved commands return exit codes and bounded output so Ya can run tests, type checks and builds, repair failures, and rerun checks.
 - **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support, through the same OpenAI-compatible chat-completions path.
 - **Isolated desktop renderer:** the Electron renderer has no Node.js or direct filesystem access. Privileged operations pass through a narrow preload bridge into the main process.
 
@@ -172,7 +173,7 @@ The tool set can:
 - create or replace text files;
 - move or rename files and directories.
 
-It cannot execute shell commands, scripts, Git, or package managers, and it cannot delete files. Every change shows an absolute path and requires approval. Replacements include a unified diff capped at 200 lines. In a non-interactive shell, changes are denied unless that invocation includes `--approve`.
+The file tools cannot delete files. Every change shows an absolute path and requires approval. Replacements include a unified diff capped at 200 lines. In a non-interactive shell, file changes are denied unless that invocation includes `--approve`.
 
 Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, credentials, private keys, binary files, invalid UTF-8, and files larger than 1 MiB are blocked. Action audit logs contain metadata—not file content or diffs—and rotate at 1 MiB with three archives.
 
@@ -180,6 +181,28 @@ Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, cre
 ya audit clear
 ya audit clear --yes  # required in a non-interactive shell
 ```
+
+### Command execution and verification
+
+Enable `local_run` for a coding task with `--local --exec`. Ya inspects the repository's existing scripts, chooses relevant tests, type checks or builds, reads failure output, and can repair the code and rerun the check:
+
+```sh
+ya ask --local --exec --workspace "$PWD" "Fix the bug and run the relevant tests and type check"
+```
+
+Each command approval displays the exact shell command, absolute working directory and timeout. The desktop equivalent is **Allow command execution** in the workspace; command cards display live stdout/stderr, completion status, exit code and duration. **Stop** cancels pending approvals, API requests and the running command's process tree. The CLI uses Ctrl+C.
+
+For an unattended task, file changes and commands have separate authorizations:
+
+```sh
+ya ask --local --exec --approve --approve-commands --no-feedback "Fix the bug and verify it"
+```
+
+`--approve-commands` approves all commands for that non-interactive invocation. `--approve` and `--yes` do not approve commands. Interactive terminals still prompt for every command.
+
+Commands use `cmd.exe /d /s /c` on Windows and `/bin/sh -c` on macOS/Linux, inherit the installed project toolchain, and run without stdin. Use one-shot checks instead of watch modes, interactive programs or detached background services. Process-tree termination uses the operating system's process controls; if cleanup cannot be confirmed, the result reports an error and bounds output draining instead of hanging. The default timeout is 120 seconds; the model can request an integer from 1 to 600 seconds. Each tool result retains the last 64 KiB of stdout and stderr, with explicit truncation flags. Command-enabled tasks have up to 20 tool rounds for inspection, repair and verification; other tasks retain the six-round limit. Final answers must report the checks performed and any failures, denied commands or incomplete checks.
+
+Only the **initial working directory** is confined to the resolved workspace. Shell commands execute with your account's permissions and can modify or delete files elsewhere or access the network; execution is not sandboxed. Ya excludes its `DEEPSEEK_API_KEY`, `YA_HOME` and application runtime flags from the child environment. Audit logs record command status, working-directory metadata, exit code and duration, without command text or stdout/stderr.
 
 ### Configuration
 
@@ -244,7 +267,7 @@ npm run package:cli        # package a CLI for the current host
 npm run package:gui        # package the Electron app for the current host
 ```
 
-The test suite covers configuration/data compatibility, Keychain fallback, memory ranking, local-workspace confinement, audit rotation, DeepSeek request/retry/stream/tool behavior, vision input validation and payloads, web result parsing, orchestration, CLI semantics, and GUI controller/rendering helpers. The GUI smoke test additionally loads the packaged renderer boundary and verifies page navigation and vision controls.
+The test suite covers configuration/data compatibility, Keychain fallback, memory ranking, local-workspace confinement, audit rotation, command approval/output/timeouts/process-tree cancellation, failed-check repair and re-verification, DeepSeek request/retry/stream/tool behavior and cancellation, vision input validation and payloads, web result parsing, orchestration, CLI semantics, and GUI controller/rendering helpers. The GUI smoke test additionally loads the packaged renderer boundary and verifies page navigation, vision and command controls.
 
 ## Project layout
 
@@ -255,6 +278,7 @@ src/
   deepseek.ts            typed DeepSeek HTTP, SSE, retry, and tool loop
   images.ts              validated vision sources and content blocks
   local.ts               confined local filesystem tools and audit log
+  commands.ts            approved shell execution, output capture and process cancellation
   memory.ts              candidate lifecycle and relevance ranking
   orchestrator.ts        single-agent, ToA, web, local, and ICM logic
   service.ts             shared CLI/GUI task service
