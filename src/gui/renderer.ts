@@ -41,7 +41,7 @@ interface AppState {
 }
 
 interface LocalAction {
-  operation: "mkdir" | "write" | "move" | "run";
+  operation: "mkdir" | "write" | "edit" | "move" | "run";
   paths: string[];
   summary: string;
   diff?: string;

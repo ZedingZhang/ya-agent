@@ -171,11 +171,16 @@ The tool set can:
 - read and search bounded UTF-8 text;
 - create one directory at a time;
 - create or replace text files;
+- edit existing files with revision-checked, exact replacements;
 - move or rename files and directories.
 
 The file tools cannot delete files. Every change shows an absolute path and requires approval. Replacements include a unified diff capped at 200 lines. In a non-interactive shell, file changes are denied unless that invocation includes `--approve`.
 
 Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, credentials, private keys, binary files, invalid UTF-8, and files larger than 1 MiB are blocked. Action audit logs contain metadata—not file content or diffs—and rotate at 1 MiB with three archives.
+
+For existing files, Ya prefers `local_edit`: `local_read` returns exact content and a SHA-256 `revision`, which the edit submits as `expected_revision` with 1–100 `{old_text, new_text}` replacements. Each non-empty `old_text` must match exactly once in the original file; ambiguous, missing or overlapping matches reject the whole batch before approval. Use surrounding context for insertion and an empty `new_text` for deletion. No fuzzy matching or newline normalization is performed.
+
+The approval shows the resulting diff. After approval, the tool rechecks the path, file identity, permissions and content before publishing the batch through a same-directory atomic rename. Conflicts require a fresh read and new edits. Read-only files are refused, because a rename needs only directory write permission and would otherwise rewrite a file the user protected. Untouched content, including BOM and line endings, is preserved, along with the ordinary permission bits and, where the platform has them, the owner and group; when Ya cannot restore the owner it refuses instead of transferring the file to your account. Because publishing replaces the file with a new one, ACLs, extended attributes and hard links are not carried over, and other links to the old file keep the previous content. Local edits use the same workspace, sensitive-file, UTF-8, 1 MiB and cancellation restrictions as reads; rejected batches leave the original intact. `local_write` remains available for new files and explicitly needed whole-file replacement.
 
 ```sh
 ya audit clear
