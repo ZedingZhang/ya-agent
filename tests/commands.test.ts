@@ -241,7 +241,8 @@ describe("command execution and verification", () => {
     const command = nodeCommand("check.cjs");
     const calls: ToolCall[] = [
       { id: "check1", function: { name: "local_run", arguments: JSON.stringify({ command }) } },
-      { id: "repair", function: { name: "local_write", arguments: JSON.stringify({ path: "check.cjs", content: 'console.log("test passed");' }) } },
+      { id: "inspect", function: { name: "local_read", arguments: JSON.stringify({ path: "check.cjs" }) } },
+      { id: "repair", function: { name: "local_edit", arguments: "" } },
       { id: "check2", function: { name: "local_run", arguments: JSON.stringify({ command }) } },
     ];
     const messages: ChatMessage[][] = [];
@@ -250,6 +251,10 @@ describe("command execution and verification", () => {
       const payload = JSON.parse(String(init?.body));
       messages.push(payload.messages);
       const call = calls[request++];
+      if (call?.id === "repair") {
+        const read = JSON.parse(String(payload.messages.find((message: ChatMessage) => message.tool_call_id === "inspect")?.content));
+        call.function.arguments = JSON.stringify({ path: "check.cjs", expected_revision: read.revision, edits: [{ old_text: read.content, new_text: 'console.log("test passed");' }] });
+      }
       return Response.json({ choices: [{ message: call ? { role: "assistant", tool_calls: [call] } : { role: "assistant", content: "Fixed and verified." } }] });
     };
     const workspace = new LocalWorkspace(root, () => true, undefined, { commandsEnabled: true });
@@ -258,7 +263,7 @@ describe("command execution and verification", () => {
     });
     const firstCheck = JSON.parse(String(messages[1]?.find((message) => message.tool_call_id === "check1")?.content)) as CommandResult;
     expect(firstCheck).toMatchObject({ status: "failed", exitCode: 1, stderr: "expected true\n" });
-    const finalCheck = JSON.parse(String(messages[3]?.find((message) => message.tool_call_id === "check2")?.content)) as CommandResult;
+    const finalCheck = JSON.parse(String(messages[4]?.find((message) => message.tool_call_id === "check2")?.content)) as CommandResult;
     expect(finalCheck).toMatchObject({ status: "success", exitCode: 0, stdout: "test passed\n" });
     expect(result.commands?.map((check) => check.status)).toEqual(["failed", "success"]);
     expect(result.content).toBe("Fixed and verified.");

@@ -115,6 +115,8 @@ describe("agent orchestration", () => {
     const names = new Set(client.calls[0]!.tools?.map((tool) => tool.function.name));
     expect(names).toContain("web_search");
     expect(names).toContain("local_read");
+    expect(names).toContain("local_edit");
+    expect(client.calls[0]!.messages[0]!.content).toContain("prefer local_edit");
     expect(client.calls[0]!.messages[0]!.content).toContain("Local workspace tools are available");
   });
 

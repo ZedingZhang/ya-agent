@@ -1,8 +1,12 @@
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   lstatSync,
+  fchmodSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -11,6 +15,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
   basename,
@@ -24,6 +29,7 @@ import {
 import { createTwoFilesPatch } from "diff";
 import { dataHome } from "./config";
 import { abortable } from "./cancellation";
+import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
 import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
@@ -35,14 +41,14 @@ export let AUDIT_LOG_MAX_BYTES = 1024 * 1024;
 export const MAX_AUDIT_ARCHIVES = 3;
 
 export interface LocalAction {
-  operation: "mkdir" | "write" | "move" | "run";
+  operation: "mkdir" | "write" | "edit" | "move" | "run";
   paths: string[];
   summary: string;
   diff?: string;
 }
 
 export interface LocalActivity {
-  operation: "list" | "read" | "search" | "mkdir" | "write" | "move" | "run";
+  operation: "list" | "read" | "search" | "mkdir" | "write" | "edit" | "move" | "run";
   paths: string[];
   status: "success" | "denied" | "error";
 }
@@ -87,7 +93,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_read",
-      description: "Read a UTF-8 text file up to 1 MiB inside the authorized workspace. Sensitive files are blocked.",
+      description: "Read a UTF-8 text file up to 1 MiB inside the authorized workspace. Returns exact content and its revision for local_edit. Sensitive files are blocked.",
       parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
     },
   },
@@ -115,11 +121,34 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_write",
-      description: "Create or replace a UTF-8 text file inside the workspace. Its parent must already exist. The client shows a diff and asks before writing.",
+      description: "Create a UTF-8 text file, or replace an entire file only when explicitly needed. Prefer local_edit for changes to existing files. Its parent must already exist. The client shows a diff and asks before writing.",
       parameters: {
         type: "object",
         properties: { path: { type: "string" }, content: { type: "string" } },
         required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "local_edit",
+      description: "Edit an existing non-sensitive UTF-8 file using the revision from local_read and exact old_text/new_text replacements. Each old_text must occur exactly once in the original file, with enough context to disambiguate; ranges cannot overlap. No fuzzy matching or newline normalization. A batch is approved and applied as a whole; stale files are rejected. On conflict, read again and rebuild the edits.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          expected_revision: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          edits: {
+            type: "array", minItems: 1, maxItems: MAX_EDITS,
+            items: {
+              type: "object",
+              properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } },
+              required: ["old_text", "new_text"], additionalProperties: false,
+            },
+          },
+        },
+        required: ["path", "expected_revision", "edits"], additionalProperties: false,
       },
     },
   },
@@ -243,6 +272,7 @@ export class LocalWorkspace {
       local_search: (arguments_) => this.search(arguments_),
       local_mkdir: (arguments_) => this.mkdir(arguments_),
       local_write: (arguments_) => this.write(arguments_),
+      local_edit: (arguments_) => this.edit(arguments_),
       local_move: (arguments_) => this.move(arguments_),
       ...(this.commandsEnabled ? { local_run: (arguments_: ToolArguments) => this.run(arguments_) } : {}),
     };
@@ -385,7 +415,7 @@ export class LocalWorkspace {
     const path = this.resolveInput(arguments_.path);
     const content = this.readText(path);
     this.activity("read", [path], "success");
-    return JSON.stringify({ path: this.relativePath(path), content });
+    return JSON.stringify({ path: this.relativePath(path), content, revision: textRevision(content) });
   }
 
   search(arguments_: ToolArguments): string {
@@ -480,6 +510,60 @@ export class LocalWorkspace {
     } catch (error) {
       this.audit("write", [path], "error", errorMessage(error));
       this.activity("write", [path], "error");
+      throw error;
+    }
+  }
+
+  async edit(arguments_: ToolArguments): Promise<string> {
+    const path = this.resolveInput(arguments_.path);
+    try {
+      const revision = arguments_.expected_revision;
+      if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) {
+        throw new Error("expected_revision must be the revision returned by local_read.");
+      }
+      const previous = this.readText(path);
+      const identity = statSync(path);
+      if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
+      const { content, count } = applyTextEdits(previous, arguments_.edits, MAX_TEXT_BYTES);
+      const action: LocalAction = {
+        operation: "edit", paths: [path], summary: `Edit text file: ${path} (${count} replacements)`,
+        diff: limitedDiff(path, previous, content),
+      };
+      if (!(await this.confirmed(action))) {
+        return JSON.stringify({ status: "denied", operation: "edit", path: this.relativePath(path), reason: "User declined this action." });
+      }
+      const checkUnchanged = (): void => {
+        if (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path) {
+          throw new Error("File path changed during approval. Read again before editing.");
+        }
+        const current = statSync(path);
+        if (current.dev !== identity.dev || current.ino !== identity.ino || current.mode !== identity.mode || this.readText(path) !== previous) {
+          throw new Error("File changed during approval. Read again before editing.");
+        }
+      };
+      checkUnchanged();
+      // A same-directory rename publishes the whole batch without partially rewriting the file.
+      const temporary = join(dirname(path), `.ya-edit-${randomUUID()}.tmp`);
+      let descriptor: number | undefined;
+      try {
+        descriptor = openSync(temporary, "wx", 0o600);
+        writeFileSync(descriptor, content, "utf8");
+        fchmodSync(descriptor, identity.mode & 0o777);
+        fsyncSync(descriptor);
+        closeSync(descriptor);
+        descriptor = undefined;
+        checkUnchanged();
+        renameSync(temporary, path);
+      } finally {
+        if (descriptor !== undefined) closeSync(descriptor);
+        if (existsSync(temporary)) unlinkSync(temporary);
+      }
+      this.audit("edit", [path], "success", undefined, { replacements: count });
+      this.activity("edit", [path], "success");
+      return JSON.stringify({ status: "ok", operation: "edit", path: this.relativePath(path), applied_edits: count, revision: textRevision(content) });
+    } catch (error) {
+      this.audit("edit", [path], "error", errorMessage(error));
+      this.activity("edit", [path], "error");
       throw error;
     }
   }
