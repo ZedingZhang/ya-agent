@@ -1,10 +1,14 @@
 import {
+  accessSync,
   appendFileSync,
   closeSync,
+  constants,
   existsSync,
-  lstatSync,
   fchmodSync,
+  fchownSync,
   fsyncSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -133,7 +137,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_edit",
-      description: "Edit an existing non-sensitive UTF-8 file using the revision from local_read and exact old_text/new_text replacements. Each old_text must occur exactly once in the original file, with enough context to disambiguate; ranges cannot overlap. No fuzzy matching or newline normalization. A batch is approved and applied as a whole; stale files are rejected. On conflict, read again and rebuild the edits.",
+      description: "Edit an existing non-sensitive writable UTF-8 file using the revision from local_read and exact old_text/new_text replacements. Each old_text must occur exactly once in the original file, with enough context to disambiguate; ranges cannot overlap. No fuzzy matching or newline normalization. A batch is approved and applied as a whole; stale and read-only files are rejected. On conflict, read again and rebuild the edits.",
       parameters: {
         type: "object",
         properties: {
@@ -524,6 +528,13 @@ export class LocalWorkspace {
       const previous = this.readText(path);
       const identity = statSync(path);
       if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
+      // Publishing replaces the file, and a rename needs only directory write permission, so without
+      // this check Ya would silently rewrite files the user marked read-only.
+      try {
+        accessSync(path, constants.W_OK);
+      } catch {
+        throw new Error(`Read-only files cannot be edited: ${path}. Ask the user to change its permissions.`);
+      }
       const { content, count } = applyTextEdits(previous, arguments_.edits, MAX_TEXT_BYTES);
       const action: LocalAction = {
         operation: "edit", paths: [path], summary: `Edit text file: ${path} (${count} replacements)`,
@@ -548,6 +559,17 @@ export class LocalWorkspace {
       try {
         descriptor = openSync(temporary, "wx", 0o600);
         writeFileSync(descriptor, content, "utf8");
+        // The rename publishes a new inode, so the owner and group have to be restored explicitly.
+        // Only chown when they differ: an unnecessary call can fail on an unchanged group, and on
+        // Windows both fchown and the uid/gid fields are inert.
+        const staged = fstatSync(descriptor);
+        if (staged.uid !== identity.uid || staged.gid !== identity.gid) {
+          try {
+            fchownSync(descriptor, identity.uid, identity.gid);
+          } catch {
+            throw new Error(`Cannot preserve the owner of ${path}. The edit was not applied; ask the user to change its owner.`);
+          }
+        }
         fchmodSync(descriptor, identity.mode & 0o777);
         fsyncSync(descriptor);
         closeSync(descriptor);

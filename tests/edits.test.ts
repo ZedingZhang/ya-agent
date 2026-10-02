@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, fchownSync, fstatSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_TEXT_BYTES, LocalWorkspace, type LocalAction, type LocalActivity } from "../src/local";
@@ -6,7 +6,7 @@ import { tempHome, type TempHome } from "./helpers";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+  return { ...actual, fchownSync: vi.fn(actual.fchownSync), fstatSync: vi.fn(actual.fstatSync), renameSync: vi.fn(actual.renameSync) };
 });
 
 describe("reliable local edits", () => {
@@ -99,6 +99,43 @@ describe("reliable local edits", () => {
     await expect(workspace.edit({ ...args, expected_revision: undefined })).rejects.toThrow("local_read");
     expect(actions).toEqual([]);
     expect(readFileSync(path, "utf8")).toBe("old plus manual changes");
+  });
+
+  it("refuses read-only files instead of bypassing their write protection", async () => {
+    const path = join(root, "locked.txt");
+    writeFileSync(path, "old");
+    chmodSync(path, 0o444);
+    try {
+      await expect(workspace.edit(request("locked.txt", "old", "new"))).rejects.toThrow("Read-only files cannot be edited");
+      expect(actions).toEqual([]);
+      expect(readFileSync(path, "utf8")).toBe("old");
+      expect(readdirSync(root)).toEqual(["locked.txt"]);
+    } finally {
+      chmodSync(path, 0o666);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("refuses an edit whose ownership it cannot restore", async () => {
+    const path = join(root, "code.txt");
+    writeFileSync(path, "old");
+    const args = request("code.txt", "old", "new");
+    vi.mocked(fstatSync).mockReturnValueOnce({ uid: 4242, gid: 4242 } as unknown as ReturnType<typeof fstatSync>);
+    vi.mocked(fchownSync).mockImplementationOnce(() => { throw new Error("EPERM: operation not permitted"); });
+    await expect(workspace.edit(args)).rejects.toThrow("Cannot preserve the owner");
+    expect(readFileSync(path, "utf8")).toBe("old");
+    expect(readdirSync(root)).toEqual(["code.txt"]);
+  });
+
+  it("publishes a new inode, so hard links keep the previous content", async () => {
+    const path = join(root, "code.txt");
+    const linked = join(root, "linked.txt");
+    writeFileSync(path, "old");
+    linkSync(path, linked);
+    expect(statSync(path).nlink).toBe(2);
+    await workspace.edit(request("code.txt", "old", "new"));
+    expect(readFileSync(path, "utf8")).toBe("new");
+    expect(readFileSync(linked, "utf8")).toBe("old");
+    expect(statSync(path).nlink).toBe(1);
   });
 
   it.each(["change", "replace", "delete"])("rejects a file %s during approval", async (operation) => {
