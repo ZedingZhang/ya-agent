@@ -17,6 +17,12 @@ export function stripTerminalControls(text: string): string {
   return text.replace(ANSI_ESCAPE, "").replace(CONTROL_CHARACTERS, "");
 }
 
+/** Show untrusted approval text without allowing it to move or erase the cursor. */
+export function escapeTerminalControls(text: string): string {
+  return text.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 function style(text: string, code: string, color: boolean): string {
   return color ? `\u001b[${code}m${text}\u001b[0m` : text;
 }

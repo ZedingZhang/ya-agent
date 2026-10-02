@@ -93,6 +93,28 @@ describe("GUI controller", () => {
     expect(await options.localWorkspace?.confirm({ operation: "mkdir", paths: [join(workspace, "notes")], summary: "Create" })).toBe(true);
   });
 
+  it("passes command opt-in, events and cancellation through the shared service", async () => {
+    const calls: Parameters<TaskRunner>[] = [];
+    const runner: TaskRunner = async (...arguments_) => {
+      calls.push(arguments_);
+      return { content: "answer", mode: "single", usage: {} };
+    };
+    const controller = new GuiController(runner);
+    controller.setSessionApiKey("key");
+    controller.setWorkspace(home.path);
+    const cancellation = new AbortController();
+    await controller.run({ task: "Test", local: true }, { signal: cancellation.signal });
+    expect(calls[0]?.[3]?.localWorkspace?.toolHandlers.local_run).toBeUndefined();
+    await controller.run({ task: "Test", local: true, exec: true }, { signal: cancellation.signal, onLocalAction: () => false });
+    expect(calls[1]?.[3]?.signal).toBe(cancellation.signal);
+    const workspace = calls[1]?.[3]?.localWorkspace;
+    expect(workspace?.tools.map((tool) => tool.function.name)).toContain("local_run");
+    expect(JSON.parse(await workspace!.run({ command: "echo check" })).status).toBe("denied");
+    await expect(controller.run({ task: "Test", exec: true })).rejects.toThrow("requires local");
+    cancellation.abort(new Error("Stop"));
+    await expect(controller.run({ task: "Test", local: true, exec: true }, { signal: cancellation.signal })).rejects.toThrow("Stop");
+  });
+
   it("passes a stream callback only for simple tasks", async () => {
     const calls: Parameters<TaskRunner>[] = [];
     const runner: TaskRunner = async (...arguments_) => {

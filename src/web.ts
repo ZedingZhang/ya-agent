@@ -1,5 +1,6 @@
 import type { ToolArguments, ToolDefinition } from "./types";
 import { VERSION } from "./version";
+import { abortable, delay } from "./cancellation";
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 export type Sleep = (milliseconds: number) => Promise<void>;
@@ -67,23 +68,27 @@ export async function search(
   arguments_: ToolArguments,
   fetcher: FetchLike = fetch,
   sleep: Sleep = defaultSleep,
+  signal?: AbortSignal,
 ): Promise<string> {
   const query = String(arguments_.query ?? "").trim();
   if (!query) throw new Error("web_search requires a query");
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query).replaceAll("%20", "+")}`;
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    signal?.throwIfAborted();
     try {
-      const response = await fetcher(url, {
+      const timeout = AbortSignal.timeout(15_000);
+      const response = await abortable(fetcher(url, {
         headers: { "User-Agent": `Ya/${VERSION} research agent` },
-        signal: AbortSignal.timeout(15_000),
-      });
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      }), signal);
       if (!response.ok) throw new Error(`Web search returned HTTP ${response.status}`);
-      return JSON.stringify(parseSearchResults(await response.text()).slice(0, 5));
+      return JSON.stringify(parseSearchResults(await abortable(response.text(), signal)).slice(0, 5));
     } catch (error) {
+      signal?.throwIfAborted();
       lastError = error;
       if (attempt === 2) break;
-      await sleep(500 * (attempt + 1));
+      await (sleep === defaultSleep ? delay(500 * (attempt + 1), signal) : abortable(sleep(500 * (attempt + 1)), signal));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError));

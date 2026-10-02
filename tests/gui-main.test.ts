@@ -105,4 +105,47 @@ describe("GUI pending action lifecycle", () => {
     respond(true);
     await expect(nextTask).resolves.toBe("done");
   });
+
+  it("cancels a pending approval, rejects late approval and releases the task lock", async () => {
+    const task = start();
+    const rejection = expect(task).rejects.toThrow("cancelled");
+    await mocks.handlers.get("task:cancel")!(event);
+    await rejection;
+    expect(mocks.run.mock.calls.at(-1)?.[1].signal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    respond(true);
+    const nextTask = start();
+    respond(true);
+    await expect(nextTask).resolves.toBe("done");
+    expect(mocks.run.mock.calls.at(-1)?.[1].signal.aborted).toBe(false);
+  });
+
+  it("keeps the task lock until the running command has finished stopping", async () => {
+    let finish!: () => void;
+    mocks.run.mockImplementation((_options, callbacks) => new Promise((resolveTask) => {
+      finish = () => resolveTask("cancelled");
+      callbacks.onCommandEvent({ type: "start", id: "c", command: "npm test", cwd: "." });
+    }));
+    const task = start();
+    expect(sender.send).toHaveBeenCalledWith("task:event", { type: "command", event: { type: "start", id: "c", command: "npm test", cwd: "." } });
+    await mocks.handlers.get("task:cancel")!(event);
+    await expect(start()).rejects.toThrow("already running");
+    finish();
+    await expect(task).resolves.toBe("cancelled");
+  });
+
+  it("rejects untrusted cancellation requests", async () => {
+    const task = start();
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    expect(() => mocks.handlers.get("task:cancel")!(untrusted)).toThrow("Untrusted");
+    expect(mocks.run.mock.calls.at(-1)?.[1].signal.aborted).toBe(false);
+    respond(true);
+    await task;
+  });
+
+  it("validates execution opt-in at the IPC boundary", async () => {
+    await expect(mocks.handlers.get("task:run")!(event, { ...options, exec: "true" })).rejects.toThrow("Invalid command");
+    await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("requires local");
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
 });

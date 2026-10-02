@@ -24,6 +24,7 @@ import {
 import { shouldUseWeb, type RunResult } from "../orchestrator";
 import { runTask, type RunTaskOptions } from "../service";
 import type { UserImageContentPart, WebMode } from "../types";
+import type { CommandEvent } from "../commands";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -41,6 +42,7 @@ export interface GuiTaskOptions {
   toaWorkers?: number;
   stream?: boolean;
   local?: boolean;
+  exec?: boolean;
   workspace?: string;
   images?: UserImageContentPart[];
 }
@@ -49,6 +51,8 @@ export interface GuiRunCallbacks {
   onContent?: (content: string) => void;
   onLocalAction?: LocalConfirmation;
   onLocalActivity?: (activity: LocalActivity) => void;
+  onCommandEvent?: (event: CommandEvent) => void;
+  signal?: AbortSignal;
 }
 
 export type TaskRunner = (
@@ -180,9 +184,11 @@ export class GuiController {
   }
 
   async run(options: GuiTaskOptions, callbacks: GuiRunCallbacks = {}): Promise<RunResult> {
+    callbacks.signal?.throwIfAborted();
     const apiKey = this.apiKey();
     if (!apiKey) throw new Error("No DeepSeek API key found. Add one in Settings.");
     if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
+    if (options.exec && !options.local) throw new Error("Command execution requires local workspace mode.");
     let localWorkspace: LocalWorkspace | undefined;
     if (options.local) {
       const workspace = options.workspace ?? this.validWorkspace();
@@ -191,6 +197,7 @@ export class GuiController {
         workspace,
         callbacks.onLocalAction ?? (() => false),
         callbacks.onLocalActivity,
+        { commandsEnabled: options.exec, signal: callbacks.signal, onCommandEvent: callbacks.onCommandEvent },
       );
     }
     return this.taskRunner(apiKey, options.task, this.config, {
@@ -200,6 +207,7 @@ export class GuiController {
       onContent: this.canStream(options) ? callbacks.onContent : undefined,
       localWorkspace,
       images: options.images,
+      signal: callbacks.signal,
     });
   }
 

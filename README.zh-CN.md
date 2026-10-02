@@ -4,7 +4,7 @@
 
 Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命令行与原生桌面应用。项目内核采用 TypeScript，桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
 
-Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。模型不会获得无限制 shell 权限，也不能通过本地工具删除文件。
+Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。命令执行需要为每次任务显式开启，并单独批准。
 
 ## 桌面界面
 
@@ -18,6 +18,7 @@ Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V
 - **ICM 好奇心循环**：回答标记出一个重要证据缺口时，Ya 最多执行一次受限的来源探索。
 - **受限 ToA**：一个根协调 Agent 最多使用两个临时工作 Agent，并受 Token 与超时预算约束。
 - **共享类型核心**：CLI 和桌面端复用配置、记忆、编排、API、网页检索和本地工作区模块。
+- **代码验证**：已批准的命令返回退出码与有大小上限的输出，Ya 可以运行测试、类型检查和构建，修复失败原因后再次验证。
 - **视觉输入**：CLI 与桌面端都可通过同一条 OpenAI 兼容的 Chat Completions 链路，把经过校验的 JPEG、PNG、GIF 和 WebP 输入发送给原生支持视觉的 `deepseek-flash`。
 - **隔离桌面渲染器**：Electron 渲染进程没有 Node.js 或直接文件系统权限；特权操作通过窄化的 preload 桥接进入主进程。
 
@@ -172,7 +173,7 @@ ya ask --local --workspace "$PWD" "根据这里的文本文件创建 notes/summa
 - 创建或替换文本文件；
 - 移动或重命名文件与目录。
 
-工具不能执行 shell、脚本、Git 或包管理器，也不能删除文件。每项变更都会显示绝对路径并等待批准；替换文件时显示最多 200 行的统一 diff。非交互环境默认拒绝写入，只有本次调用带 `--approve` 时才允许。
+文件工具不能删除文件。每项变更都会显示绝对路径并等待批准；替换文件时显示最多 200 行的统一 diff。非交互环境默认拒绝文件写入，只有本次调用带 `--approve` 时才允许。
 
 读取始终限制在解析后的工作区中。符号链接逃逸、`.git`、`.env`、凭据、私钥、二进制文件、非法 UTF-8 和超过 1 MiB 的文件都会被阻止。操作审计只记录元数据，不记录文件内容或 diff；日志达到 1 MiB 后轮转，并保留三份归档。
 
@@ -180,6 +181,30 @@ ya ask --local --workspace "$PWD" "根据这里的文本文件创建 notes/summa
 ya audit clear
 ya audit clear --yes  # 非交互环境必须添加
 ```
+
+### 命令执行与代码验证
+
+使用 `--local --exec` 为编码任务开启 `local_run`。Ya 会读取仓库现有脚本，选择相关测试、类型检查或构建，查看失败输出，修复代码后重新运行检查：
+
+```sh
+ya ask --local --exec --workspace "$PWD" "修复这个 bug，并运行相关测试和类型检查"
+```
+
+每次审批都会显示完整命令、绝对工作目录和超时时间。桌面端在工作区勾选 **允许命令执行**；命令卡片显示实时 stdout/stderr、完成状态、退出码和耗时。**停止** 会取消待审批操作、API 请求及正在执行的命令进程树；CLI 使用 Ctrl+C。
+
+包含终端控制字符的命令会在审批前被拒绝，允许 LF 换行和制表符。CLI 审批会将文件路径及差异中的控制字符显示为可见转义文本。库调用方给 `runTask` 传入 `signal` 即可取消本地工具和待审批操作，无需再给 `LocalWorkspace` 配置第二个信号。
+
+无人值守任务分别授权文件变更与命令：
+
+```sh
+ya ask --local --exec --approve --approve-commands --no-feedback "修复这个 bug 并验证"
+```
+
+`--approve-commands` 允许本次非交互调用中的全部命令。`--approve` 和 `--yes` 不会授权命令；交互终端仍逐条询问。
+
+Windows 使用 `cmd.exe /d /s /c`，macOS/Linux 使用 `/bin/sh -c`，沿用已安装的项目工具链，stdin 关闭。检查应执行一次后退出，避免 watch 模式、交互程序和脱离父进程的后台服务。进程树终止使用操作系统的进程控制；若无法确认清理完成，结果会注明错误并限制输出排空时间，避免任务一直挂起。默认超时 120 秒，模型可以请求 1–600 秒的整数。每次工具结果保留 stdout 与 stderr 各自末尾 64 KiB，并标明是否截断。开启命令的任务最多使用 20 轮工具调用完成查看、修复与验证，其他任务保留 6 轮上限。最终回答需要说明实际执行的检查，以及失败、被拒绝或未完成的检查。
+
+只有命令的 **初始工作目录** 被限制在解析后的工作区内。命令以当前用户权限运行，可修改或删除工作区外文件、访问网络，执行环境并非沙箱。Ya 不向子进程传递自身的 `DEEPSEEK_API_KEY`、`YA_HOME` 和应用运行时标志。命令审计记录状态、工作目录元数据、退出码与耗时，不记录命令文本或 stdout/stderr。
 
 ### 配置
 
@@ -254,6 +279,7 @@ src/
   deepseek.ts            DeepSeek HTTP、SSE、重试与工具循环
   images.ts              经校验的视觉来源与内容块
   local.ts               受限本地文件工具与审计日志
+  commands.ts            已批准的 shell 执行、输出捕获与进程取消
   memory.ts              候选记忆生命周期与相关性排序
   orchestrator.ts        单 Agent、ToA、网页、本地与 ICM 编排
   service.ts             CLI/GUI 共享任务服务

@@ -25,6 +25,10 @@ export {
 } from "./images";
 export type { ImageFileInfo, SupportedImageMimeType } from "./images";
 export { runTask } from "./service";
+export { runCommand } from "./commands";
+export type { CommandEvent, CommandOptions, CommandResult } from "./commands";
+export { LocalWorkspace, LOCAL_RUN_TOOL } from "./local";
+export type { LocalWorkspaceOptions } from "./local";
 export type {
   ChatFileContentPart,
   ChatImageUrlContentPart,
