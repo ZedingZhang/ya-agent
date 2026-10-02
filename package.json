@@ -19,9 +19,6 @@
   },
   "files": [
     "dist/typescript",
-    "native/index.js",
-    "native/index.d.ts",
-    "native/*.node",
     "README.md",
     "README.zh-CN.md",
     "LICENSE"
@@ -31,11 +28,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node dist/typescript/scripts/copy-assets.js",
-    "build:native": "npm --prefix native run build",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "test:parity": "node native/parity.js",
     "test:watch": "vitest",
     "smoke:gui": "npm run build && electron dist/typescript/gui/main.js --smoke-test",
     "check": "npm run typecheck && npm test && npm run build",
@@ -46,8 +41,7 @@
   },
   "dependencies": {
     "commander": "14.0.3",
-    "diff": "9.0.0",
-    "ya-core": "file:./native"
+    "diff": "9.0.0"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
@@ -63,8 +57,7 @@
     ],
     "assets": [
       "dist/typescript/gui/index.html",
-      "dist/typescript/gui/styles.css",
-      "native/*.node"
+      "dist/typescript/gui/styles.css"
     ]
   },
   "build": {
@@ -74,20 +67,11 @@
       "main": "dist/typescript/gui/main.js"
     },
     "asar": true,
-    "asarUnpack": [
-      "**/*.node"
-    ],
     "directories": {
       "output": "release/electron"
     },
     "files": [
       "dist/typescript/**/*",
-      "!node_modules/ya-core/target/**",
-      "!node_modules/ya-core/node_modules/**",
-      "!node_modules/ya-core/src/**",
-      "!node_modules/ya-core/Cargo.*",
-      "!node_modules/ya-core/build.rs",
-      "!node_modules/ya-core/parity.js",
       "package.json",
       "LICENSE"
     ],
@@ -100,9 +84,13 @@
       ]
     },
     "win": {
-      "signExts": [".dll", ".node"],
+      "signExts": [
+        ".dll"
+      ],
       "signtoolOptions": {
-        "signingHashAlgorithms": ["sha256"],
+        "signingHashAlgorithms": [
+          "sha256"
+        ],
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       },
       "target": [

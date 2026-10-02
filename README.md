@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The project has a Rust core; the desktop application uses Electron and shares the same typed service layer as the CLI.
+Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The shared core is written in TypeScript; the desktop application uses Electron and shares the same typed service layer as the CLI.
 
 Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. It never gives its model unrestricted shell access or permission to delete local files through local tools.
 
@@ -219,15 +219,13 @@ The application does not start a local web server. The renderer cannot access No
 
 ## Development
 
-The shared core is written in Rust and compiled to a Node-API addon, so a Rust
-toolchain is required (see [native/README.md](native/README.md)):
+The shared core, CLI, and Electron desktop application are written in TypeScript.
+Development requires Node.js 22 or later:
 
 ```sh
 npm ci
-npm run build:native
 npm run typecheck
 npm test
-npm run test:parity
 npm run build
 npm run smoke:gui
 npm run check
@@ -239,8 +237,6 @@ Useful commands:
 
 ```sh
 npm start -- --help        # build and run the CLI
-npm run build:native       # compile the Rust core for this host
-npm run test:parity        # compare the Rust core against the TypeScript one
 npm run gui                # build and run Electron
 npm run smoke:gui          # load IPC/preload/renderer and verify navigation
 npm run test:watch         # watch unit tests

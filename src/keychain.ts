@@ -1,36 +1,49 @@
-import {
-  keychainAccount,
-  keychainService,
-  loadApiKey as loadNativeApiKey,
-  macosKeychainAvailable as nativeMacosKeychainAvailable,
-  saveApiKey as saveNativeApiKey,
-} from "ya-core";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
-export const KEYCHAIN_SERVICE = keychainService();
-export const KEYCHAIN_ACCOUNT = keychainAccount();
+export const KEYCHAIN_SERVICE = "Ya DeepSeek API";
+export const KEYCHAIN_ACCOUNT = "default";
 
-/**
- * macOS Keychain is reachable only on darwin with the `security` executable.
- * `platform` and `securityPath` stay injectable so the rule is testable
- * everywhere; the implementation lives in the Rust core.
- */
 export function macosKeychainAvailable(
   platform: NodeJS.Platform = process.platform,
   securityPath = "/usr/bin/security",
 ): boolean {
-  return nativeMacosKeychainAvailable(platform, securityPath);
+  return platform === "darwin" && existsSync(securityPath);
 }
 
-/** `platform` and `securityPath` stay injectable for tests. */
 export function saveApiKey(
   apiKey: string,
-  platform?: NodeJS.Platform,
-  securityPath?: string,
+  platform: NodeJS.Platform = process.platform,
+  securityPath = "/usr/bin/security",
 ): void {
-  saveNativeApiKey(apiKey, platform, securityPath);
+  const value = apiKey.trim();
+  if (!value) throw new Error("API key cannot be empty.");
+  if (!macosKeychainAvailable(platform, securityPath)) {
+    throw new Error("ya auth deepseek is available only on macOS. Set DEEPSEEK_API_KEY instead.");
+  }
+  try {
+    execFileSync(
+      securityPath,
+      ["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", value],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch {
+    // Child-process errors can include the full argv. Never surface the key.
+    throw new Error("Could not save the API key to macOS Keychain.");
+  }
 }
 
-/** The environment variable wins on every platform; Keychain is the macOS fallback. */
 export function loadApiKey(): string | undefined {
-  return loadNativeApiKey() ?? undefined;
+  const environmentKey = process.env.DEEPSEEK_API_KEY?.trim();
+  if (environmentKey) return environmentKey;
+  if (!macosKeychainAvailable()) return undefined;
+  try {
+    return execFileSync(
+      "/usr/bin/security",
+      ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }

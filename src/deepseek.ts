@@ -1,9 +1,3 @@
-import {
-  SseReader,
-  buildChatPayload,
-  parseModelReply,
-  parseStreamChunk,
-} from "ya-core";
 import type {
   ChatMessage,
   TokenUsage,
@@ -12,7 +6,8 @@ import type {
   ToolDefinition,
   ToolHandler,
 } from "./types";
-import { ModelConfig } from "./config";
+import { assertImageInputSupported, ModelConfig } from "./config";
+import { assertImageCount } from "./images";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
 export const MAX_TOOL_CALL_ROUNDS = 6;
@@ -74,6 +69,46 @@ interface DeepSeekPayload {
   stream_options?: { include_usage: true };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function messageFromBody(body: unknown): ChatMessage {
+  if (!isRecord(body) || !Array.isArray(body.choices) || !isRecord(body.choices[0]) || !isRecord(body.choices[0].message)) {
+    throw new DeepSeekError(`Unexpected DeepSeek response: ${JSON.stringify(body)}`);
+  }
+  return body.choices[0].message as ChatMessage;
+}
+
+function usageFromBody(body: unknown): TokenUsage {
+  return isRecord(body) && isRecord(body.usage) ? body.usage : {};
+}
+
+function replyFromBody(body: unknown): ModelReply {
+  const message = messageFromBody(body);
+  return {
+    content: typeof message.content === "string" ? message.content : "",
+    ...(typeof message.reasoning_content === "string" ? { reasoningContent: message.reasoning_content } : {}),
+    toolCalls: Array.isArray(message.tool_calls) ? message.tool_calls : [],
+    usage: usageFromBody(body),
+    assistantMessage: message,
+  };
+}
+
+function validateImageMessages(messages: ChatMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    const messageImageCount = message.content.filter((part) => part.type === "image_url" || part.type === "file").length;
+    if (messageImageCount > 0 && message.role !== "user") {
+      throw new Error("DeepSeek image content is supported only in user messages.");
+    }
+    count += messageImageCount;
+  }
+  assertImageCount(count);
+  return count;
+}
+
 export class DeepSeekClient {
   readonly apiKey: string;
   private readonly fetcher: FetchLike;
@@ -85,12 +120,6 @@ export class DeepSeekClient {
     this.sleep = sleep;
   }
 
-  /**
-   * Builds the chat-completions body.
-   *
-   * The shape, the image role rule, and the per-request image limit live in the
-   * Rust core; this only marshals the arguments across the boundary.
-   */
   payload(
     messages: ChatMessage[],
     config: ModelConfig,
@@ -98,15 +127,18 @@ export class DeepSeekClient {
     tools: ToolDefinition[] | undefined,
     stream: boolean,
   ): DeepSeekPayload {
-    return JSON.parse(buildChatPayload(
-      JSON.stringify(messages),
-      config.model,
-      config.thinkingEnabled,
-      config.reasoningEffort,
-      maxTokens,
-      tools === undefined ? undefined : JSON.stringify(tools),
+    assertImageInputSupported(config.model, validateImageMessages(messages));
+    const payload: DeepSeekPayload = {
+      model: config.model,
+      messages,
+      thinking: { type: config.thinkingEnabled ? "enabled" : "disabled" },
       stream,
-    )) as DeepSeekPayload;
+      max_tokens: maxTokens,
+    };
+    if (config.thinkingEnabled) payload.reasoning_effort = config.reasoningEffort;
+    if (tools && tools.length > 0) payload.tools = tools;
+    if (stream) payload.stream_options = { include_usage: true };
+    return payload;
   }
 
   private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
@@ -164,11 +196,8 @@ export class DeepSeekClient {
     const payload = this.payload(messages, config, maxTokens, tools, false);
     return this.withRetry(async () => {
       const response = await this.request(payload, config.toaTimeout);
-      // Parsing the body here keeps a non-JSON response failing exactly where it
-      // did before; the Rust core receives the same re-serialised JSON that the
-      // TypeScript original embedded in its error message.
       const body = JSON.parse(await readNetwork(() => response.text())) as unknown;
-      return JSON.parse(parseModelReply(JSON.stringify(body))) as ModelReply;
+      return replyFromBody(body);
     });
   }
 
@@ -186,14 +215,24 @@ export class DeepSeekClient {
       const usage: TokenUsage = {};
       const response = await this.request(payload, config.toaTimeout);
       const done = await readServerSentEvents(response, (data) => {
-        const chunk = parseStreamChunk(data);
-        if (chunk.done) return true;
-        if (chunk.usageJson) Object.assign(usage, JSON.parse(chunk.usageJson) as TokenUsage);
-        if (chunk.reasoningContent != null) reasoning.push(chunk.reasoningContent);
-        if (chunk.content != null) {
-          content.push(chunk.content);
+        if (data === "[DONE]") return true;
+        let chunk: unknown;
+        try {
+          chunk = JSON.parse(data) as unknown;
+        } catch (error) {
+          throw new DeepSeekError(`Invalid streaming chunk: ${error instanceof Error ? error.message : String(error)}`,
+            undefined, undefined, { cause: error });
+        }
+        if (!isRecord(chunk)) return false;
+        if (isRecord(chunk.usage)) Object.assign(usage, chunk.usage);
+        const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+        const first = isRecord(choices[0]) ? choices[0] : undefined;
+        const delta = first && isRecord(first.delta) ? first.delta : undefined;
+        if (delta && typeof delta.reasoning_content === "string") reasoning.push(delta.reasoning_content);
+        if (delta && typeof delta.content === "string") {
+          content.push(delta.content);
           markDelivered();
-          onContent(chunk.content);
+          onContent(delta.content);
         }
         return false;
       });
@@ -252,27 +291,29 @@ export class DeepSeekClient {
   }
 }
 
-/**
- * Reads the event stream, with the framing and the incremental UTF-8 decoding
- * handled by the Rust core so a multi-byte character split across two chunks
- * stays intact.
- */
 async function readServerSentEvents(response: Response, onData: (data: string) => boolean): Promise<boolean> {
   if (!response.body) throw new DeepSeekError("DeepSeek streaming response had no body.");
   const reader = response.body.getReader();
-  const frames = new SseReader();
+  const decoder = new TextDecoder();
+  let pending = "";
   while (true) {
     const { done, value } = await readNetwork(() => reader.read());
-    if (value) {
-      for (const data of frames.push(Buffer.from(value))) {
-        if (onData(data)) {
+    pending += decoder.decode(value, { stream: !done });
+    let newline = pending.indexOf("\n");
+    while (newline >= 0) {
+      const rawLine = pending.slice(0, newline).replace(/\r$/u, "").trim();
+      pending = pending.slice(newline + 1);
+      if (rawLine.startsWith("data:")) {
+        const data = rawLine.slice(5).trim();
+        if (data && onData(data)) {
           await reader.cancel();
           return true;
         }
       }
+      newline = pending.indexOf("\n");
     }
     if (done) break;
   }
-  const trailing = frames.finish();
-  return trailing !== null && onData(trailing);
+  const finalLine = pending.trim();
+  return finalLine.startsWith("data:") && onData(finalLine.slice(5).trim());
 }

@@ -1,6 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { defaultModel, supportedModels } from "ya-core";
 import {
   ModelConfig,
   VALID_MODELS,
@@ -107,6 +106,12 @@ describe("configuration", () => {
     expect(() => modelId("legacy")).toThrow(/flash.*pro/u);
   });
 
+  it.each(["constructor", "toString", "__proto__"])("rejects inherited property %s as a model name", (name) => {
+    expect(() => modelId(name)).toThrow(/flash.*pro/u);
+    writeFileSync(configPath(), JSON.stringify({ model: name }));
+    expect(loadConfig).toThrow(/Only deepseek/u);
+  });
+
   it("treats V4.1-Flash as the vision model and keeps pro text-only", () => {
     const flash = "deepseek-flash";
     expect(modelId("flash")).toBe(flash);
@@ -117,10 +122,4 @@ describe("configuration", () => {
     expect(() => assertImageInputSupported(modelId("pro"), 1)).toThrow(flash);
   });
 
-  it("keeps the TypeScript model table in step with the Rust core", () => {
-    // VALID_MODELS carries the compile-time ModelId union, so it cannot be
-    // derived from the binding; this pins the two together instead.
-    expect(supportedModels()).toEqual(Object.values(VALID_MODELS));
-    expect(defaultModel()).toBe(VALID_MODELS.flash);
-  });
 });
