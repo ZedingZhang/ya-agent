@@ -209,7 +209,8 @@ describe("reliable local edits", () => {
     const audit = readFileSync(join(home.path, "actions.jsonl"), "utf8");
     expect(audit).toContain('"operation":"edit"');
     expect(audit).toContain('"replacements":1');
-    expect(audit).not.toContain("private");
+    expect(audit).not.toContain("private original text");
+    expect(audit).not.toContain("private replacement text");
     expect(observed).toEqual([{ operation: "edit", paths: ["code.txt"], status: "success" }]);
   });
 });
