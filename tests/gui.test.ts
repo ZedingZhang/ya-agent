@@ -50,6 +50,7 @@ describe("GUI controller", () => {
     const second = join(home.path, "second");
     const unchosen = join(home.path, "unchosen");
     for (const path of [first, second, unchosen]) mkdirSync(path);
+    const physicalSecond = realpathSync(second);
     const controller = new GuiController();
     controller.setWorkspace(first);
     controller.setWorkspace(second);
@@ -60,11 +61,11 @@ describe("GUI controller", () => {
     expect(() => restored.activateWorkspace(realpathSync(unchosen))).toThrow(/directory picker/u);
     expect(restored.validWorkspace()).toBe(realpathSync(first));
     rmSync(second, { recursive: true });
-    expect(() => restored.activateWorkspace(second)).toThrow(/does not exist/u);
+    expect(() => restored.activateWorkspace(physicalSecond)).toThrow(/does not exist/u);
     expect(restored.validWorkspace()).toBe(realpathSync(first));
     restored.activateWorkspace();
     expect(new GuiController().workspace).toBeUndefined();
-    expect(new GuiController().workspaces).toEqual([realpathSync(first), second]);
+    expect(new GuiController().workspaces).toEqual([realpathSync(first), physicalSecond]);
   });
 
   it("keeps the existing project when loading preferences from the previous desktop layout", () => {
