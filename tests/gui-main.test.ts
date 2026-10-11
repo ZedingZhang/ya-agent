@@ -143,6 +143,20 @@ describe("GUI pending action lifecycle", () => {
     await task;
   });
 
+  it("rejects project switching and directory picking while an approval is pending", async () => {
+    const task = start();
+    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    await expect(mocks.handlers.get("workspace:choose")!(event)).rejects.toThrow(/running/);
+    respond(true);
+    await expect(task).resolves.toBe("done");
+  });
+
+  it("rejects untrusted project activation before changing workspace", () => {
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    expect(() => mocks.handlers.get("workspace:activate")!(untrusted)).toThrow("Untrusted");
+    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid project");
+  });
+
   it("validates execution opt-in at the IPC boundary", async () => {
     await expect(mocks.handlers.get("task:run")!(event, { ...options, exec: "true" })).rejects.toThrow("Invalid command");
     await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("requires local");

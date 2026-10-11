@@ -8,7 +8,7 @@ import {
   preferencesPath,
   type TaskRunner,
 } from "../src/gui/controller";
-import { initialWindowGeometry, initialWorkbenchColumns } from "../src/gui/layout";
+import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
 import type { UserImageContentPart } from "../src/types";
@@ -43,6 +43,36 @@ describe("GUI controller", () => {
     expect(new GuiController().validWorkspace()).toBe(realpathSync(workspace));
     rmSync(workspace, { recursive: true });
     expect(new GuiController().validWorkspace()).toBeUndefined();
+  });
+
+  it("remembers chosen projects and validates activation without changing the current project on failure", () => {
+    const first = join(home.path, "first");
+    const second = join(home.path, "second");
+    const unchosen = join(home.path, "unchosen");
+    for (const path of [first, second, unchosen]) mkdirSync(path);
+    const controller = new GuiController();
+    controller.setWorkspace(first);
+    controller.setWorkspace(second);
+    const restored = new GuiController();
+    expect(restored.workspaces).toEqual([realpathSync(second), realpathSync(first)]);
+    restored.activateWorkspace(realpathSync(first));
+    expect(restored.validWorkspace()).toBe(realpathSync(first));
+    expect(() => restored.activateWorkspace(realpathSync(unchosen))).toThrow(/directory picker/u);
+    expect(restored.validWorkspace()).toBe(realpathSync(first));
+    rmSync(second, { recursive: true });
+    expect(() => restored.activateWorkspace(second)).toThrow(/does not exist/u);
+    expect(restored.validWorkspace()).toBe(realpathSync(first));
+    restored.activateWorkspace();
+    expect(new GuiController().workspace).toBeUndefined();
+    expect(new GuiController().workspaces).toEqual([realpathSync(first), second]);
+  });
+
+  it("keeps the existing project when loading preferences from the previous desktop layout", () => {
+    const workspace = join(home.path, "legacy");
+    mkdirSync(workspace);
+    const physical = realpathSync(workspace);
+    writeFileSync(preferencesPath(), JSON.stringify({ language: "zh-CN", workspace: physical, stream: false }));
+    expect(new GuiController()).toMatchObject({ workspace: physical, workspaces: [physical], language: "zh-CN", stream: false });
   });
 
   it("saves model configuration and keeps a session-only API key", () => {
@@ -184,11 +214,6 @@ describe("GUI presentation helpers", () => {
   it("chooses a spacious centered initial geometry", () => {
     expect(initialWindowGeometry(2_048, 1_280)).toEqual({ width: 1_884, height: 1_152, x: 82, y: 64 });
     expect(initialWindowGeometry(1_280, 800)).toEqual({ width: 1_178, height: 720, x: 51, y: 40 });
-    expect(initialWorkbenchColumns(1_720)).toEqual([20, 65, 15]);
-    // The file panel is twice the width it had before the split was widened (380px against 190px).
-    expect(initialWorkbenchColumns(1_020)).toEqual([380, 560, 260]);
-    // Wide windows keep the proportions: a 20% file panel is the doubled default of the former 10%.
-    expect(initialWorkbenchColumns(1_400)).toEqual([20, 65, 15]);
   });
 
   it("parses headings, inline styles, links, lists, quotes, code, and tables", () => {

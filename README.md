@@ -8,9 +8,9 @@ Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to s
 
 ## Desktop preview
 
-Browse local files, chat with Ya, and view relevant memory, tool activity, and file operations awaiting approval in the workspace.
+Navigate projects and sessions on the left, chat with Ya on the right, and open Settings from the bottom of the sidebar. Files, relevant memory, tool activity, and approvals are available in an optional details panel.
 
-![Ya desktop workspace: file list on the left, conversation and task input in the center, and relevant memory and tool activity on the right](assets/ya-gui-workspace-screenshot.png)
+![Ya desktop workspace: project and session navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
 ## Architecture
 
@@ -237,11 +237,13 @@ The existing `~/.ya/memory.json` format is preserved, so upgrading from the Pyth
 
 ## Desktop application
 
-The desktop application is a workspace-first three-column workbench:
+The desktop application uses a two-column workspace inspired by the [official DeepSeek Harness desktop and sidebar sources](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop):
 
-- a navigation-only file browser;
-- a session-only task timeline;
-- relevant memory, local activity metadata, and inline file-change approval.
+- Project and session navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
+- Conversation history and a compact composer on the right. Each session keeps its own draft, replies, and command output locally across restarts; sessions group task history while each task uses the existing shared task service.
+- An optional Files/Activity panel for file navigation, relevant memory, and approvals. Pending approvals open the panel automatically.
+
+Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
 
 It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 

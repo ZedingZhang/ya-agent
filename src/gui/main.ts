@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -8,6 +9,7 @@ import {
   dialog,
   ipcMain,
   net,
+  nativeTheme,
   screen,
   shell,
   type IpcMainInvokeEvent,
@@ -71,6 +73,7 @@ function appState(): AppState {
     language: controller.language,
     ...(controller.workspace ? { workspace: controller.workspace } : {}),
     ...(validWorkspace ? { validWorkspace } : {}),
+    workspaces: controller.workspaces,
     stream: controller.stream,
     hasApiKey: Boolean(controller.apiKey()),
     config: {
@@ -185,10 +188,20 @@ function registerIpc(): void {
 
   ipcMain.handle("workspace:choose", async (event) => {
     assertTrustedSender(event);
+    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
     if (!mainWindow) return undefined;
     const selection = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
     const path = selection.filePaths[0];
+    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
     return selection.canceled || !path ? undefined : controller.setWorkspace(path);
+  });
+
+  ipcMain.handle("workspace:activate", (event, workspace: unknown) => {
+    assertTrustedSender(event);
+    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
+    if (workspace !== undefined && typeof workspace !== "string") throw new Error("Invalid project selection.");
+    controller.activateWorkspace(workspace);
+    return appState();
   });
 
   ipcMain.handle("workspace:entries", (event, path: unknown) => {
@@ -359,7 +372,7 @@ async function createWindow(show = true): Promise<BrowserWindow> {
   mainWindow = new BrowserWindow({
     ...geometry,
     title: "Ya",
-    minWidth: 1_020,
+    minWidth: 860,
     minHeight: 680,
     show: false,
     webPreferences: {
@@ -439,10 +452,17 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const stop = document.querySelector('#stop-button');
     const commandControls = commands instanceof HTMLInputElement && !commands.checked
       && stop instanceof HTMLButtonElement && stop.hidden && typeof window.ya.cancelTask === 'function';
-    const ribbon = document.querySelector('.workspace-ribbon');
-    const ribbonOrder = ribbon ? Array.from(ribbon.children).map((child) => (child.id || child.querySelector('input')?.id) ?? '') : [];
-    const workspaceRibbon = ribbonOrder.join(',') === 'local-enabled,refresh-files,choose-workspace,workspace-path';
-    // A long path must stay inside the ribbon instead of widening the page, so probe it before capture.
+    const sidebar = document.querySelector('.app-sidebar');
+    const settingsButton = document.querySelector('#settings-tab');
+    const timeline = document.querySelector('#timeline');
+    const composer = document.querySelector('.composer');
+    const leftNavigation = sidebar instanceof HTMLElement && timeline instanceof HTMLElement
+      && sidebar.getBoundingClientRect().right <= timeline.getBoundingClientRect().left;
+    const bottomSettings = sidebar instanceof HTMLElement && settingsButton instanceof HTMLElement
+      && sidebar.getBoundingClientRect().bottom - settingsButton.getBoundingClientRect().bottom < 32;
+    const rightComposer = composer instanceof HTMLElement && timeline instanceof HTMLElement
+      && composer.getBoundingClientRect().top + 1 >= timeline.getBoundingClientRect().bottom;
+    // A long project path must stay inside the header instead of widening the page.
     const pathLabel = document.querySelector('#workspace-path');
     const main = document.querySelector('main');
     const probeText = 'C:\\\\' + 'workspace-folder\\\\'.repeat(24) + 'final-folder';
@@ -453,7 +473,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     if (pathLabel && restoreText !== null) pathLabel.textContent = restoreText;
     return {
       memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker,
-      workspaceControls, commandControls, workspaceRibbon, workspaceOverflow, formOverflow, keychainVisible,
+      workspaceControls, commandControls, leftNavigation, bottomSettings, rightComposer, workspaceOverflow, formOverflow, keychainVisible,
     };
   })()`) as {
     memoryActive?: boolean;
@@ -464,7 +484,9 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     imagePicker?: boolean;
     workspaceControls?: boolean;
     commandControls?: boolean;
-    workspaceRibbon?: boolean;
+    leftNavigation?: boolean;
+    bottomSettings?: boolean;
+    rightComposer?: boolean;
     workspaceOverflow?: number;
     formOverflow?: number;
     keychainVisible?: boolean;
@@ -473,8 +495,9 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls || !pages.commandControls) {
     throw new Error("Renderer navigation, vision or command controls failed.");
   }
-  if (!pages.workspaceRibbon) {
-    throw new Error("Workspace ribbon controls must be ordered as local tools, refresh, choose, and path.");
+  if (!pages.leftNavigation || !pages.bottomSettings || !pages.rightComposer) {
+    throw new Error(`Desktop layout geometry failed: ${JSON.stringify({ leftNavigation: pages.leftNavigation,
+      bottomSettings: pages.bottomSettings, rightComposer: pages.rightComposer })}.`);
   }
   if ((pages.workspaceOverflow ?? 0) > 0) {
     throw new Error(`A long workspace path overflows the window by ${pages.workspaceOverflow}px.`);
@@ -523,29 +546,253 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
   if (!commandRendering) throw new Error("Command output, exit status or stop controls failed to render.");
 }
 
+async function verifySessionNavigation(window: BrowserWindow, root: string): Promise<void> {
+  const first = join(root, "ya-agent");
+  const second = join(root, "notes");
+  mkdirSync(first);
+  mkdirSync(second);
+  controller.setWorkspace(first);
+  controller.setWorkspace(second);
+  const navigation = await window.webContents.executeJavaScript(`(async () => {
+    state = await bridge.state();
+    const [second, first] = state.workspaces;
+    await selectSession(undefined, first);
+    const firstId = currentSession.id;
+    const input = document.querySelector('#task-input');
+    input.value = 'A draft for the first project';
+    input.dispatchEvent(new Event('input'));
+    await selectSession(undefined, second);
+    const draftsIsolated = input.value === '';
+    await selectSession(sessions.find((session) => session.id === firstId));
+    const draftRestored = input.value === 'A draft for the first project';
+    const projectRestored = (await bridge.state()).validWorkspace === first;
+    const attachmentsAvailable = !document.querySelector('#choose-images').disabled;
+    await selectSession(undefined, first, true);
+    const newSession = currentSession.id !== firstId && input.value === '';
+    const source = sessions.find((session) => session.id === firstId);
+    source.turns.push({ task: 'Summarize the YA desktop layout', images: [],
+      answer: '## Desktop workspace\\nProject and session navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
+      status: 'complete', commands: [{ id: 'history-command', command: 'npm run check', cwd: first,
+        stdout: 'Checks passed', stderr: '', result: { status: 'success', exitCode: 0, durationMs: 500,
+          stdout: 'Checks passed', stderr: '', stdoutTruncated: false, stderrTruncated: false } }] });
+    source.title = 'Desktop layout';
+    source.draft = '';
+    source.activities = [{ operation: 'read', paths: ['src/gui/index.html'], status: 'success' }];
+    await selectSession(source);
+    const transcriptRestored = document.querySelector('#timeline').textContent.includes('Project and session navigation')
+      && document.querySelector('#timeline .command-run').textContent.includes('Checks passed');
+    setRunning(true);
+    const locked = document.querySelector('#new-session').disabled && document.querySelector('#choose-workspace').disabled
+      && Array.from(document.querySelectorAll('.session-button')).every((button) => button.disabled);
+    const runningId = currentSession.id;
+    await selectSession(undefined, second);
+    const runningSessionStable = currentSession.id === runningId;
+    setRunning(false);
+    pendingAction = { id: 'approval-preview', action: { operation: 'edit', paths: ['README.md'], summary: 'Update desktop documentation', diff: '+ New desktop layout' } };
+    renderPendingAction();
+    switchPage('workspace');
+    setDrawer('activity');
+    const approvalVisible = !document.querySelector('#details-drawer').hidden && !document.querySelector('#action-content').hidden
+      && document.querySelector('#toggle-activity').classList.contains('has-pending');
+    pendingAction = undefined;
+    renderPendingAction();
+    setDrawer(undefined);
+    document.querySelector('#sidebar-toggle').click();
+    const collapsed = document.body.classList.contains('sidebar-collapsed')
+      && document.querySelector('#settings-tab').getBoundingClientRect().width > 0;
+    document.querySelector('#sidebar-toggle').click();
+    input.value = 'A draft that survives reload';
+    input.dispatchEvent(new Event('input'));
+    persistSessions();
+    return { draftsIsolated, draftRestored, projectRestored, attachmentsAvailable, newSession, transcriptRestored,
+      locked, runningSessionStable, approvalVisible, collapsed, activeId: currentSession.id };
+  })()`) as Record<string, boolean | string>;
+  for (const [name, value] of Object.entries(navigation)) {
+    if (name !== "activeId" && value !== true) throw new Error(`Desktop navigation check failed: ${name}.`);
+  }
+  await window.loadFile(rendererFile);
+  await verifyRenderer(window);
+  const restored = await window.webContents.executeJavaScript(`(() => ({
+    id: currentSession.id, draft: document.querySelector('#task-input').value,
+    transcript: document.querySelector('#timeline').textContent.includes('Project and session navigation'),
+    commands: document.querySelector('#timeline .command-run').textContent.includes('Checks passed'),
+  }))()`) as { id: string; draft: string; transcript: boolean; commands: boolean };
+  if (restored.id !== navigation.activeId || restored.draft !== "A draft that survives reload" || !restored.transcript || !restored.commands) {
+    throw new Error("Session transcripts, commands or drafts did not survive renderer reload.");
+  }
+  await window.webContents.executeJavaScript("document.querySelector('#task-input').value = ''; currentSession.draft = ''; persistSessions(); setStatus(t('ready'));");
+}
+
+async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
+  const originalSize = window.getBounds();
+  const originalTheme = nativeTheme.themeSource;
+  const originalLanguage = controller.language;
+  for (const language of ["en", "zh-CN"]) {
+    for (const theme of ["light", "dark"] as const) {
+      nativeTheme.themeSource = theme;
+      for (const [width, height] of [[920, 680], [1440, 900]] as const) {
+        window.setSize(width, height);
+        await window.webContents.executeJavaScript(`state.language = '${language}'; applyLanguage(); switchPage('workspace'); setDrawer(undefined);`);
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        const fits = await window.webContents.executeJavaScript(`(() => {
+          const sidebar = document.querySelector('.app-sidebar').getBoundingClientRect();
+          const settings = document.querySelector('#settings-tab').getBoundingClientRect();
+          const composer = document.querySelector('.composer').getBoundingClientRect();
+          const options = document.querySelector('#task-options');
+          options.open = true;
+          const popup = options.querySelector('.task-controls').getBoundingClientRect();
+          options.open = false;
+          return document.documentElement.scrollWidth <= innerWidth && composer.right <= innerWidth
+            && composer.left >= sidebar.right && composer.bottom <= innerHeight
+            && sidebar.bottom - settings.bottom < 32 && popup.left >= sidebar.right
+            && popup.right <= innerWidth && popup.top >= 0;
+        })()`) as boolean;
+        if (!fits) throw new Error(`Desktop layout overflows at ${width}x${height}, ${language}, ${theme}.`);
+        const settingsFit = await window.webContents.executeJavaScript(`(() => {
+          switchPage('settings');
+          const container = document.querySelector('.settings-layout');
+          const cards = Array.from(container.querySelectorAll('.form-card'));
+          const fieldsInside = cards.every((card) => Array.from(card.querySelectorAll('input, select, button, .check'))
+            .filter((field) => !field.hidden && field.getClientRects().length > 0)
+            .every((field) => field.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom - 8));
+          const cardsApart = innerWidth > 1100 || cards.every((card, index) => index === 0
+            || card.getBoundingClientRect().top >= cards[index - 1].getBoundingClientRect().bottom);
+          container.scrollTop = container.scrollHeight;
+          const save = document.querySelector('#settings-save').getBoundingClientRect();
+          const reachableSave = save.bottom <= container.getBoundingClientRect().bottom + 1;
+          container.scrollTop = 0;
+          switchPage('workspace');
+          return fieldsInside && cardsApart && reachableSave;
+        })()`) as boolean;
+        if (!settingsFit) throw new Error(`Settings fields are clipped at ${width}x${height}, ${language}, ${theme}.`);
+      }
+    }
+  }
+  nativeTheme.themeSource = originalTheme;
+  window.setSize(originalSize.width, originalSize.height);
+  await window.webContents.executeJavaScript(`state.language = '${originalLanguage}'; applyLanguage(); fillSettings();`);
+}
+
+async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
+  const originalController = controller;
+  controller = new GuiController(async (_apiKey, task, _config, options = {}) => {
+    if (task === "smoke-error") throw new Error("Expected smoke failure");
+    options.onContent?.("A streamed ");
+    if (task === "smoke-stream") {
+      const delivered = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline) {
+          if (document.body.classList.contains('task-running') && activeTurn?.status === 'running'
+            && activeTurn.answer === 'A streamed ' && activeAnswer?.textContent.includes('A streamed')) return true;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return false;
+      })()`) as boolean;
+      if (!delivered) throw new Error("The live streaming chunk did not reach the running conversation.");
+    }
+    options.onContent?.("reply.");
+    if (options.localWorkspace) await options.localWorkspace.write({ path: "smoke.txt", content: "Approved smoke task" });
+    return { content: "A streamed reply.", mode: "single", usage: {} };
+  });
+  controller.setSessionApiKey("smoke-only-key");
+  try {
+    const results = await window.webContents.executeJavaScript(`(async () => {
+      try {
+      const originalSession = currentSession;
+      state = await bridge.state();
+      await selectSession(undefined, state.workspace, true);
+      const testSession = currentSession;
+      const input = document.querySelector('#task-input');
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#web-mode').value = 'off';
+      syncWorkspaceControls();
+      input.value = 'smoke-stream';
+      await runTask();
+      const streamed = currentSession.turns[0].answer === 'A streamed reply.'
+        && currentSession.turns[0].status === 'complete'
+        && document.querySelector('#timeline').textContent.includes('A streamed reply.');
+      document.querySelector('#local-enabled').checked = true;
+      syncWorkspaceControls();
+      input.value = 'smoke-approval';
+      const running = runTask();
+      const deadline = Date.now() + 3000;
+      while (!pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!pendingAction) {
+        await bridge.cancelTask();
+        await running;
+        throw new Error('The live task did not request approval.');
+      }
+      const automaticApproval = !document.querySelector('#details-drawer').hidden && drawerPage === 'activity'
+        && !document.querySelector('#action-content').hidden;
+      const originalProject = state.workspace;
+      let projectLocked = false;
+      try { await bridge.activateWorkspace(); } catch (error) { projectLocked = errorText(error).includes('running'); }
+      const navigationLocked = document.querySelector('#new-session').disabled
+        && document.querySelector('#choose-workspace').disabled;
+      document.querySelector('#action-approve').click();
+      await running;
+      const approvalCompleted = currentSession.turns.at(-1).status === 'complete'
+        && currentSession.activities.some((activity) => activity.operation === 'write' && activity.status === 'success')
+        && state.workspace === originalProject;
+      input.value = 'smoke-error';
+      await runTask();
+      const failureSaved = currentSession.turns.at(-1).status === 'error'
+        && currentSession.turns.at(-1).answer.includes('Expected smoke failure')
+        && !document.body.classList.contains('task-running') && !document.querySelector('#send-button').disabled;
+      await selectSession(originalSession);
+      await selectSession(testSession);
+      const historyRestored = document.querySelector('#timeline').textContent.includes('A streamed reply.')
+        && document.querySelector('#timeline').textContent.includes('Expected smoke failure');
+      sessions = sessions.filter((session) => session.id !== testSession.id);
+      await selectSession(originalSession);
+      return { streamed, automaticApproval, projectLocked, navigationLocked, approvalCompleted, failureSaved, historyRestored };
+      } catch (error) { return { failure: errorText(error) }; }
+    })()`) as Record<string, boolean | string>;
+    for (const [name, value] of Object.entries(results)) {
+      if (value !== true) throw new Error(`Desktop task history check failed: ${name} (${value}).`);
+    }
+  } finally {
+    controller = originalController;
+    await window.webContents.executeJavaScript("(async () => { state = await bridge.state(); fillSettings(); renderNavigation(); })()");
+  }
+}
+
 /** YA_SMOKE_CAPTURE=<file> writes a PNG of one page (YA_SMOKE_CAPTURE_PAGE=workspace|memory|settings) during the smoke test. */
 async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
   const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
   if (!["workspace", "memory", "settings"].includes(page)) {
     throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, memory, or settings.");
   }
-  await window.webContents.executeJavaScript(`(() => {
-    document.querySelectorAll('.page').forEach((node) => node.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach((node) => node.classList.remove('active'));
-    document.querySelector('[data-page="${page}"]')?.classList.add('active');
-    document.querySelector('#page-${page}')?.classList.add('active');
-  })()`);
+  const language = process.env.YA_SMOKE_LANGUAGE;
+  if (language && LANGUAGES.includes(language as Language)) {
+    await window.webContents.executeJavaScript(`state.language = '${language}'; applyLanguage(); fillSettings(); renderSession();`);
+  }
+  const theme = process.env.YA_SMOKE_THEME;
+  if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
+  const size = process.env.YA_SMOKE_SIZE?.match(/^(\d+)x(\d+)$/u);
+  if (size) window.setSize(Number(size[1]), Number(size[2]));
+  await window.webContents.executeJavaScript(`switchPage('${page}')`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());
 }
 
 const smokeTest = process.argv.includes("--smoke-test");
+const smokeRoot = smokeTest ? mkdtempSync(join(tmpdir(), "ya-desktop-smoke-")) : undefined;
+if (smokeRoot) {
+  process.env.YA_HOME = join(smokeRoot, "home");
+  const profile = join(smokeRoot, "electron");
+  mkdirSync(profile);
+  app.setPath("userData", profile);
+}
 app.whenReady().then(async () => {
   controller = createController();
   registerIpc();
   if (smokeTest) {
     const window = await createWindow(false);
     await verifyRenderer(window);
+    await verifySessionNavigation(window, smokeRoot!);
+    await verifyTaskHistory(window);
+    await verifyResponsiveLayout(window);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();
@@ -559,6 +806,16 @@ app.whenReady().then(async () => {
 }).catch((error: unknown) => {
   process.stderr.write(`Ya GUI error: ${error instanceof Error ? error.message : String(error)}\n`);
   app.exit(2);
+});
+
+app.on("quit", () => {
+  if (smokeRoot) {
+    try { rmSync(smokeRoot, { recursive: true, force: true }); }
+    catch {
+      // Chromium can still hold its temporary profile open during quit on Windows.
+      // Cleanup must not turn a successful smoke run into a blocking native error dialog.
+    }
+  }
 });
 
 app.on("window-all-closed", () => {

@@ -32,6 +32,7 @@ export type Language = (typeof LANGUAGES)[number];
 export interface GuiPreferences {
   language: Language;
   workspace?: string;
+  workspaces?: string[];
   stream: boolean;
 }
 
@@ -79,18 +80,21 @@ export function loadPreferences(): GuiPreferences {
     const language = LANGUAGES.includes(value.language as Language) ? value.language as Language : "en";
     const workspace = typeof value.workspace === "string" ? value.workspace : undefined;
     const stream = typeof value.stream === "boolean" ? value.stream : true;
-    return { language, ...(workspace ? { workspace } : {}), stream };
+    const workspaces = Array.isArray(value.workspaces)
+      ? [...new Set(value.workspaces.filter((path): path is string => typeof path === "string" && path.length > 0))]
+      : undefined;
+    return { language, ...(workspace ? { workspace } : {}), ...(workspaces ? { workspaces } : {}), stream };
   } catch {
     return { language: "en", stream: true };
   }
 }
 
-export function savePreferences(language: Language, workspace?: string, stream = true): void {
+export function savePreferences(language: Language, workspace?: string, stream = true, workspaces: string[] = []): void {
   if (!LANGUAGES.includes(language)) throw new Error("GUI language must be en or zh-CN.");
   const path = preferencesPath();
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ language, workspace: workspace ?? null, stream }, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify({ language, workspace: workspace ?? null, workspaces, stream }, null, 2)}\n`, "utf8");
   renameSync(temporary, path);
 }
 
@@ -98,6 +102,7 @@ export class GuiController {
   config: ModelConfig;
   language: Language;
   workspace?: string;
+  workspaces: string[];
   stream: boolean;
   private sessionApiKey?: string;
   private readonly taskRunner: TaskRunner;
@@ -107,12 +112,13 @@ export class GuiController {
     const preferences = loadPreferences();
     this.language = preferences.language;
     this.workspace = preferences.workspace;
+    this.workspaces = [...new Set([...(preferences.workspaces ?? []), ...(this.workspace ? [this.workspace] : [])])];
     this.stream = preferences.stream;
     this.taskRunner = taskRunner;
   }
 
   private persistPreferences(): void {
-    savePreferences(this.language, this.workspace, this.stream);
+    savePreferences(this.language, this.workspace, this.stream, this.workspaces);
   }
 
   setLanguage(language: Language): void {
@@ -127,8 +133,19 @@ export class GuiController {
     const physical = realpathSync(workspace);
     if (!statSync(physical).isDirectory()) throw new Error(`Workspace is not a directory: ${physical}`);
     this.workspace = physical;
+    this.workspaces = [physical, ...this.workspaces.filter((path) => path !== physical)];
     this.persistPreferences();
     return physical;
+  }
+
+  activateWorkspace(value?: string): void {
+    if (value === undefined) {
+      this.workspace = undefined;
+      this.persistPreferences();
+      return;
+    }
+    if (!this.workspaces.includes(value)) throw new Error("Choose this project through the directory picker first.");
+    this.setWorkspace(value);
   }
 
   setStream(enabled: boolean): void {
