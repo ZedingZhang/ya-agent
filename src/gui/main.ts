@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -24,6 +24,7 @@ import {
   type ImageFileInfo,
 } from "../images";
 import { DuplicateMemoryError, MemoryLimitError, type MemoryKind } from "../memory";
+import type { RunResult } from "../orchestrator";
 import { runTask } from "../service";
 import { VERSION } from "../version";
 import { search } from "../web";
@@ -41,6 +42,7 @@ import type {
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 let activeTaskController: AbortController | undefined;
+let activeTaskPromise: Promise<RunResult> | undefined;
 const LOCAL_ACTION_TIMEOUT_MS = 120_000;
 const pendingActions = new Map<string, {
   resolve: (approved: boolean) => void;
@@ -181,8 +183,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function registerIpc(): void {
-  ipcMain.handle("state:get", (event) => {
+  ipcMain.handle("state:get", async (event) => {
     assertTrustedSender(event);
+    // A replacement renderer must not accept tasks or navigation while cancellation is settling.
+    if (activeTaskController?.signal.aborted) await activeTaskPromise?.catch(() => undefined);
     return appState();
   });
 
@@ -276,13 +280,17 @@ function registerIpc(): void {
     taskRunning = true;
     const taskController = new AbortController();
     activeTaskController = taskController;
+    const send = (value: TaskEvent): void => {
+      if (!taskController.signal.aborted) sendTaskEvent(value);
+    };
     try {
-      return await controller.run({ ...options, images }, {
+      activeTaskPromise = controller.run({ ...options, images }, {
         signal: taskController.signal,
-        onContent: (content) => sendTaskEvent({ type: "content", content }),
-        onLocalActivity: (activity) => sendTaskEvent({ type: "activity", activity }),
-        onCommandEvent: (commandEvent) => sendTaskEvent({ type: "command", event: commandEvent }),
+        onContent: (content) => send({ type: "content", content }),
+        onLocalActivity: (activity) => send({ type: "activity", activity }),
+        onCommandEvent: (commandEvent) => send({ type: "command", event: commandEvent }),
         onLocalAction: (action) => new Promise<boolean>((resolvePromise, reject) => {
+          taskController.signal.throwIfAborted();
           if (event.sender.isDestroyed()) {
             reject(new Error("The renderer is no longer available."));
             return;
@@ -302,7 +310,9 @@ function registerIpc(): void {
           }
         }),
       });
+      return await activeTaskPromise;
     } finally {
+      activeTaskPromise = undefined;
       activeTaskController = undefined;
       rejectPendingActions(new Error("Task ended."));
       taskRunning = false;
@@ -395,6 +405,9 @@ async function createWindow(show = true): Promise<BrowserWindow> {
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
+  });
+  mainWindow.webContents.on("did-start-loading", () => {
+    cancelTask(new Error("The renderer was reloaded while running a task."));
   });
   mainWindow.webContents.on("destroyed", () => {
     cancelTask(new Error("The renderer was destroyed while running a task."));
@@ -757,6 +770,148 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
+  const originalController = controller;
+  let signal: AbortSignal | undefined;
+  let taskStarted = false;
+  let release!: () => void;
+  let finished!: () => void;
+  const stopping = new Promise<void>((resolve) => { release = resolve; });
+  const stopped = new Promise<void>((resolve) => { finished = resolve; });
+  controller = new GuiController(async (_apiKey, task, _config, options = {}) => {
+    if (task === "smoke-reload") {
+      taskStarted = true;
+      signal = options.signal;
+      options.onContent?.("Reply before reload");
+      try {
+        await stopping;
+        options.onContent?.(" late reply from the old task");
+        signal?.throwIfAborted();
+      } finally {
+        finished();
+      }
+    }
+    return { content: "Reply after reload", mode: "single", usage: {} };
+  });
+  controller.setSessionApiKey("smoke-only-key");
+  const fixture = await window.webContents.executeJavaScript(`(async () => {
+    const originalId = currentSession.id;
+    state = await bridge.state();
+    await selectSession(undefined, state.workspace, true);
+    const source = currentSession;
+    document.querySelector('#task-input').value = 'smoke-reload';
+    document.querySelector('#task-input').dispatchEvent(new Event('input'));
+    await selectSession(undefined, source.workspace, true);
+    const nextId = currentSession.id;
+    await selectSession(source);
+    document.querySelector('#local-enabled').checked = false;
+    document.querySelector('#web-mode').value = 'off';
+    syncWorkspaceControls();
+    void runTask();
+    return { originalId, sourceId: source.id, nextId };
+  })()`) as { originalId: string; sourceId: string; nextId: string };
+  try {
+    const live = await window.webContents.executeJavaScript(`(async () => {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if (activeTurn?.answer === 'Reply before reload' && document.querySelector('#new-session').disabled) return true;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return false;
+    })()`) as boolean;
+    if (!live) throw new Error("The reload fixture did not start a live task.");
+    const loaded = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("The renderer reload did not finish.")), 5000);
+      window.webContents.once("did-finish-load", () => { clearTimeout(timer); resolve(); });
+    });
+    window.webContents.reload();
+    await loaded;
+    if (!signal?.aborted) throw new Error("Reload did not cancel the previous task.");
+    const waiting = await window.webContents.executeJavaScript("document.body.inert && document.body.dataset.ready !== 'true'") as boolean;
+    if (!waiting) throw new Error("The reloaded renderer became interactive before the previous task stopped.");
+    release();
+    await stopped;
+    await verifyRenderer(window);
+    const recovered = await window.webContents.executeJavaScript(`(async () => {
+      const source = sessions.find((session) => session.id === '${fixture.sourceId}');
+      const interrupted = currentSession.id === source.id && source.turns.at(-1).status === 'interrupted'
+        && source.turns.at(-1).answer === 'Reply before reload';
+      await selectSession(sessions.find((session) => session.id === '${fixture.nextId}'));
+      const isolated = currentSession.id === '${fixture.nextId}' && currentSession.activities.length === 0
+        && currentSession.turns.length === 0 && pendingAction === undefined && document.querySelector('#stop-button').hidden;
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#task-input').value = 'smoke-reload-next';
+      await runTask();
+      return interrupted && isolated && currentSession.turns.at(-1).status === 'complete'
+        && currentSession.turns.at(-1).answer === 'Reply after reload';
+    })()`) as boolean;
+    if (!recovered) throw new Error("Reload lost task ownership, mixed session history, or blocked the next task.");
+  } finally {
+    release();
+    if (taskStarted) await stopped;
+    controller = originalController;
+    await window.webContents.executeJavaScript(`(async () => {
+      state = await bridge.state();
+      sessions = sessions.filter((session) => !['${fixture.sourceId}', '${fixture.nextId}'].includes(session.id));
+      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+    })()`);
+  }
+}
+
+async function verifyUnavailableHistory(window: BrowserWindow, root: string): Promise<void> {
+  const directory = join(root, "archived-project");
+  const originalWorkspace = controller.workspace;
+  mkdirSync(directory);
+  const unavailable = controller.setWorkspace(directory);
+  const fixture = await window.webContents.executeJavaScript(`(async () => {
+    const originalId = currentSession.id;
+    state = await bridge.state();
+    await selectSession(undefined, state.workspace, true);
+    currentSession.title = 'Archived history';
+    currentSession.turns.push({ task: 'Saved task', images: [], answer: 'Saved answer', status: 'complete', commands: [] });
+    renderSession();
+    document.querySelector('#task-input').value = 'Saved draft';
+    document.querySelector('#task-input').dispatchEvent(new Event('input'));
+    persistSessions();
+    return { originalId, archivedId: currentSession.id };
+  })()`) as { originalId: string; archivedId: string };
+  rmdirSync(directory);
+  try {
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const startup = await window.webContents.executeJavaScript(`currentSession.id === '${fixture.archivedId}'
+      && document.querySelector('#timeline').textContent.includes('Saved answer')
+      && document.querySelector('#task-input').value === 'Saved draft'`) as boolean;
+    if (!startup) throw new Error("Unavailable-project history did not restore at startup.");
+    const restored = await window.webContents.executeJavaScript(`(async () => {
+      const archived = sessions.find((session) => session.id === '${fixture.archivedId}');
+      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+      await selectSession(archived);
+      const main = await bridge.state();
+      return currentSession.id === archived.id && document.querySelector('#timeline').textContent.includes('Saved answer')
+        && document.querySelector('#task-input').value === 'Saved draft'
+        && main.workspace === undefined && main.validWorkspace === undefined
+        && !document.querySelector('#local-enabled').checked && document.querySelector('#local-enabled').disabled
+        && !document.querySelector('#commands-enabled').checked && document.querySelector('#commands-enabled').disabled
+        && document.querySelectorAll('#file-list .file-row').length === 0;
+    })()`) as boolean;
+    if (!restored) throw new Error("Unavailable-project history cannot open independently of the previous project's files.");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const reopened = await window.webContents.executeJavaScript(`currentSession.id === '${fixture.archivedId}'
+      && currentSession.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
+    if (!reopened) throw new Error("Unavailable-project selection or draft was lost after reload.");
+  } finally {
+    controller.workspaces = controller.workspaces.filter((path) => path !== unavailable);
+    controller.activateWorkspace(originalWorkspace);
+    await window.webContents.executeJavaScript(`(async () => {
+      state = await bridge.state();
+      sessions = sessions.filter((session) => session.id !== '${fixture.archivedId}');
+      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+    })()`);
+  }
+}
+
 /** YA_SMOKE_CAPTURE=<file> writes a PNG of one page (YA_SMOKE_CAPTURE_PAGE=workspace|memory|settings) during the smoke test. */
 async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
   const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
@@ -791,7 +946,9 @@ app.whenReady().then(async () => {
     const window = await createWindow(false);
     await verifyRenderer(window);
     await verifySessionNavigation(window, smokeRoot!);
+    await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);
+    await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);

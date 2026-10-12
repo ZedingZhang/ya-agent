@@ -280,7 +280,7 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
 }
 
 function renderWorkspaceLabel(): void {
-  const path = state.validWorkspace ?? state.workspace;
+  const path = currentSession?.workspace ?? state.workspace;
   const label = element<HTMLDivElement>("workspace-path");
   label.textContent = path ?? t("noProject");
   label.title = path ?? "";
@@ -530,7 +530,7 @@ async function selectSession(session?: ConversationSession, workspace?: string, 
   setNavigationPending(true);
   try {
     const targetWorkspace = session ? session.workspace : workspace;
-    if (state.workspace !== targetWorkspace) state = await bridge.activateWorkspace(targetWorkspace);
+    await activateSessionWorkspace(targetWorkspace);
     const candidates = sessions.filter((item) => item.workspace === targetWorkspace).sort((a, b) => b.updatedAt - a.updatedAt);
     const selected = session ?? (fresh ? candidates.find((item) => item.turns.length === 0 && !item.draft) : candidates[0])
       ?? createSession(targetWorkspace);
@@ -539,6 +539,17 @@ async function selectSession(session?: ConversationSession, workspace?: string, 
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
     setNavigationPending(false);
+  }
+}
+
+async function activateSessionWorkspace(workspace?: string): Promise<void> {
+  if (state.workspace === workspace) return;
+  try {
+    state = await bridge.activateWorkspace(workspace);
+  } catch (error) {
+    if (!workspace || !state.workspaces.includes(workspace)) throw error;
+    // History is independent of the folder, but must never inherit another project's tools.
+    state = await bridge.activateWorkspace();
   }
 }
 
@@ -1275,7 +1286,7 @@ function registerEvents(): void {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
   element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
-  element<HTMLButtonElement>("new-session").addEventListener("click", () => void selectSession(undefined, state.workspace, true));
+  element<HTMLButtonElement>("new-session").addEventListener("click", () => void selectSession(undefined, currentSession.workspace, true));
   element<HTMLButtonElement>("sidebar-toggle").addEventListener("click", () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
@@ -1314,7 +1325,7 @@ function registerEvents(): void {
     if (event.isComposing) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
-      void selectSession(undefined, state.workspace, true);
+      void selectSession(undefined, currentSession.workspace, true);
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
       event.preventDefault();
       element<HTMLButtonElement>("sidebar-toggle").click();
@@ -1370,10 +1381,12 @@ function registerEvents(): void {
 }
 
 async function initialize(): Promise<void> {
+  document.body.inert = true;
   state = await bridge.state();
   const activeId = loadSessionHistory();
-  currentSession = sessions.find((session) => session.id === activeId && session.workspace === state.workspace)
+  currentSession = sessions.find((session) => session.id === activeId && (!session.workspace || state.workspaces.includes(session.workspace)))
     ?? sessions.find((session) => session.workspace === state.workspace) ?? createSession();
+  await activateSessionWorkspace(currentSession.workspace);
   registerEvents();
   applyLanguage();
   fillSettings();
@@ -1382,9 +1395,11 @@ async function initialize(): Promise<void> {
   persistSessions();
   await renderFiles();
   document.body.dataset.ready = "true";
+  document.body.inert = false;
 }
 
 void initialize().catch((error: unknown) => {
+  document.body.inert = false;
   document.body.dataset.startupError = "true";
   document.body.textContent = `Ya failed to start: ${errorText(error)}`;
 });

@@ -245,6 +245,8 @@ The desktop application uses a two-column workspace inspired by the [official De
 
 Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
 
+Saved transcripts and drafts remain accessible if a project's folder is moved or deleted. Opening that history disables local tools and clears access to the previously selected project's folder. Reloading the desktop during a task cancels it and waits for it to stop before enabling session navigation.
+
 It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 
 The application does not start a local web server. The renderer cannot access Node.js directly; API calls and filesystem operations run in the Electron main process behind validated IPC handlers.

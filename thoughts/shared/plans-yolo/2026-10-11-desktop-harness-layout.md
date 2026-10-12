@@ -52,6 +52,13 @@ No remaining Standards findings after the final targeted review. Fixed all Minor
 
 No remaining Spec findings. The follow-up review verified both READMEs and refreshed locale screenshots. Its Minor streaming-coverage note is addressed by the live-delivery check and negative control.
 
+## PR review regression fixes — 2026-10-12
+
+- Preserve access to transcripts and drafts for unavailable project directories, including cross-project selection and reopening after the active filesystem workspace has been cleared. Keep native-picker authorization and activation validation intact, and disable local tools instead of inheriting the previous project's folder.
+- Cancel tasks when the renderer starts loading, wait for cancellation to settle before returning startup state, and suppress cancelled-task content, activity, command events, and late approval requests. Keep the replacement renderer inactive until initialization completes.
+- Before the fixes, the unavailable-history Electron case failed because it remained in the other project; the active-task reload case failed because the task was not cancelled. The main-process reload lifecycle cases also failed on the old code.
+- After the fixes, `npm run check` passed with 269 tests and 3 platform-dependent skips. Real Electron smoke exercises both regression scenarios; the IPC test additionally covers delayed stopping and events after the next task has started.
+
 ## References
 
 - https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop
