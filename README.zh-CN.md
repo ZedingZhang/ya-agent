@@ -270,7 +270,7 @@ npm run check
 
 ```sh
 npm start -- --help        # 构建并运行 CLI
-npm run gui                # 构建并运行 Electron
+npm run gui                # 构建并运行 Ya（macOS 使用名为 Ya 的应用包）
 npm run smoke:gui          # 加载 IPC/preload/renderer 并验证页面切换
 npm run test:watch         # 监听单元测试
 npm run package:cli        # 为当前平台打包 CLI

@@ -271,7 +271,7 @@ Useful commands:
 
 ```sh
 npm start -- --help        # build and run the CLI
-npm run gui                # build and run Electron
+npm run gui                # build and run Ya (branded Ya.app on macOS)
 npm run smoke:gui          # load IPC/preload/renderer and verify navigation
 npm run test:watch         # watch unit tests
 npm run package:cli        # package a CLI for the current host

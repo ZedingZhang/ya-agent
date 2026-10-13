@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   app,
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   net,
   nativeTheme,
   screen,
@@ -30,6 +31,7 @@ import { VERSION } from "../version";
 import { search } from "../web";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
+import { installApplicationMenu } from "./menu";
 import type {
   AppState,
   RendererTaskOptions,
@@ -38,6 +40,8 @@ import type {
   TaskEvent,
   WorkspaceModelSelection,
 } from "./shared";
+
+app.setName("Ya");
 
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
@@ -256,6 +260,7 @@ function registerIpc(): void {
     });
     controller.saveModelConfig(config);
     controller.setLanguage(settings.language);
+    installApplicationMenu(controller.language);
     controller.setStream(settings.stream);
     if (settings.apiKey?.trim()) {
       if (settings.keyStorage === "keychain") controller.saveMacosApiKey(settings.apiKey);
@@ -392,7 +397,7 @@ async function createWindow(show = true): Promise<BrowserWindow> {
       sandbox: true,
     },
   });
-  mainWindow.removeMenu();
+  if (process.platform !== "darwin") mainWindow.removeMenu();
   if (show) mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     try {
@@ -931,6 +936,39 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());
 }
 
+async function verifyApplicationMenu(window: BrowserWindow): Promise<void> {
+  if (app.getName() !== "Ya") throw new Error(`Unexpected application name: ${app.getName()}`);
+  if (process.platform !== "darwin") return;
+  if (basename(app.getPath("exe")) !== "Ya") throw new Error("The macOS executable must be named Ya.");
+
+  const originalLanguage = controller.language;
+  const saveLanguage = (language: Language): Promise<unknown> => window.webContents.executeJavaScript(`(async () => {
+    const current = await window.ya.state();
+    return window.ya.saveSettings({ ...current.config, language: '${language}', stream: current.stream });
+  })()`);
+  const verifyLabels = (language: Language): void => {
+    const menu = Menu.getApplicationMenu();
+    const labels = menu?.items.map((item) => item.label).join("|");
+    const expected = language === "zh-CN" ? "Ya|文件|编辑|视图|窗口" : "Ya|File|Edit|View|Window";
+    const appLabels = menu?.items[0]?.submenu?.items.map((item) => item.label) ?? [];
+    const editLabels = menu?.items[2]?.submenu?.items.map((item) => item.label) ?? [];
+    const quit = language === "zh-CN" ? "退出 Ya" : "Quit Ya";
+    const paste = language === "zh-CN" ? "粘贴" : "Paste";
+    if (labels !== expected || !appLabels.includes(quit) || !editLabels.includes(paste)) {
+      throw new Error(`Native menu localization failed for ${language}: ${JSON.stringify({ labels, appLabels, editLabels })}`);
+    }
+  };
+  verifyLabels(originalLanguage);
+  try {
+    for (const language of ["zh-CN", "en"] as const) {
+      await saveLanguage(language);
+      verifyLabels(language);
+    }
+  } finally {
+    await saveLanguage(originalLanguage);
+  }
+}
+
 const smokeTest = process.argv.includes("--smoke-test");
 const smokeRoot = smokeTest ? mkdtempSync(join(tmpdir(), "ya-desktop-smoke-")) : undefined;
 if (smokeRoot) {
@@ -941,10 +979,12 @@ if (smokeRoot) {
 }
 app.whenReady().then(async () => {
   controller = createController();
+  installApplicationMenu(controller.language);
   registerIpc();
   if (smokeTest) {
     const window = await createWindow(false);
     await verifyRenderer(window);
+    await verifyApplicationMenu(window);
     await verifySessionNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);

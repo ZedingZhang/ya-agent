@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
-  app: { whenReady: () => Promise.resolve(), on: vi.fn(), exit: vi.fn() },
+  app: { whenReady: () => Promise.resolve(), on: vi.fn(), exit: vi.fn(), setName: vi.fn() },
+  Menu: { buildFromTemplate: vi.fn((template) => template), setApplicationMenu: vi.fn() },
   BrowserWindow: class extends EventEmitter {
     webContents = Object.assign(new EventEmitter(), {
       isDestroyed: vi.fn(() => false),
