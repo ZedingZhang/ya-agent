@@ -4,6 +4,7 @@ import type { RendererTaskOptions, SettingsUpdate, TaskEvent, WorkspaceModelSele
 const bridge: YaBridge = {
   state: () => ipcRenderer.invoke("state:get"),
   chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
+  activateWorkspace: (workspace) => ipcRenderer.invoke("workspace:activate", workspace),
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   clearImages: () => ipcRenderer.invoke("images:clear"),
   workspaceEntries: (path = ".") => ipcRenderer.invoke("workspace:entries", path),

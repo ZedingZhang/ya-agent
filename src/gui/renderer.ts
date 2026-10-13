@@ -26,6 +26,7 @@ interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
+  workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
   config: {
@@ -78,6 +79,7 @@ interface RunResult {
 interface YaRendererBridge {
   state(): Promise<AppState>;
   chooseWorkspace(): Promise<string | undefined>;
+  activateWorkspace(workspace?: string): Promise<AppState>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
@@ -103,6 +105,11 @@ const bridge = (window as typeof window & { ya: YaRendererBridge }).ya;
 
 const TEXT = {
   en: {
+    projects: "Projects", addProject: "Add project", newSession: "New session", conversations: "Conversations",
+    generalChats: "Without a project", noProject: "No project selected", addProjectHint: "Add a folder to start a project.",
+    welcome: "What would you like to work on?", welcomeHint: "Start a conversation, or choose a project to work with local files.",
+    toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
+    interrupted: "This task was interrupted. You can send it again.", historySaveError: "Session history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", choose: "Choose…", refresh: "Refresh",
     local: "Enable local tools", task: "Task", taskPlaceholder: "Ask Ya a question or describe a workspace task…", send: "Send",
     model: "Model", thinking: "Thinking", web: "Web", toa: "Tree of Agents", workers: "Workers", auto: "Auto", on: "On", off: "Off",
@@ -126,6 +133,11 @@ const TEXT = {
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
+    projects: "项目", addProject: "添加项目", newSession: "新建会话", conversations: "对话",
+    generalChats: "未关联项目", noProject: "尚未选择项目", addProjectHint: "添加文件夹，开始一个项目。",
+    welcome: "今天想做些什么？", welcomeHint: "开始一段对话，或选择项目来处理本地文件。",
+    toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
+    interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存会话记录，本地存储空间可能已满。",
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
     local: "启用本地工具", task: "任务", taskPlaceholder: "向 Ya 提问，或描述一个工作区任务…", send: "发送",
     model: "模型", thinking: "思考", web: "网页", toa: "Tree of Agents", workers: "工作 Agent", auto: "自动", on: "开启", off: "关闭",
@@ -160,6 +172,39 @@ let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
+type CommandResult = Extract<ShellCommandEvent, { type: "finish" }>["result"];
+interface ConversationCommand {
+  id: string;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  result?: CommandResult;
+}
+interface ConversationTurn {
+  task: string;
+  images: SelectedImage[];
+  answer: string;
+  status: "running" | "complete" | "error" | "interrupted";
+  partial?: boolean;
+  commands: ConversationCommand[];
+}
+interface ConversationSession {
+  id: string;
+  workspace?: string;
+  title: string;
+  updatedAt: number;
+  draft: string;
+  turns: ConversationTurn[];
+  activities: LocalActivity[];
+}
+const SESSION_STORAGE_KEY = "ya.desktop.sessions.v1";
+let sessions: ConversationSession[] = [];
+let currentSession: ConversationSession;
+let activeTurn: ConversationTurn | undefined;
+let navigationPending = false;
+let sessionSaveTimer: number | undefined;
+let drawerPage: "files" | "activity" | undefined;
 const commandLogs = new Map<string, { summary: HTMLElement; stdout: HTMLElement; stderr: HTMLElement; command: string; cwd: string }>();
 const VISION_MODEL = "deepseek-flash";
 
@@ -198,6 +243,16 @@ function applyLanguage(): void {
     const key = node.dataset.i18nPlaceholder as TextKey | undefined;
     if (key) node.placeholder = t(key);
   });
+  document.querySelectorAll<HTMLElement>("[data-i18n-label]").forEach((node) => {
+    const label = t(node.dataset.i18nLabel as TextKey);
+    node.setAttribute("aria-label", label);
+    node.title = label;
+  });
+  document.querySelectorAll<HTMLButtonElement>(".nav-button").forEach((node) => {
+    const label = node.querySelector(".nav-label")?.textContent ?? "";
+    node.setAttribute("aria-label", label);
+    node.title = label;
+  });
   element<HTMLSelectElement>("web-mode").options[0]!.text = t("auto");
   element<HTMLSelectElement>("web-mode").options[1]!.text = t("on");
   element<HTMLSelectElement>("web-mode").options[2]!.text = t("off");
@@ -206,6 +261,8 @@ function applyLanguage(): void {
   renderActivities();
   renderPendingAction();
   renderImages();
+  renderNavigation();
+  renderPageTitle();
   if (!activeAnswer) setStatus(t("ready"));
 }
 
@@ -214,29 +271,318 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((node) => {
     const active = node.dataset.page === page;
     node.classList.toggle("active", active);
-    node.setAttribute("aria-selected", String(active));
+    if (active) node.setAttribute("aria-current", "page");
+    else node.removeAttribute("aria-current");
   });
+  element<HTMLDivElement>("workspace-actions").hidden = page !== "workspace";
+  renderPageTitle();
   if (page === "memory") renderMemory();
 }
 
 function renderWorkspaceLabel(): void {
-  const path = state.validWorkspace ?? state.workspace;
+  const path = currentSession?.workspace ?? state.workspace;
   const label = element<HTMLDivElement>("workspace-path");
-  label.textContent = path ?? t("noWorkspace");
+  label.textContent = path ?? t("noProject");
   label.title = path ?? "";
   label.classList.toggle("missing", !state.validWorkspace);
+  const hint = element<HTMLSpanElement>("project-hint");
+  hint.textContent = path ? projectName(path) : t("noProject");
+  hint.title = path ?? "";
+}
+
+function projectName(path: string): string {
+  return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
+}
+
+function sessionTitle(session: ConversationSession): string {
+  return session.title || t("newSession");
+}
+
+function renderPageTitle(): void {
+  const page = document.querySelector<HTMLButtonElement>(".tab.active")?.dataset.page;
+  element<HTMLHeadingElement>("page-title").textContent = page === "settings" ? t("settings")
+    : page === "memory" ? t("memory") : currentSession ? sessionTitle(currentSession) : t("newSession");
+}
+
+function persistSessions(): void {
+  if (sessionSaveTimer !== undefined) window.clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = undefined;
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentSession.id, sessions,
+      sidebarCollapsed: document.body.classList.contains("sidebar-collapsed") }));
+  } catch {
+    setStatus(t("historySaveError"), "error");
+  }
+}
+
+function scheduleSessionSave(): void {
+  if (sessionSaveTimer !== undefined) window.clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = window.setTimeout(persistSessions, 250);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validSavedCommand(value: unknown): value is ConversationCommand {
+  if (!isRecord(value) || ![value.id, value.command, value.cwd, value.stdout, value.stderr].every((part) => typeof part === "string")) return false;
+  if (value.result === undefined) return true;
+  const result = value.result;
+  return isRecord(result) && ["success", "failed", "timed_out", "cancelled", "error"].includes(String(result.status))
+    && (result.exitCode === null || typeof result.exitCode === "number") && typeof result.durationMs === "number"
+    && typeof result.stdout === "string" && typeof result.stderr === "string"
+    && typeof result.stdoutTruncated === "boolean" && typeof result.stderrTruncated === "boolean"
+    && (result.error === undefined || typeof result.error === "string");
+}
+
+function loadSessionHistory(): string | undefined {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
+    if (!isRecord(saved) || !Array.isArray(saved.sessions)) return undefined;
+    document.body.classList.toggle("sidebar-collapsed", saved.sidebarCollapsed === true);
+    element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(saved.sidebarCollapsed !== true));
+    const ids = new Set<string>();
+    for (const value of saved.sessions) {
+      if (!isRecord(value) || typeof value.id !== "string" || ids.has(value.id) || typeof value.title !== "string"
+        || typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt) || typeof value.draft !== "string"
+        || (value.workspace !== undefined && typeof value.workspace !== "string") || !Array.isArray(value.turns)) continue;
+      const turns: ConversationTurn[] = [];
+      for (const turn of value.turns) {
+        if (!isRecord(turn) || typeof turn.task !== "string" || typeof turn.answer !== "string"
+          || !["running", "complete", "error", "interrupted"].includes(String(turn.status))) continue;
+        const images = Array.isArray(turn.images) ? turn.images.filter((image): image is SelectedImage =>
+          isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
+          && typeof image.size === "number" && typeof image.mimeType === "string") : [];
+        turns.push({ task: turn.task, answer: turn.answer, images,
+          status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
+          partial: turn.partial === true,
+          commands: Array.isArray(turn.commands) ? turn.commands.filter(validSavedCommand) : [],
+        });
+      }
+      const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
+        isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
+        && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
+      sessions.push({ id: value.id, title: value.title, updatedAt: value.updatedAt, draft: value.draft,
+        ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}), turns, activities: savedActivities });
+      ids.add(value.id);
+    }
+    return typeof saved.activeId === "string" ? saved.activeId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSession(workspace = state.workspace): ConversationSession {
+  const session: ConversationSession = { id: crypto.randomUUID(), ...(workspace ? { workspace } : {}),
+    title: "", updatedAt: Date.now(), draft: "", turns: [], activities: [] };
+  sessions.unshift(session);
+  return session;
+}
+
+function renderNavigation(): void {
+  const list = element<HTMLDivElement>("project-list");
+  list.replaceChildren();
+  const disabled = navigationPending || document.body.classList.contains("task-running");
+  const projects: Array<string | undefined> = [...state.workspaces];
+  if (sessions.some((session) => !session.workspace)) projects.push(undefined);
+  for (const workspace of projects) {
+    const group = document.createElement("section");
+    group.className = "project-group";
+    const row = document.createElement("div");
+    row.className = "project-row";
+    const project = document.createElement("button");
+    project.type = "button";
+    project.className = "project-button";
+    project.classList.toggle("active", workspace === currentSession?.workspace);
+    project.dataset.workspace = workspace ?? "";
+    project.disabled = disabled;
+    project.title = workspace ?? t("generalChats");
+    project.innerHTML = '<svg class="project-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
+    const name = document.createElement("span");
+    name.textContent = workspace ? projectName(workspace) : t("generalChats");
+    project.append(name);
+    project.addEventListener("click", () => void selectSession(undefined, workspace));
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "icon-button";
+    add.textContent = "+";
+    add.title = `${t("newSession")} · ${name.textContent}`;
+    add.setAttribute("aria-label", add.title);
+    add.disabled = disabled;
+    add.addEventListener("click", () => void selectSession(undefined, workspace, true));
+    row.append(project, add);
+    const children = document.createElement("div");
+    children.className = "session-list";
+    for (const session of sessions.filter((item) => item.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "session-button";
+      button.classList.toggle("active", session.id === currentSession?.id);
+      if (session.id === currentSession?.id) button.setAttribute("aria-current", "true");
+      button.dataset.sessionId = session.id;
+      button.disabled = disabled;
+      button.title = sessionTitle(session);
+      const title = document.createElement("span");
+      title.textContent = sessionTitle(session);
+      button.append(title);
+      if (session.turns.length > 0) {
+        const count = document.createElement("span");
+        count.className = "session-time";
+        count.textContent = String(session.turns.length);
+        button.append(count);
+      }
+      button.addEventListener("click", () => void selectSession(session));
+      children.append(button);
+    }
+    group.append(row, children);
+    list.append(group);
+  }
+  if (state.workspaces.length === 0) {
+    const hint = document.createElement("p");
+    hint.className = "sidebar-empty";
+    hint.textContent = t("addProjectHint");
+    list.prepend(hint);
+  }
+  element<HTMLButtonElement>("new-session").disabled = disabled;
+  element<HTMLButtonElement>("choose-workspace").disabled = disabled;
+}
+
+function renderSession(): void {
+  const timeline = element<HTMLDivElement>("timeline");
+  timeline.querySelectorAll(".turn").forEach((turn) => turn.remove());
+  commandLogs.clear();
+  lastAnswer = "";
+  for (const turn of currentSession.turns) {
+    const answer = appendTask(turn.task, turn.images);
+    answer.classList.remove("busy-answer");
+    if (turn.status === "error") {
+      answer.textContent = turn.answer;
+      answer.classList.add("error-copy");
+    } else {
+      renderMarkdown(answer, turn.answer);
+      if (turn.status === "complete") lastAnswer = turn.answer;
+    }
+    if (turn.partial || turn.status === "interrupted") {
+      const warning = document.createElement("p");
+      warning.className = "warning";
+      warning.textContent = t(turn.status === "interrupted" ? "interrupted" : "partial");
+      answer.append(warning);
+    }
+    activeAnswer = answer;
+    for (const command of turn.commands) {
+      renderCommand({ type: "start", id: command.id, command: command.command, cwd: command.cwd });
+      if (command.result) renderCommand({ type: "finish", id: command.id, result: command.result });
+      else {
+        renderCommand({ type: "output", id: command.id, stream: "stdout", text: command.stdout });
+        renderCommand({ type: "output", id: command.id, stream: "stderr", text: command.stderr });
+      }
+    }
+    activeAnswer = undefined;
+  }
+  element<HTMLDivElement>("timeline-empty").hidden = currentSession.turns.length > 0;
+  element<HTMLTextAreaElement>("task-input").value = currentSession.draft;
+  resizeTaskInput();
+  element<HTMLButtonElement>("learn-button").disabled = !lastAnswer;
+  element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace);
+  element<HTMLInputElement>("commands-enabled").checked = false;
+  activities = currentSession.activities;
+  pendingAction = undefined;
+  renderActivities();
+  renderPendingAction();
+  renderWorkspaceLabel();
+  renderPageTitle();
+  syncWorkspaceControls();
+  const lastTask = currentSession.turns.at(-1)?.task;
+  if (lastTask) void renderRelevant(lastTask);
+  else element<HTMLDivElement>("relevant-list").textContent = t("noRelevant");
+}
+
+function resizeTaskInput(): void {
+  const input = element<HTMLTextAreaElement>("task-input");
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 220)}px`;
+}
+
+function setNavigationPending(pending: boolean): void {
+  navigationPending = pending;
+  renderNavigation();
+  syncWorkspaceControls();
+  renderImages();
+}
+
+async function openSession(session: ConversationSession): Promise<void> {
+  await clearImages();
+  currentSession = session;
+  currentDirectory = ".";
+  switchPage("workspace");
+  renderSession();
+  setDrawer(undefined);
+  await renderFiles();
+  setStatus(t("ready"));
+  persistSessions();
+  element<HTMLTextAreaElement>("task-input").focus();
+}
+
+async function selectSession(session?: ConversationSession, workspace?: string, fresh = false): Promise<void> {
+  if (navigationPending || document.body.classList.contains("task-running")) return;
+  currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+  persistSessions();
+  setNavigationPending(true);
+  try {
+    const targetWorkspace = session ? session.workspace : workspace;
+    await activateSessionWorkspace(targetWorkspace);
+    const candidates = sessions.filter((item) => item.workspace === targetWorkspace).sort((a, b) => b.updatedAt - a.updatedAt);
+    const selected = session ?? (fresh ? candidates.find((item) => item.turns.length === 0 && !item.draft) : candidates[0])
+      ?? createSession(targetWorkspace);
+    await openSession(selected);
+  } catch (error) {
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  } finally {
+    setNavigationPending(false);
+  }
+}
+
+async function activateSessionWorkspace(workspace?: string): Promise<void> {
+  if (state.workspace === workspace) return;
+  try {
+    state = await bridge.activateWorkspace(workspace);
+  } catch (error) {
+    if (!workspace || !state.workspaces.includes(workspace)) throw error;
+    // History is independent of the folder, but must never inherit another project's tools.
+    state = await bridge.activateWorkspace();
+  }
+}
+
+function setDrawer(page: "files" | "activity" | undefined): void {
+  drawerPage = page;
+  element<HTMLElement>("details-drawer").hidden = page === undefined;
+  document.querySelector(".workbench")?.classList.toggle("drawer-open", page !== undefined);
+  element<HTMLElement>("drawer-files").hidden = page !== "files";
+  element<HTMLElement>("drawer-activity").hidden = page !== "activity";
+  for (const name of ["files", "activity"] as const) {
+    element<HTMLButtonElement>(`drawer-${name}-tab`).classList.toggle("active", page === name);
+    const button = element<HTMLButtonElement>(`toggle-${name}`);
+    button.classList.toggle("active", page === name);
+    button.setAttribute("aria-expanded", String(page === name));
+  }
 }
 
 async function chooseWorkspace(): Promise<void> {
+  if (navigationPending || document.body.classList.contains("task-running")) return;
+  currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+  persistSessions();
+  setNavigationPending(true);
   try {
     const selected = await bridge.chooseWorkspace();
     if (!selected) return;
     state = await bridge.state();
-    currentDirectory = ".";
-    renderWorkspaceLabel();
-    await renderFiles();
+    const session = sessions.filter((session) => session.workspace === state.workspace)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? createSession();
+    await openSession(session);
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  } finally {
+    setNavigationPending(false);
   }
 }
 
@@ -253,10 +599,12 @@ function formatBytes(bytes: number): string {
 function renderImages(): void {
   const list = element<HTMLDivElement>("image-list");
   const running = document.body.classList.contains("task-running");
-  element<HTMLButtonElement>("choose-images").disabled = running || workspaceModelSaving || !visionEnabled();
+  element<HTMLButtonElement>("choose-images").disabled = running || workspaceModelSaving || navigationPending || !visionEnabled();
+  element<HTMLButtonElement>("choose-images").title = t(visionEnabled() ? "attachImages" : "visionOnly");
   element<HTMLButtonElement>("clear-images").disabled = running || workspaceModelSaving || selectedImages.length === 0;
   element<HTMLSelectElement>("image-detail").disabled = running || workspaceModelSaving || !visionEnabled() || selectedImages.length === 0;
   list.replaceChildren();
+  element<HTMLDivElement>("image-controls").hidden = selectedImages.length === 0;
   if (!visionEnabled()) {
     list.textContent = t("visionOnly");
     list.className = "image-list muted";
@@ -312,7 +660,10 @@ async function renderFiles(): Promise<void> {
     return;
   }
   try {
+    const workspace = state.validWorkspace;
+    const directory = currentDirectory;
     const entries = await bridge.workspaceEntries(currentDirectory);
+    if (workspace !== state.validWorkspace || directory !== currentDirectory) return;
     if (currentDirectory !== ".") {
       const up = fileRow("..", "directory");
       up.addEventListener("click", () => {
@@ -385,7 +736,7 @@ function appendTask(task: string, images: SelectedImage[]): HTMLElement {
 }
 
 async function runTask(): Promise<void> {
-  if (document.body.classList.contains("task-running") || workspaceModelSaving) return;
+  if (document.body.classList.contains("task-running") || workspaceModelSaving || navigationPending) return;
   const input = element<HTMLTextAreaElement>("task-input");
   const taskImages = [...selectedImages];
   const task = input.value.trim() || (taskImages.length > 0 ? t("defaultVisionTask") : "");
@@ -416,15 +767,25 @@ async function runTask(): Promise<void> {
   }
 
   input.value = "";
+  resizeTaskInput();
+  currentSession.draft = "";
+  currentSession.updatedAt = Date.now();
+  if (!currentSession.title) currentSession.title = task.replace(/\s+/gu, " ").slice(0, 48);
+  activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [] };
+  currentSession.turns.push(activeTurn);
   activeAnswer = appendTask(task, taskImages);
   activeAnswerText = "";
   lastAnswer = "";
   activities = [];
+  currentSession.activities = activities;
   commandLogs.clear();
   pendingAction = undefined;
   renderPendingAction();
   renderActivities();
   setRunning(true);
+  renderPageTitle();
+  persistSessions();
+  element<HTMLDetailsElement>("task-options").open = false;
   void renderRelevant(task);
   setStatus(t("working"), "busy");
   try {
@@ -441,6 +802,9 @@ async function runTask(): Promise<void> {
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
     });
     activeAnswerText = result.content;
+    activeTurn.answer = result.content;
+    activeTurn.status = "complete";
+    activeTurn.partial = result.partial;
     lastAnswer = result.content;
     activeAnswer.classList.remove("busy-answer");
     renderMarkdown(activeAnswer, result.content);
@@ -456,14 +820,18 @@ async function runTask(): Promise<void> {
     activeAnswer.classList.remove("busy-answer");
     activeAnswer.classList.add("error-copy");
     activeAnswer.textContent = `${t("taskError")}: ${errorText(error)}`;
+    activeTurn.answer = activeAnswer.textContent;
+    activeTurn.status = "error";
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
     pendingAction = undefined;
     renderPendingAction();
     activeAnswer = undefined;
+    activeTurn = undefined;
     selectedImages = [];
     void bridge.clearImages().catch(() => undefined);
     setRunning(false);
+    persistSessions();
   }
 }
 
@@ -474,9 +842,23 @@ function setRunning(running: boolean): void {
   element<HTMLButtonElement>("stop-button").disabled = false;
   syncWorkspaceControls();
   renderImages();
+  renderNavigation();
 }
 
 function renderCommand(event: ShellCommandEvent): void {
+  if (activeTurn) {
+    if (event.type === "start") activeTurn.commands.push({ id: event.id, command: event.command, cwd: event.cwd, stdout: "", stderr: "" });
+    else {
+      const command = activeTurn.commands.find((item) => item.id === event.id);
+      if (command && event.type === "output") command[event.stream] = `${command[event.stream]}${event.text}`.slice(-65_536);
+      if (command && event.type === "finish") {
+        command.result = event.result;
+        command.stdout = "";
+        command.stderr = "";
+      }
+    }
+    scheduleSessionSave();
+  }
   if (event.type === "start") {
     if (!activeAnswer) return;
     const details = document.createElement("details");
@@ -490,7 +872,7 @@ function renderCommand(event: ShellCommandEvent): void {
     details.append(summary, stdout, stderr);
     activeAnswer.parentElement?.append(details);
     commandLogs.set(event.id, { summary, stdout, stderr, command: event.command, cwd: event.cwd });
-    setStatus(t("working"), "busy");
+    if (activeTurn) setStatus(t("working"), "busy");
   } else {
     const log = commandLogs.get(event.id);
     if (!log) return;
@@ -522,7 +904,9 @@ async function renderRelevant(task: string): Promise<void> {
   const panel = element<HTMLDivElement>("relevant-list");
   panel.replaceChildren();
   try {
+    const sessionId = currentSession.id;
     const matches = await bridge.relevantCards(task);
+    if (sessionId !== currentSession.id) return;
     if (matches.length === 0) {
       panel.textContent = t("noRelevant");
       panel.className = "compact-list empty";
@@ -565,6 +949,7 @@ function renderActivities(): void {
 function renderPendingAction(): void {
   const empty = element<HTMLParagraphElement>("action-empty");
   const content = element<HTMLDivElement>("action-content");
+  element<HTMLButtonElement>("toggle-activity").classList.toggle("has-pending", Boolean(pendingAction));
   if (!pendingAction) {
     empty.hidden = false;
     empty.textContent = t("noAction");
@@ -686,14 +1071,17 @@ function fillWorkspaceModelSelection(): void {
 
 function syncWorkspaceControls(): void {
   const running = document.body.classList.contains("task-running");
-  element<HTMLButtonElement>("send-button").disabled = running || workspaceModelSaving;
-  element<HTMLSelectElement>("task-model").disabled = running || workspaceModelSaving;
-  element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving;
+  element<HTMLButtonElement>("send-button").disabled = running || workspaceModelSaving || navigationPending;
+  element<HTMLSelectElement>("task-model").disabled = running || workspaceModelSaving || navigationPending;
+  element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving || navigationPending;
   const local = element<HTMLInputElement>("local-enabled");
-  local.disabled = running;
+  local.disabled = running || navigationPending || !state.validWorkspace;
   const commands = element<HTMLInputElement>("commands-enabled");
-  commands.disabled = running || !local.checked;
+  commands.disabled = running || navigationPending || !local.checked;
   if (!local.checked) commands.checked = false;
+  element<HTMLSelectElement>("web-mode").disabled = running;
+  element<HTMLInputElement>("toa-enabled").disabled = running;
+  element<HTMLSelectElement>("toa-workers").disabled = running || !element<HTMLInputElement>("toa-enabled").checked;
 }
 
 async function saveWorkspaceModelSelection(): Promise<void> {
@@ -898,6 +1286,21 @@ function registerEvents(): void {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
   element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
+  element<HTMLButtonElement>("new-session").addEventListener("click", () => void selectSession(undefined, currentSession.workspace, true));
+  element<HTMLButtonElement>("sidebar-toggle").addEventListener("click", () => {
+    const collapsed = document.body.classList.toggle("sidebar-collapsed");
+    element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
+    persistSessions();
+  });
+  for (const page of ["files", "activity"] as const) {
+    element<HTMLButtonElement>(`toggle-${page}`).addEventListener("click", () => setDrawer(drawerPage === page ? undefined : page));
+    element<HTMLButtonElement>(`drawer-${page}-tab`).addEventListener("click", () => setDrawer(page));
+  }
+  element<HTMLButtonElement>("close-drawer").addEventListener("click", () => {
+    const previous = drawerPage;
+    setDrawer(undefined);
+    if (previous) element<HTMLButtonElement>(`toggle-${previous}`).focus();
+  });
   element<HTMLButtonElement>("refresh-files").addEventListener("click", () => void renderFiles());
   element<HTMLButtonElement>("choose-images").addEventListener("click", () => void chooseImages());
   element<HTMLButtonElement>("clear-images").addEventListener("click", () => void clearImages());
@@ -907,10 +1310,40 @@ function registerEvents(): void {
   element<HTMLButtonElement>("stop-button").addEventListener("click", () => void stopTask());
   element<HTMLInputElement>("local-enabled").addEventListener("change", syncWorkspaceControls);
   element<HTMLTextAreaElement>("task-input").addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (!event.isComposing && (event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
       void runTask();
     }
+  });
+  element<HTMLTextAreaElement>("task-input").addEventListener("input", (event) => {
+    const input = event.currentTarget as HTMLTextAreaElement;
+    currentSession.draft = input.value;
+    resizeTaskInput();
+    scheduleSessionSave();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
+      event.preventDefault();
+      void selectSession(undefined, currentSession.workspace, true);
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+      event.preventDefault();
+      element<HTMLButtonElement>("sidebar-toggle").click();
+    } else if (event.key === "Escape") {
+      element<HTMLDetailsElement>("task-options").open = false;
+      const previous = drawerPage;
+      setDrawer(undefined);
+      if (previous) element<HTMLButtonElement>(`toggle-${previous}`).focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target instanceof Node && !element<HTMLDetailsElement>("task-options").contains(event.target)) {
+      element<HTMLDetailsElement>("task-options").open = false;
+    }
+  });
+  window.addEventListener("beforeunload", () => {
+    currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+    persistSessions();
   });
   element<HTMLInputElement>("toa-enabled").addEventListener("change", (event) => {
     element<HTMLSelectElement>("toa-workers").disabled = !(event.currentTarget as HTMLInputElement).checked;
@@ -926,33 +1359,47 @@ function registerEvents(): void {
   bridge.onTaskEvent((event) => {
     if (event.type === "content" && activeAnswer) {
       activeAnswerText += event.content;
+      if (activeTurn) activeTurn.answer = activeAnswerText;
       activeAnswer.classList.remove("busy-answer");
       renderMarkdown(activeAnswer, activeAnswerText);
       element<HTMLDivElement>("timeline").scrollTop = element<HTMLDivElement>("timeline").scrollHeight;
+      scheduleSessionSave();
     } else if (event.type === "activity") {
       activities.push(event.activity);
       renderActivities();
+      scheduleSessionSave();
     } else if (event.type === "command") {
       renderCommand(event.event);
     } else if (event.type === "local-action") {
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();
+      switchPage("workspace");
+      setDrawer("activity");
       setStatus(t("waiting"), "busy");
     }
   });
 }
 
 async function initialize(): Promise<void> {
+  document.body.inert = true;
   state = await bridge.state();
+  const activeId = loadSessionHistory();
+  currentSession = sessions.find((session) => session.id === activeId && (!session.workspace || state.workspaces.includes(session.workspace)))
+    ?? sessions.find((session) => session.workspace === state.workspace) ?? createSession();
+  await activateSessionWorkspace(currentSession.workspace);
   registerEvents();
   applyLanguage();
   fillSettings();
   renderMemory();
+  renderSession();
+  persistSessions();
   await renderFiles();
   document.body.dataset.ready = "true";
+  document.body.inert = false;
 }
 
 void initialize().catch((error: unknown) => {
+  document.body.inert = false;
   document.body.dataset.startupError = "true";
   document.body.textContent = `Ya failed to start: ${errorText(error)}`;
 });

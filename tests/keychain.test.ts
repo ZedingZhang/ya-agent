@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   KEYCHAIN_ACCOUNT,
   KEYCHAIN_SERVICE,
@@ -32,7 +32,14 @@ describe("API key storage", () => {
   });
 
   it("returns undefined when neither the environment nor Keychain is available", () => {
-    expect(loadApiKey()).toBeUndefined();
+    // A developer's Mac may already contain a real key. Make Keychain
+    // unavailable explicitly instead of reading the machine's credentials.
+    vi.stubGlobal("process", { ...process, platform: "linux" });
+    try {
+      expect(loadApiKey()).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("recognizes Keychain only on macOS with the security executable", () => {

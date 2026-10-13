@@ -32,10 +32,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke:gui": "npm run build && electron dist/typescript/gui/main.js --smoke-test",
+    "smoke:gui": "npm run build && node dist/typescript/scripts/run-gui.js --smoke-test",
     "check": "npm run typecheck && npm test && npm run build",
     "start": "npm run build && node dist/typescript/cli.js",
-    "gui": "npm run build && electron dist/typescript/gui/main.js",
+    "gui": "npm run build && node dist/typescript/scripts/run-gui.js",
     "package:cli": "npm run build && pkg --compress GZip --output release/ya dist/typescript/cli.js",
     "package:gui": "npm run build && electron-builder --publish never"
   },

@@ -9,96 +9,107 @@
     <script src="renderer.js" defer></script>
   </head>
   <body>
-    <header class="app-header">
-      <div class="brand" aria-label="Ya"><span class="brand-seed">Y</span><span>a</span></div>
-      <nav class="tabs" role="tablist">
-        <button id="workspace-tab" class="tab active" type="button" role="tab" aria-controls="page-workspace" aria-selected="true" data-page="workspace" data-i18n="workspace">Workspace</button>
-        <button id="memory-tab" class="tab" type="button" role="tab" aria-controls="page-memory" aria-selected="false" data-page="memory" data-i18n="memory">Memory</button>
-        <button id="settings-tab" class="tab" type="button" role="tab" aria-controls="page-settings" aria-selected="false" data-page="settings" data-i18n="settings">Settings</button>
-      </nav>
-      <div id="app-status" class="app-status">Ready</div>
-    </header>
-
-    <main>
-      <section id="page-workspace" class="page active" role="tabpanel" aria-labelledby="workspace-tab">
-        <div class="workspace-ribbon">
-          <label class="check"><input id="local-enabled" type="checkbox" checked><span data-i18n="local">Enable local tools</span></label>
-          <button id="refresh-files" class="secondary" type="button" data-i18n="refresh">Refresh</button>
-          <button id="choose-workspace" class="secondary" type="button" data-i18n="choose">Choose…</button>
-          <div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div>
+    <aside class="app-sidebar" aria-label="Navigation">
+      <div class="sidebar-header">
+        <div class="brand" aria-label="Ya"><span class="brand-mark">Y</span><span class="brand-name">Ya<span class="brand-caption">DESKTOP</span></span></div>
+        <button id="sidebar-toggle" class="icon-button" type="button" aria-controls="app-navigation" aria-expanded="true" data-i18n-label="toggleSidebar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+        </button>
+      </div>
+      <nav id="app-navigation" class="sidebar-navigation">
+        <button id="new-session" class="new-session nav-button" type="button" aria-keyshortcuts="Control+N Meta+N">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span class="nav-label" data-i18n="newSession">New session</span><span class="shortcut">⌘ / Ctrl N</span>
+        </button>
+        <button id="workspace-tab" class="nav-button tab active" type="button" data-page="workspace" aria-controls="page-workspace" aria-current="page">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z"/></svg>
+          <span class="nav-label" data-i18n="conversations">Conversations</span>
+        </button>
+        <div class="sidebar-scroll">
+          <div class="sidebar-section-heading"><span data-i18n="projects">Projects</span>
+            <button id="choose-workspace" class="icon-button" type="button" data-i18n-label="addProject">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+          <div id="project-list" class="project-list"></div>
         </div>
+        <div class="sidebar-footer">
+          <button id="memory-tab" class="nav-button tab" type="button" data-page="memory" aria-controls="page-memory">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5a3 3 0 0 0-5 2 4 4 0 0 0-1 7 4 4 0 0 0 6 5M15 4.5a3 3 0 0 1 5 2 4 4 0 0 1 1 7 4 4 0 0 1-6 5M9 4v16M15 4v16M9 8H6M15 15h3"/></svg>
+            <span class="nav-label" data-i18n="memory">Memory</span>
+          </button>
+          <button id="settings-tab" class="nav-button tab" type="button" data-page="settings" aria-controls="page-settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.1-2 .9-2-.6-2 3.4 1.5 1.6-.2 2.2-1.3 1.6 2 3.4 2-.5 2 .9.6 2.1h4l.6-2.1 2-.9 2 .5 2-3.4-1.3-1.6-.2-2.2 1.5-1.6-2-3.4-2 .6-2-.9-.6-2.1Z"/><circle cx="11.5" cy="11.6" r="3"/></svg>
+            <span class="nav-label" data-i18n="settings">Settings</span><span class="sidebar-version">Ya</span>
+          </button>
+        </div>
+      </nav>
+    </aside>
 
+    <main class="app-main">
+      <header class="app-header">
+        <div class="header-titles"><h1 id="page-title">New session</h1><div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div></div>
+        <div id="app-status" class="app-status" role="status">Ready</div>
+        <div id="workspace-actions" class="header-actions">
+          <button id="toggle-files" class="icon-button" type="button" aria-controls="details-drawer" aria-expanded="false" data-i18n-label="files">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
+          </button>
+          <button id="toggle-activity" class="icon-button" type="button" aria-controls="details-drawer" aria-expanded="false" data-i18n-label="activity">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <section id="page-workspace" class="page active" aria-labelledby="workspace-tab">
         <div class="workbench">
-          <aside class="panel files-panel">
-            <div class="panel-heading"><span data-i18n="files">Files</span><span id="file-location" class="muted">.</span></div>
-            <div id="file-list" class="file-list"></div>
-          </aside>
-
           <section class="center-panel">
-            <div id="timeline" class="timeline">
-              <div id="timeline-empty" class="timeline-empty" data-i18n="noTasks">Ask a question to begin.</div>
+            <div id="timeline" class="timeline" role="log" aria-label="Conversation">
+              <div id="timeline-empty" class="timeline-empty"><div class="welcome-mark" aria-hidden="true">Y</div><h2 data-i18n="welcome">What would you like to work on?</h2><p data-i18n="welcomeHint">Start a conversation, or choose a project to work with local files.</p></div>
             </div>
-            <div class="composer">
-              <label for="task-input" data-i18n="task">Task</label>
-              <textarea id="task-input" rows="4" data-i18n-placeholder="taskPlaceholder" placeholder="Ask Ya a question or describe a workspace task…"></textarea>
-              <div class="image-controls">
-                <button id="choose-images" class="secondary" type="button" data-i18n="attachImages">Attach images…</button>
-                <label><span data-i18n="imageDetail">Image detail</span>
-                  <select id="image-detail"><option value="auto" selected>auto</option><option value="low">low</option><option value="high">high</option><option value="original">original</option></select>
-                </label>
-                <div id="image-list" class="image-list muted" data-i18n="visionOnly">Image input requires the DeepSeek-V4.1-Flash model.</div>
-                <button id="clear-images" class="secondary" type="button" disabled data-i18n="clearImages">Clear</button>
+            <div class="composer-area">
+              <div class="composer">
+                <label for="task-input" class="sr-only" data-i18n="task">Task</label>
+                <textarea id="task-input" rows="3" data-i18n-placeholder="taskPlaceholder" placeholder="Ask Ya a question or describe a workspace task…"></textarea>
+                <div class="image-controls" id="image-controls" hidden><div id="image-list" class="image-list muted"></div><button id="clear-images" class="secondary" type="button" disabled data-i18n="clearImages">Clear</button></div>
+                <div class="composer-toolbar">
+                  <button id="choose-images" class="icon-button" type="button" data-i18n-label="attachImages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6"/></svg></button>
+                  <label class="composer-select"><span class="sr-only" data-i18n="model">Model</span><select id="task-model"><option value="deepseek-flash">deepseek-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option></select></label>
+                  <label class="composer-select"><span class="sr-only" data-i18n="reasoning">Reasoning effort</span><select id="task-reasoning"><option value="high">high</option><option value="max">max</option></select></label>
+                  <details id="task-options" class="task-options">
+                    <summary class="icon-button" data-i18n-label="taskOptions"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m4 0h5M4 17h3m4 0h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></summary>
+                    <div class="task-controls">
+                      <h3 data-i18n="taskOptions">Task options</h3>
+                      <label class="check"><input id="local-enabled" type="checkbox" checked><span data-i18n="local">Enable local tools</span></label>
+                      <label class="check"><input id="commands-enabled" type="checkbox"><span data-i18n="commands">Allow command execution</span></label>
+                      <label><span data-i18n="web">Web</span><select id="web-mode"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
+                      <label class="check"><input id="toa-enabled" type="checkbox"><span data-i18n="toa">Tree of Agents</span></label>
+                      <label><span data-i18n="workers">Workers</span><select id="toa-workers" disabled><option value="1">1</option><option value="2" selected>2</option></select></label>
+                      <label><span data-i18n="imageDetail">Image detail</span><select id="image-detail"><option value="auto" selected>auto</option><option value="low">low</option><option value="high">high</option><option value="original">original</option></select></label>
+                    </div>
+                  </details>
+                  <span class="control-spacer"></span>
+                  <button id="learn-button" class="icon-button" type="button" disabled data-i18n-label="learn"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M5.6 18.4 18.4 5.6"/></svg></button>
+                  <button id="stop-button" class="danger" type="button" hidden data-i18n="stop">Stop</button>
+                  <button id="send-button" class="primary send-button" type="button" data-i18n-label="send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v13"/></svg></button>
+                </div>
               </div>
-              <div class="task-controls">
-                <label><span data-i18n="model">Model</span>
-                  <select id="task-model"><option value="deepseek-flash">deepseek-flash</option><option value="deepseek-v4-pro">deepseek-v4-pro</option></select>
-                </label>
-                <label><span data-i18n="reasoning">Reasoning effort</span>
-                  <select id="task-reasoning"><option value="high">high</option><option value="max">max</option></select>
-                </label>
-                <label><span data-i18n="web">Web</span>
-                  <select id="web-mode"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select>
-                </label>
-                <label class="check"><input id="toa-enabled" type="checkbox"><span data-i18n="toa">Tree of Agents</span></label>
-                <label class="check"><input id="commands-enabled" type="checkbox"><span data-i18n="commands">Allow command execution</span></label>
-                <label><span data-i18n="workers">Workers</span>
-                  <select id="toa-workers" disabled><option value="1">1</option><option value="2" selected>2</option></select>
-                </label>
-                <span class="control-spacer"></span>
-                <button id="learn-button" class="secondary" type="button" disabled data-i18n="learn">Learn from this answer</button>
-                <button id="stop-button" class="danger" type="button" hidden data-i18n="stop">Stop</button>
-                <button id="send-button" class="primary" type="button" data-i18n="send">Send</button>
-              </div>
+              <div class="composer-hint"><span id="project-hint" data-i18n="noProject">No project selected</span><span data-i18n="sendShortcut">Ctrl / ⌘ Enter to send</span></div>
             </div>
           </section>
 
-          <aside class="context-panel">
-            <section class="panel context-section">
-              <h2 data-i18n="relevant">Relevant memory</h2>
-              <div id="relevant-list" class="compact-list empty" data-i18n="noRelevant">No approved memory meets the relevance threshold.</div>
-            </section>
-            <section class="panel context-section grow">
-              <h2 data-i18n="activity">Activity</h2>
-              <div id="activity-list" class="activity-list"><p class="empty" data-i18n="noActivity">No local activity for this task.</p></div>
-            </section>
-            <section class="panel context-section action-panel">
-              <h2 data-i18n="pendingAction">Pending action</h2>
-              <p id="action-empty" class="empty" data-i18n="noAction">No action is waiting for approval.</p>
-              <div id="action-content" hidden>
-                <div id="action-summary" class="action-summary"></div>
-                <div id="action-paths" class="action-paths"></div>
-                <pre id="action-diff" class="action-diff"></pre>
-                <div class="button-row">
-                  <button id="action-deny" class="secondary" type="button" data-i18n="deny">Deny</button>
-                  <button id="action-approve" class="primary" type="button" data-i18n="approve">Approve</button>
-                </div>
-              </div>
-            </section>
+          <aside id="details-drawer" class="details-drawer" hidden aria-label="Workspace details">
+            <div class="drawer-heading"><div class="drawer-tabs"><button id="drawer-files-tab" class="drawer-tab active" type="button" data-i18n="files">Files</button><button id="drawer-activity-tab" class="drawer-tab" type="button" data-i18n="activity">Activity</button></div><button id="close-drawer" class="icon-button" type="button" data-i18n-label="closePanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
+            <section id="drawer-files" class="files-panel"><div class="panel-heading"><span id="file-location" class="muted">.</span><button id="refresh-files" class="icon-button" type="button" data-i18n-label="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div><div id="file-list" class="file-list"></div></section>
+            <div id="drawer-activity" class="context-panel" hidden>
+              <section class="context-section action-panel" id="approval-panel"><h2 data-i18n="pendingAction">Pending action</h2><p id="action-empty" class="empty" data-i18n="noAction">No action is waiting for approval.</p><div id="action-content" hidden><div id="action-summary" class="action-summary"></div><div id="action-paths" class="action-paths"></div><pre id="action-diff" class="action-diff"></pre><div class="button-row"><button id="action-deny" class="secondary" type="button" data-i18n="deny">Deny</button><button id="action-approve" class="primary" type="button" data-i18n="approve">Approve</button></div></div></section>
+              <section class="context-section grow"><h2 data-i18n="activity">Activity</h2><div id="activity-list" class="activity-list"><p class="empty" data-i18n="noActivity">No local activity for this task.</p></div></section>
+              <section class="context-section"><h2 data-i18n="relevant">Relevant memory</h2><div id="relevant-list" class="compact-list empty" data-i18n="noRelevant">No approved memory meets the relevance threshold.</div></section>
+            </div>
           </aside>
         </div>
       </section>
 
-      <section id="page-memory" class="page" role="tabpanel" aria-labelledby="memory-tab">
+      <section id="page-memory" class="page" aria-labelledby="memory-tab">
         <div class="page-column">
           <section class="panel form-card">
             <h1 data-i18n="createCandidate">Create candidate</h1>
@@ -126,7 +137,7 @@
         </div>
       </section>
 
-      <section id="page-settings" class="page" role="tabpanel" aria-labelledby="settings-tab">
+      <section id="page-settings" class="page" aria-labelledby="settings-tab">
         <div class="settings-layout">
           <section class="panel form-card">
             <h1 data-i18n="settings">Settings</h1>

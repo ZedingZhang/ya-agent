@@ -11,7 +11,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
-  app: { whenReady: () => Promise.resolve(), on: vi.fn(), exit: vi.fn() },
+  app: { whenReady: () => Promise.resolve(), on: vi.fn(), exit: vi.fn(), setName: vi.fn() },
+  Menu: { buildFromTemplate: vi.fn((template) => template), setApplicationMenu: vi.fn() },
   BrowserWindow: class extends EventEmitter {
     webContents = Object.assign(new EventEmitter(), {
       isDestroyed: vi.fn(() => false),
@@ -35,6 +36,12 @@ vi.mock("../src/gui/controller", () => ({
   LANGUAGES: ["en"],
   GuiController: class {
     config = { model: "deepseek-v4-pro" };
+    workspaces = [];
+    auditLogs() { return []; }
+    auditLogTotalBytes() { return 0; }
+    validWorkspace() { return undefined; }
+    apiKey() { return "test-key"; }
+    cards() { return []; }
     run = mocks.run;
   },
 }));
@@ -86,7 +93,7 @@ describe("GUI pending action lifecycle", () => {
     await expect(nextTask).resolves.toBe("done");
   });
 
-  it.each(["destroyed", "render-process-gone"])("rejects pending actions on %s and releases the task lock", async (name) => {
+  it.each(["destroyed", "render-process-gone", "did-start-loading"])("rejects pending actions on %s and releases the task lock", async (name) => {
     const task = start();
     const rejection = expect(task).rejects.toThrow(/renderer/);
     sender.emit(name);
@@ -141,6 +148,63 @@ describe("GUI pending action lifecycle", () => {
     expect(mocks.run.mock.calls.at(-1)?.[1].signal.aborted).toBe(false);
     respond(true);
     await task;
+  });
+
+  it("waits for a task to settle after reload and ignores its late events and approval requests", async () => {
+    let finish!: () => void;
+    let callbacks: any;
+    mocks.run.mockImplementation((_options, value) => new Promise((resolveTask) => {
+      callbacks = value;
+      finish = () => resolveTask("cancelled");
+    }));
+    const task = start();
+    sender.emit("did-start-loading");
+    expect(callbacks.signal.aborted).toBe(true);
+    let stateReady = false;
+    const state = Promise.resolve(mocks.handlers.get("state:get")!(event)).then((value) => {
+      stateReady = true;
+      return value;
+    });
+    await Promise.resolve();
+    expect(stateReady).toBe(false);
+    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    const sent = sender.send.mock.calls.length;
+    callbacks.onContent("late reply");
+    callbacks.onLocalActivity({ operation: "write", paths: ["old-task.txt"], status: "success" });
+    callbacks.onCommandEvent({ type: "start", id: "late", command: "npm test", cwd: "." });
+    await expect(callbacks.onLocalAction({ operation: "write", paths: ["old-task.txt"], summary: "Late write" })).rejects.toThrow(/reload/);
+    expect(sender.send.mock.calls.length).toBe(sent);
+    expect(vi.getTimerCount()).toBe(0);
+    finish();
+    await expect(task).resolves.toBe("cancelled");
+    await expect(state).resolves.toMatchObject({ workspaces: [], hasApiKey: true });
+    expect(stateReady).toBe(true);
+    callbacks.onLocalActivity({ operation: "write", paths: ["old-task-after-exit.txt"], status: "success" });
+    expect(sender.send.mock.calls.length).toBe(sent);
+    mocks.run.mockImplementation(async (_options, value) => {
+      await value.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });
+      return "done";
+    });
+    const nextTask = start();
+    const nextSent = sender.send.mock.calls.length;
+    callbacks.onContent("late reply after the next task started");
+    expect(sender.send.mock.calls.length).toBe(nextSent);
+    respond(true);
+    await expect(nextTask).resolves.toBe("done");
+  });
+
+  it("rejects project switching and directory picking while an approval is pending", async () => {
+    const task = start();
+    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    await expect(mocks.handlers.get("workspace:choose")!(event)).rejects.toThrow(/running/);
+    respond(true);
+    await expect(task).resolves.toBe("done");
+  });
+
+  it("rejects untrusted project activation before changing workspace", () => {
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    expect(() => mocks.handlers.get("workspace:activate")!(untrusted)).toThrow("Untrusted");
+    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid project");
   });
 
   it("validates execution opt-in at the IPC boundary", async () => {

@@ -20,6 +20,7 @@ export interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
+  workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
   config: SerializedConfig;
@@ -72,6 +73,7 @@ export type TaskEvent =
 export interface YaBridge {
   state(): Promise<AppState>;
   chooseWorkspace(): Promise<string | undefined>;
+  activateWorkspace(workspace?: string): Promise<AppState>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
