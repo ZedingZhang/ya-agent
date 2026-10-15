@@ -1,6 +1,6 @@
 import { basename, join, resolve } from "node:path";
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelConfig, loadConfig } from "../src/config";
 import {
   GuiController,
@@ -11,7 +11,7 @@ import {
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
-import type { UserImageContentPart } from "../src/types";
+import type { ConversationMessage, UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
 describe("GUI controller", () => {
@@ -175,6 +175,25 @@ describe("GUI controller", () => {
     controller.saveModelConfig(new ModelConfig({ model: "deepseek-flash" }));
     await controller.run({ task: "Explain the image", images });
     expect(calls[0]![3]!.images).toEqual(images);
+  });
+
+  it("forwards the original request as history after configuring a missing API key", async () => {
+    const calls: Parameters<TaskRunner>[] = [];
+    const controller = new GuiController(async (...arguments_) => {
+      calls.push(arguments_);
+      return { content: "Creating ya.md", mode: "single", usage: {} };
+    });
+    const key = vi.spyOn(controller, "apiKey").mockReturnValue(undefined);
+    await expect(controller.run({ task: "Create ya.md" })).rejects.toThrow("No DeepSeek API key");
+    expect(calls).toHaveLength(0);
+    key.mockRestore();
+    controller.setSessionApiKey("test-key");
+    const history: ConversationMessage[] = [{ role: "user", content: "Create ya.md" }];
+    await controller.run({ task: "继续", history });
+    expect(calls[0]?.[1]).toBe("继续");
+    expect(calls[0]?.[3]?.history).toEqual(history);
+    await controller.run({ task: "New conversation" });
+    expect(calls[1]?.[3]?.history).toBeUndefined();
   });
 
   it("rejects local plus ToA and missing local workspaces", async () => {
