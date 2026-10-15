@@ -39,6 +39,7 @@ import type {
   SelectedImage,
   SettingsUpdate,
   TaskEvent,
+  TaskTransportEvent,
   WorkspaceModelSelection,
 } from "./shared";
 
@@ -325,6 +326,13 @@ function registerIpc(): void {
       taskRunning = false;
       for (const id of options.imageIds) selectedImages.delete(id);
     }
+  });
+
+  ipcMain.handle("task:flush", (event, id: unknown) => {
+    assertTrustedSender(event);
+    if (typeof id !== "string" || id.length === 0 || id.length > 128) throw new Error("Invalid task flush ID.");
+    const marker: TaskTransportEvent = { type: "flush", id };
+    event.sender.send("task:event", marker);
   });
 
   ipcMain.handle("task:cancel", (event) => {

@@ -150,6 +150,27 @@ describe("GUI pending action lifecycle", () => {
     await task;
   });
 
+  it("places a flush marker after the task's final file-change and activity events", async () => {
+    mocks.run.mockImplementation(async (_options, callbacks) => {
+      callbacks.onFileChange({ id: "change", path: "notes.txt", operation: "create", additions: 1, deletions: 0, hunks: [], truncated: false });
+      callbacks.onLocalActivity({ operation: "write", paths: ["notes.txt"], status: "success" });
+      return "done";
+    });
+    await start();
+    await mocks.handlers.get("task:flush")!(event, "flush-id");
+    expect(sender.send.mock.calls.map((call: any[]) => call[1].type)).toEqual(["file-change", "activity", "flush"]);
+    expect(sender.send).toHaveBeenLastCalledWith("task:event", { type: "flush", id: "flush-id" });
+  });
+
+  it("rejects untrusted or invalid task flush requests", () => {
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    expect(() => mocks.handlers.get("task:flush")!(untrusted, "flush-id")).toThrow("Untrusted");
+    for (const id of [undefined, 123, "", "x".repeat(129)]) {
+      expect(() => mocks.handlers.get("task:flush")!(event, id)).toThrow("Invalid task flush ID");
+    }
+    expect(sender.send).not.toHaveBeenCalled();
+  });
+
   it("waits for a task to settle after reload and ignores its late events and approval requests", async () => {
     let finish!: () => void;
     let callbacks: any;

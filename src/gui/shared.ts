@@ -72,6 +72,9 @@ export type TaskEvent =
   | { type: "file-change"; change: FileChange }
   | { type: "local-action"; id: string; action: LocalAction };
 
+/** Private transport marker; never forwarded to the renderer's task event listener. */
+export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };
+
 export interface YaBridge {
   state(): Promise<AppState>;
   chooseWorkspace(): Promise<string | undefined>;
