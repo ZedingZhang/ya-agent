@@ -25,6 +25,7 @@ import { shouldUseWeb, type RunResult } from "../orchestrator";
 import { runTask, type RunTaskOptions } from "../service";
 import type { UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
+import type { FileChange } from "../file-diff";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -53,6 +54,7 @@ export interface GuiRunCallbacks {
   onLocalAction?: LocalConfirmation;
   onLocalActivity?: (activity: LocalActivity) => void;
   onCommandEvent?: (event: CommandEvent) => void;
+  onFileChange?: (change: FileChange) => void;
   signal?: AbortSignal;
 }
 
@@ -214,7 +216,8 @@ export class GuiController {
         workspace,
         callbacks.onLocalAction ?? (() => false),
         callbacks.onLocalActivity,
-        { commandsEnabled: options.exec, signal: callbacks.signal, onCommandEvent: callbacks.onCommandEvent },
+        { commandsEnabled: options.exec, signal: callbacks.signal, onCommandEvent: callbacks.onCommandEvent,
+          onFileChange: callbacks.onFileChange },
       );
     }
     return this.taskRunner(apiKey, options.task, this.config, {

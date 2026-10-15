@@ -34,6 +34,7 @@ import { createTwoFilesPatch } from "diff";
 import { dataHome } from "./config";
 import { abortable } from "./cancellation";
 import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
+import { createFileChange, type FileChange } from "./file-diff";
 import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
@@ -64,6 +65,7 @@ export interface LocalWorkspaceOptions {
   commandsEnabled?: boolean;
   signal?: AbortSignal;
   onCommandEvent?: (event: CommandEvent) => void;
+  onFileChange?: (change: FileChange) => void;
 }
 
 export const LOCAL_RUN_TOOL: ToolDefinition = {
@@ -291,6 +293,16 @@ export class LocalWorkspace {
     }
   }
 
+  private fileChanged(path: string, before: string | undefined, after: string, operation: "write" | "edit"): void {
+    if (!this.options.onFileChange || this.isSensitive(path) || after.includes("\0")
+      || Buffer.from(after, "utf8").toString("utf8") !== after) return;
+    try {
+      this.options.onFileChange(createFileChange(this.relativePath(path), before, after, operation));
+    } catch {
+      // A failed preview or presentation observer must not turn a committed write into an error.
+    }
+  }
+
   private resolveInput(value: unknown): string {
     this.options.signal?.throwIfAborted();
     if (typeof value !== "string" || !value.trim()) throw new Error("A non-empty path is required.");
@@ -507,7 +519,12 @@ export class LocalWorkspace {
       if (!(await this.confirmed(action))) {
         return JSON.stringify({ status: "denied", operation: "write", path: this.relativePath(path), reason: "User declined this action." });
       }
+      if (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path
+        || (existsSync(path) ? this.readText(path, true) : undefined) !== previous) {
+        throw new Error("File changed during approval. Read again before writing.");
+      }
       writeFileSync(path, content, "utf8");
+      this.fileChanged(path, previous, content, "write");
       this.audit("write", [path], "success");
       this.activity("write", [path], "success");
       return JSON.stringify({ status: "ok", operation: "write", path: this.relativePath(path) });
@@ -580,6 +597,7 @@ export class LocalWorkspace {
         if (descriptor !== undefined) closeSync(descriptor);
         if (existsSync(temporary)) unlinkSync(temporary);
       }
+      this.fileChanged(path, previous, content, "edit");
       this.audit("edit", [path], "success", undefined, { replacements: count });
       this.activity("edit", [path], "success");
       return JSON.stringify({ status: "ok", operation: "edit", path: this.relativePath(path), applied_edits: count, revision: textRevision(content) });

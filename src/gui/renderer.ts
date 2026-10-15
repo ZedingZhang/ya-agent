@@ -54,10 +54,13 @@ interface LocalActivity {
   status: string;
 }
 
+type FileChange = import("../file-diff").FileChange;
+
 type TaskEvent =
   | { type: "content"; content: string }
   | { type: "activity"; activity: LocalActivity }
   | { type: "command"; event: ShellCommandEvent }
+  | { type: "file-change"; change: FileChange }
   | { type: "local-action"; id: string; action: LocalAction };
 
 type ShellCommandEvent =
@@ -111,6 +114,12 @@ const TEXT = {
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Session history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", choose: "Choose…", refresh: "Refresh",
+    changes: "Changes", noChanges: "File changes made by Ya will appear here after approval.",
+    changesSummary: "{files} files · {changes} changes", createdFile: "Created", editedFile: "Edited", replacedFile: "Replaced",
+    noTextChanges: "No text changes.", emptyFileCreated: "Created an empty file.",
+    diffTruncated: "Preview shortened for this large change. Counts cover the complete change.",
+    diffUnavailable: "This change is too large to preview.", showDiffLines: "Show {count} more lines", collapseDiff: "Show fewer lines",
+    copyDiff: "Copy diff", copiedDiff: "Copied", copyDiffFailed: "Could not copy diff", noNewline: "No newline at end of file",
     local: "Enable local tools", task: "Task", taskPlaceholder: "Ask Ya a question or describe a workspace task…", send: "Send",
     model: "Model", thinking: "Thinking", web: "Web", toa: "Tree of Agents", workers: "Workers", auto: "Auto", on: "On", off: "Off",
     ready: "Ready", working: "Ya is working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
@@ -139,6 +148,12 @@ const TEXT = {
     toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
     interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存会话记录，本地存储空间可能已满。",
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
+    changes: "变更", noChanges: "Ya 经批准完成的文件变更将显示在这里。",
+    changesSummary: "{files} 个文件 · {changes} 次变更", createdFile: "新建", editedFile: "编辑", replacedFile: "替换",
+    noTextChanges: "文本没有变化。", emptyFileCreated: "已创建空文件。",
+    diffTruncated: "变更较大，预览已截断；行数统计包含完整变更。",
+    diffUnavailable: "此变更过大，无法预览。", showDiffLines: "展开其余 {count} 行", collapseDiff: "收起差异",
+    copyDiff: "复制 diff", copiedDiff: "已复制", copyDiffFailed: "无法复制 diff", noNewline: "文件末尾没有换行符",
     local: "启用本地工具", task: "任务", taskPlaceholder: "向 Ya 提问，或描述一个工作区任务…", send: "发送",
     model: "模型", thinking: "思考", web: "网页", toa: "Tree of Agents", workers: "工作 Agent", auto: "自动", on: "开启", off: "关闭",
     ready: "就绪", working: "Ya 正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
@@ -188,6 +203,7 @@ interface ConversationTurn {
   status: "running" | "complete" | "error" | "interrupted";
   partial?: boolean;
   commands: ConversationCommand[];
+  changes: FileChange[];
 }
 interface ConversationSession {
   id: string;
@@ -204,7 +220,7 @@ let currentSession: ConversationSession;
 let activeTurn: ConversationTurn | undefined;
 let navigationPending = false;
 let sessionSaveTimer: number | undefined;
-let drawerPage: "files" | "activity" | undefined;
+let drawerPage: "files" | "changes" | "activity" | undefined;
 const commandLogs = new Map<string, { summary: HTMLElement; stdout: HTMLElement; stderr: HTMLElement; command: string; cwd: string }>();
 const VISION_MODEL = "deepseek-flash";
 
@@ -259,6 +275,13 @@ function applyLanguage(): void {
   element<HTMLSpanElement>("about-version").textContent = `Ya ${state.version}`;
   renderWorkspaceLabel();
   renderActivities();
+  renderChanges();
+  // Existing cards are snapshots too; switching language must keep their expanded state.
+  const changes = new Map(sessionChanges().map((change) => [change.id, change]));
+  document.querySelectorAll<HTMLDetailsElement>(".turn .file-change").forEach((card) => {
+    const change = changes.get(card.dataset.changeId ?? "");
+    if (change) card.replaceWith(fileChangeCard(change, card.open));
+  });
   renderPendingAction();
   renderImages();
   renderNavigation();
@@ -335,6 +358,25 @@ function validSavedCommand(value: unknown): value is ConversationCommand {
     && (result.error === undefined || typeof result.error === "string");
 }
 
+function validSavedFileChange(value: unknown): value is FileChange {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.path !== "string"
+    || !["create", "write", "edit"].includes(String(value.operation)) || typeof value.truncated !== "boolean"
+    || ![value.additions, value.deletions].every((count) => count === null || (Number.isSafeInteger(count) && Number(count) >= 0))
+    || !Array.isArray(value.hunks)) return false;
+  let lines = 0;
+  let characters = 0;
+  for (const hunk of value.hunks) {
+    if (!isRecord(hunk) || ![hunk.oldStart, hunk.oldLines, hunk.newStart, hunk.newLines].every((count) => Number.isSafeInteger(count) && Number(count) >= 0)
+      || !Array.isArray(hunk.lines) || hunk.lines.length === 0) return false;
+    for (const line of hunk.lines) {
+      if (typeof line !== "string" || !/^[ +\-\\]/u.test(line)) return false;
+      lines += 1;
+      characters += line.length;
+    }
+  }
+  return lines <= 2_000 && characters <= 128 * 1_024;
+}
+
 function loadSessionHistory(): string | undefined {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
@@ -357,6 +399,7 @@ function loadSessionHistory(): string | undefined {
           status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
           partial: turn.partial === true,
           commands: Array.isArray(turn.commands) ? turn.commands.filter(validSavedCommand) : [],
+          changes: Array.isArray(turn.changes) ? turn.changes.filter(validSavedFileChange) : [],
         });
       }
       const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
@@ -477,6 +520,7 @@ function renderSession(): void {
         renderCommand({ type: "output", id: command.id, stream: "stderr", text: command.stderr });
       }
     }
+    for (const change of turn.changes ?? []) answer.parentElement?.append(fileChangeCard(change, true));
     activeAnswer = undefined;
   }
   element<HTMLDivElement>("timeline-empty").hidden = currentSession.turns.length > 0;
@@ -488,6 +532,7 @@ function renderSession(): void {
   activities = currentSession.activities;
   pendingAction = undefined;
   renderActivities();
+  renderChanges();
   renderPendingAction();
   renderWorkspaceLabel();
   renderPageTitle();
@@ -553,13 +598,15 @@ async function activateSessionWorkspace(workspace?: string): Promise<void> {
   }
 }
 
-function setDrawer(page: "files" | "activity" | undefined): void {
+function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
   drawerPage = page;
   element<HTMLElement>("details-drawer").hidden = page === undefined;
   document.querySelector(".workbench")?.classList.toggle("drawer-open", page !== undefined);
+  document.querySelector(".workbench")?.classList.toggle("changes-open", page === "changes");
   element<HTMLElement>("drawer-files").hidden = page !== "files";
+  element<HTMLElement>("drawer-changes").hidden = page !== "changes";
   element<HTMLElement>("drawer-activity").hidden = page !== "activity";
-  for (const name of ["files", "activity"] as const) {
+  for (const name of ["files", "changes", "activity"] as const) {
     element<HTMLButtonElement>(`drawer-${name}-tab`).classList.toggle("active", page === name);
     const button = element<HTMLButtonElement>(`toggle-${name}`);
     button.classList.toggle("active", page === name);
@@ -771,7 +818,7 @@ async function runTask(): Promise<void> {
   currentSession.draft = "";
   currentSession.updatedAt = Date.now();
   if (!currentSession.title) currentSession.title = task.replace(/\s+/gu, " ").slice(0, 48);
-  activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [] };
+  activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
   currentSession.turns.push(activeTurn);
   activeAnswer = appendTask(task, taskImages);
   activeAnswerText = "";
@@ -922,6 +969,187 @@ async function renderRelevant(task: string): Promise<void> {
   } catch (error) {
     panel.textContent = errorText(error);
   }
+}
+
+function sessionChanges(): FileChange[] {
+  return currentSession?.turns.flatMap((turn) => turn.changes ?? []) ?? [];
+}
+
+function renderChanges(): void {
+  const changes = sessionChanges();
+  const count = element<HTMLSpanElement>("changes-count");
+  const files = new Set(changes.map((change) => change.path)).size;
+  count.hidden = files === 0;
+  count.textContent = String(files);
+  element<HTMLDivElement>("changes-summary").textContent = changes.length === 0 ? ""
+    : interpolate(t("changesSummary"), { files, changes: changes.length });
+  const list = element<HTMLDivElement>("change-list");
+  const open = new Set(Array.from(list.querySelectorAll<HTMLDetailsElement>(".file-change[open]"), (card) => card.dataset.changeId));
+  list.replaceChildren();
+  if (changes.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = t("noChanges");
+    list.append(empty);
+  } else {
+    // Each entry is the diff at the time of the operation, including repeated edits to one path.
+    for (const change of changes.toReversed()) list.append(fileChangeCard(change, open.has(change.id)));
+  }
+}
+
+interface DiffDisplayLine {
+  kind: "hunk" | "addition" | "deletion" | "context" | "note";
+  oldLine?: number;
+  newLine?: number;
+  marker?: string;
+  text: string;
+}
+
+function diffDisplayLines(change: FileChange): DiffDisplayLine[] {
+  return change.hunks.flatMap((hunk) => {
+    let oldLine = hunk.oldStart;
+    let newLine = hunk.newStart;
+    const lines: DiffDisplayLine[] = [{ kind: "hunk", text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@` }];
+    for (const line of hunk.lines) {
+      if (line.startsWith("\\")) {
+        lines.push({ kind: "note", marker: "\\", text: t("noNewline") });
+      } else {
+        const kind = line.startsWith("+") ? "addition" : line.startsWith("-") ? "deletion" : "context";
+        lines.push({ kind, marker: line[0], text: line.slice(1),
+          ...(kind !== "addition" ? { oldLine: oldLine++ } : {}),
+          ...(kind !== "deletion" ? { newLine: newLine++ } : {}),
+        });
+      }
+    }
+    return lines;
+  });
+}
+
+function fileChangeText(change: FileChange): string {
+  return [`--- ${change.operation === "create" ? "/dev/null" : change.path}`, `+++ ${change.path}`,
+    ...change.hunks.flatMap((hunk) => [`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...hunk.lines]),
+    ...(change.truncated ? [`... ${t("diffTruncated")}`] : []), ""].join("\n");
+}
+
+function fileChangeCard(change: FileChange, open = false): HTMLDetailsElement {
+  const card = document.createElement("details");
+  card.className = "file-change";
+  card.dataset.changeId = change.id;
+  card.open = open;
+  const summary = document.createElement("summary");
+  const path = document.createElement("span");
+  path.className = "change-path";
+  path.textContent = change.path;
+  path.title = change.path;
+  const operation = document.createElement("span");
+  operation.className = "change-operation";
+  operation.textContent = t(change.operation === "create" ? "createdFile" : change.operation === "edit" ? "editedFile" : "replacedFile");
+  const stats = document.createElement("span");
+  stats.className = "change-stats";
+  if (change.additions !== null && change.deletions !== null) {
+    const additions = document.createElement("span");
+    additions.className = "diff-additions";
+    additions.textContent = `+${change.additions}`;
+    const deletions = document.createElement("span");
+    deletions.className = "diff-deletions";
+    deletions.textContent = `−${change.deletions}`;
+    stats.append(additions, deletions);
+  }
+  summary.append(path, operation, stats);
+  card.append(summary);
+  let loaded = false;
+  const load = (): void => {
+    if (loaded) return;
+    loaded = true;
+    const body = document.createElement("div");
+    body.className = "diff-body";
+    const rows = diffDisplayLines(change);
+    if (rows.length > 0) {
+      const toolbar = document.createElement("div");
+      toolbar.className = "diff-toolbar";
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "diff-copy";
+      copy.textContent = t("copyDiff");
+      copy.addEventListener("click", () => {
+        void (async () => {
+          try {
+            await navigator.clipboard.writeText(fileChangeText(change));
+            copy.textContent = t("copiedDiff");
+          } catch { copy.textContent = t("copyDiffFailed"); }
+        })();
+      });
+      toolbar.append(copy);
+      const scroll = document.createElement("div");
+      scroll.className = "diff-lines";
+      scroll.tabIndex = 0;
+      scroll.setAttribute("role", "region");
+      scroll.setAttribute("aria-label", `${t("changes")} · ${change.path}`);
+      const grid = document.createElement("div");
+      grid.className = "diff-grid";
+      scroll.append(grid);
+      let expanded = false;
+      const appendRow = (line: DiffDisplayLine): void => {
+        const row = document.createElement("div");
+        row.className = `diff-row ${line.kind}`;
+        if (line.kind === "hunk") row.textContent = line.text;
+        else {
+          for (const number of [line.oldLine, line.newLine]) {
+            const gutter = document.createElement("span");
+            gutter.className = "diff-number";
+            gutter.textContent = number === undefined ? "" : String(number);
+            gutter.setAttribute("aria-hidden", "true");
+            row.append(gutter);
+          }
+          const marker = document.createElement("span");
+          marker.className = "diff-marker";
+          marker.textContent = line.marker ?? "";
+          const code = document.createElement("code");
+          code.className = "diff-code";
+          code.textContent = line.text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/gu,
+            (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+          row.append(marker, code);
+        }
+        grid.append(row);
+      };
+      const renderRows = (): void => {
+        grid.replaceChildren();
+        if (rows.length <= 16 || expanded) rows.forEach(appendRow);
+        else rows.slice(0, 8).forEach(appendRow);
+        if (rows.length > 16) {
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "diff-expand";
+          toggle.textContent = expanded ? t("collapseDiff") : interpolate(t("showDiffLines"), { count: rows.length - 16 });
+          toggle.setAttribute("aria-expanded", String(expanded));
+          toggle.addEventListener("click", () => {
+            expanded = !expanded;
+            renderRows();
+            grid.querySelector<HTMLButtonElement>(".diff-expand")?.focus({ preventScroll: true });
+          });
+          grid.append(toggle);
+          if (!expanded) rows.slice(-8).forEach(appendRow);
+        }
+      };
+      renderRows();
+      body.append(toolbar, scroll);
+    } else {
+      const empty = document.createElement("p");
+      empty.className = "diff-notice";
+      empty.textContent = t(change.additions === null ? "diffUnavailable" : change.operation === "create" ? "emptyFileCreated" : "noTextChanges");
+      body.append(empty);
+    }
+    if (change.truncated && change.additions !== null) {
+      const notice = document.createElement("p");
+      notice.className = "diff-notice";
+      notice.textContent = t("diffTruncated");
+      body.append(notice);
+    }
+    card.append(body);
+  };
+  card.addEventListener("toggle", () => { if (card.open) load(); });
+  if (open) load();
+  return card;
 }
 
 function renderActivities(): void {
@@ -1292,7 +1520,7 @@ function registerEvents(): void {
     element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
     persistSessions();
   });
-  for (const page of ["files", "activity"] as const) {
+  for (const page of ["files", "changes", "activity"] as const) {
     element<HTMLButtonElement>(`toggle-${page}`).addEventListener("click", () => setDrawer(drawerPage === page ? undefined : page));
     element<HTMLButtonElement>(`drawer-${page}-tab`).addEventListener("click", () => setDrawer(page));
   }
@@ -1370,6 +1598,12 @@ function registerEvents(): void {
       scheduleSessionSave();
     } else if (event.type === "command") {
       renderCommand(event.event);
+    } else if (event.type === "file-change" && activeTurn && activeAnswer) {
+      activeTurn.changes.push(event.change);
+      activeAnswer.parentElement?.append(fileChangeCard(event.change, true));
+      renderChanges();
+      persistSessions();
+      void renderFiles();
     } else if (event.type === "local-action") {
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();

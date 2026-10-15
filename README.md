@@ -8,7 +8,7 @@ Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to s
 
 ## Desktop preview
 
-Navigate projects and sessions on the left, chat with Ya on the right, and open Settings from the bottom of the sidebar. Files, relevant memory, tool activity, and approvals are available in an optional details panel.
+Navigate projects and sessions on the left, chat with Ya on the right, and open Settings from the bottom of the sidebar. Files, applied diffs, relevant memory, tool activity, and approvals are available in an optional details panel.
 
 ![Ya desktop workspace: project and session navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
@@ -241,7 +241,11 @@ The desktop application uses a two-column workspace inspired by the [official De
 
 - Project and session navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
 - Conversation history and a compact composer on the right. Each session keeps its own draft, replies, and command output locally across restarts; sessions group task history while each task uses the existing shared task service.
-- An optional Files/Activity panel for file navigation, relevant memory, and approvals. Pending approvals open the panel automatically.
+- An optional Files/Changes/Activity panel for file navigation, applied diffs, relevant memory, and approvals. Pending approvals open the panel automatically.
+
+After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current session's file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching sessions or restarting preserves the diff at the time of each operation, without requiring Git.
+
+Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive files and non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
 
 Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
 

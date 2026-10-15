@@ -171,6 +171,7 @@ describe("GUI pending action lifecycle", () => {
     const sent = sender.send.mock.calls.length;
     callbacks.onContent("late reply");
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task.txt"], status: "success" });
+    callbacks.onFileChange({ id: "late-change", path: "old-task.txt", operation: "write", additions: 1, deletions: 0, hunks: [], truncated: false });
     callbacks.onCommandEvent({ type: "start", id: "late", command: "npm test", cwd: "." });
     await expect(callbacks.onLocalAction({ operation: "write", paths: ["old-task.txt"], summary: "Late write" })).rejects.toThrow(/reload/);
     expect(sender.send.mock.calls.length).toBe(sent);
@@ -180,6 +181,7 @@ describe("GUI pending action lifecycle", () => {
     await expect(state).resolves.toMatchObject({ workspaces: [], hasApiKey: true });
     expect(stateReady).toBe(true);
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task-after-exit.txt"], status: "success" });
+    callbacks.onFileChange({ id: "late-change-after-exit", path: "old-task.txt", operation: "write", additions: 1, deletions: 0, hunks: [], truncated: false });
     expect(sender.send.mock.calls.length).toBe(sent);
     mocks.run.mockImplementation(async (_options, value) => {
       await value.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });

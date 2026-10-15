@@ -51,6 +51,9 @@
         <div class="header-titles"><h1 id="page-title">New session</h1><div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div></div>
         <div id="app-status" class="app-status" role="status">Ready</div>
         <div id="workspace-actions" class="header-actions">
+          <button id="toggle-changes" class="icon-button changes-button" type="button" aria-controls="details-drawer" aria-expanded="false" data-i18n-label="changes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M7 9h4M15 13h4M17 11v4"/></svg><span id="changes-count" class="changes-count" hidden></span>
+          </button>
           <button id="toggle-files" class="icon-button" type="button" aria-controls="details-drawer" aria-expanded="false" data-i18n-label="files">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>
           </button>
@@ -98,8 +101,9 @@
           </section>
 
           <aside id="details-drawer" class="details-drawer" hidden aria-label="Workspace details">
-            <div class="drawer-heading"><div class="drawer-tabs"><button id="drawer-files-tab" class="drawer-tab active" type="button" data-i18n="files">Files</button><button id="drawer-activity-tab" class="drawer-tab" type="button" data-i18n="activity">Activity</button></div><button id="close-drawer" class="icon-button" type="button" data-i18n-label="closePanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
+            <div class="drawer-heading"><div class="drawer-tabs"><button id="drawer-files-tab" class="drawer-tab active" type="button" data-i18n="files">Files</button><button id="drawer-changes-tab" class="drawer-tab" type="button" data-i18n="changes">Changes</button><button id="drawer-activity-tab" class="drawer-tab" type="button" data-i18n="activity">Activity</button></div><button id="close-drawer" class="icon-button" type="button" data-i18n-label="closePanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
             <section id="drawer-files" class="files-panel"><div class="panel-heading"><span id="file-location" class="muted">.</span><button id="refresh-files" class="icon-button" type="button" data-i18n-label="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div><div id="file-list" class="file-list"></div></section>
+            <section id="drawer-changes" class="changes-panel" hidden aria-labelledby="drawer-changes-tab"><div id="changes-summary" class="panel-heading muted"></div><div id="change-list" class="change-list"></div></section>
             <div id="drawer-activity" class="context-panel" hidden>
               <section class="context-section action-panel" id="approval-panel"><h2 data-i18n="pendingAction">Pending action</h2><p id="action-empty" class="empty" data-i18n="noAction">No action is waiting for approval.</p><div id="action-content" hidden><div id="action-summary" class="action-summary"></div><div id="action-paths" class="action-paths"></div><pre id="action-diff" class="action-diff"></pre><div class="button-row"><button id="action-deny" class="secondary" type="button" data-i18n="deny">Deny</button><button id="action-approve" class="primary" type="button" data-i18n="approve">Approve</button></div></div></section>
               <section class="context-section grow"><h2 data-i18n="activity">Activity</h2><div id="activity-list" class="activity-list"><p class="empty" data-i18n="noActivity">No local activity for this task.</p></div></section>

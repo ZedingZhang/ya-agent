@@ -29,6 +29,7 @@ export { runCommand } from "./commands";
 export type { CommandEvent, CommandOptions, CommandResult } from "./commands";
 export { LocalWorkspace, LOCAL_RUN_TOOL } from "./local";
 export type { LocalWorkspaceOptions } from "./local";
+export type { FileChange, FileDiffHunk } from "./file-diff";
 export type {
   ChatFileContentPart,
   ChatImageUrlContentPart,
