@@ -28,6 +28,7 @@ import { DuplicateMemoryError, MemoryLimitError, type MemoryKind } from "../memo
 import type { RunResult } from "../orchestrator";
 import { runTask } from "../service";
 import { VERSION } from "../version";
+import { createFileChange } from "../file-diff";
 import { search } from "../web";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
@@ -38,6 +39,7 @@ import type {
   SelectedImage,
   SettingsUpdate,
   TaskEvent,
+  TaskTransportEvent,
   WorkspaceModelSelection,
 } from "./shared";
 
@@ -294,6 +296,7 @@ function registerIpc(): void {
         onContent: (content) => send({ type: "content", content }),
         onLocalActivity: (activity) => send({ type: "activity", activity }),
         onCommandEvent: (commandEvent) => send({ type: "command", event: commandEvent }),
+        onFileChange: (change) => send({ type: "file-change", change }),
         onLocalAction: (action) => new Promise<boolean>((resolvePromise, reject) => {
           taskController.signal.throwIfAborted();
           if (event.sender.isDestroyed()) {
@@ -323,6 +326,13 @@ function registerIpc(): void {
       taskRunning = false;
       for (const id of options.imageIds) selectedImages.delete(id);
     }
+  });
+
+  ipcMain.handle("task:flush", (event, id: unknown) => {
+    assertTrustedSender(event);
+    if (typeof id !== "string" || id.length === 0 || id.length > 128) throw new Error("Invalid task flush ID.");
+    const marker: TaskTransportEvent = { type: "flush", id };
+    event.sender.send("task:event", marker);
   });
 
   ipcMain.handle("task:cancel", (event) => {
@@ -564,6 +574,89 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
   if (!commandRendering) throw new Error("Command output, exit status or stop controls failed to render.");
 }
 
+async function verifyFileDiffRendering(window: BrowserWindow): Promise<void> {
+  const before = Array.from({ length: 40 }, (_, index) => `line ${index + 1}${index === 4 ? ` ${"wide ".repeat(250)}` : ""}\n`).join("");
+  const after = before.replace("line 8\n", "<img src=x onerror=alert(1)>\n").replace("line 30\n", "updated 30\n");
+  const change = createFileChange("src/example.ts", before, after, "edit");
+  const limited = createFileChange("large.txt", undefined, "added\n".repeat(2_100), "write");
+  const checks = await window.webContents.executeJavaScript(`(async () => {
+    const change = ${JSON.stringify(change)};
+    const limited = ${JSON.stringify(limited)};
+    const priorTurns = currentSession.turns;
+    const language = state.language;
+    try {
+      currentSession.turns = [{ task: 'Review file changes', images: [], answer: 'Updated two lines.',
+        status: 'complete', commands: [], changes: [change] }];
+      renderSession();
+      setDrawer('changes');
+      const card = document.querySelector('#timeline .file-change');
+      const expand = card.querySelector('.diff-expand');
+      const collapsed = card.querySelectorAll('.diff-row').length === 16 && expand.getAttribute('aria-expanded') === 'false';
+      expand.click();
+      const expanded = card.querySelectorAll('.diff-row').length === 18
+        && card.querySelector('.diff-expand').getAttribute('aria-expanded') === 'true';
+      const removed = Array.from(card.querySelectorAll('.deletion')).find((row) => row.querySelector('.diff-code').textContent === 'line 8');
+      const added = Array.from(card.querySelectorAll('.addition')).find((row) => row.querySelector('.diff-code').textContent.includes('<img'));
+      const lineNumbers = removed.querySelectorAll('.diff-number')[0].textContent === '8'
+        && removed.querySelectorAll('.diff-number')[1].textContent === ''
+        && added.querySelectorAll('.diff-number')[0].textContent === ''
+        && added.querySelectorAll('.diff-number')[1].textContent === '8';
+      const context = card.querySelectorAll('.context').length === 12
+        && card.querySelectorAll('.addition').length === 2 && card.querySelectorAll('.deletion').length === 2
+        && card.querySelector('.change-stats').textContent === '+2−2';
+      const safeText = card.querySelector('img, script') === null && added.querySelector('.diff-code').textContent === '<img src=x onerror=alert(1)>';
+      const copiedText = fileChangeText(change).includes('--- src/example.ts')
+        && fileChangeText(change).includes('-line 8\\n+<img src=x onerror=alert(1)>');
+      const clipboard = navigator.clipboard;
+      const writeText = Object.getOwnPropertyDescriptor(clipboard, 'writeText');
+      let copied = '';
+      let copyAction = false;
+      try {
+        Object.defineProperty(clipboard, 'writeText', { configurable: true, value: async (text) => { copied = text; } });
+        card.querySelector('.diff-copy').click();
+        await Promise.resolve();
+        copyAction = copied === fileChangeText(change) && card.querySelector('.diff-copy').textContent === t('copiedDiff');
+        Object.defineProperty(clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('Clipboard unavailable'); } });
+        card.querySelector('.diff-copy').click();
+        await Promise.resolve();
+        copyAction = copyAction && card.querySelector('.diff-copy').textContent === t('copyDiffFailed');
+      } finally {
+        if (writeText) Object.defineProperty(clipboard, 'writeText', writeText);
+        else delete clipboard.writeText;
+      }
+      const scroll = card.querySelector('.diff-lines');
+      const scrollable = scroll.scrollWidth > scroll.clientWidth && document.documentElement.scrollWidth <= innerWidth;
+      card.querySelector('.diff-expand').click();
+      const recollapsed = card.querySelectorAll('.diff-row').length === 16;
+      const drawerCard = document.querySelector('#change-list .file-change');
+      drawerCard.querySelector('summary').click();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const drawer = !document.querySelector('#drawer-changes').hidden && drawerCard.open
+        && drawerCard.querySelector('.diff-body') !== null && !document.querySelector('#changes-count').hidden;
+      const truncatedCard = fileChangeCard(limited, true);
+      const truncated = truncatedCard.querySelector('.diff-notice').textContent === t('diffTruncated')
+        && truncatedCard.querySelector('.diff-additions').textContent === '+2100';
+      const compatible = validSavedFileChange(change) && !validSavedFileChange({ ...change, hunks: [{ ...change.hunks[0], lines: [42] }] })
+        && !validSavedFileChange({ ...change, additions: -1 });
+      state.language = 'zh-CN';
+      applyLanguage();
+      const localized = document.querySelector('#drawer-changes-tab').textContent === '变更'
+        && document.querySelector('#timeline .change-operation').textContent === '编辑'
+        && document.querySelector('#change-list .file-change').open;
+      return { collapsed, expanded, recollapsed, lineNumbers, context, safeText, copiedText, copyAction, scrollable, drawer, truncated, compatible, localized };
+    } finally {
+      state.language = language;
+      currentSession.turns = priorTurns;
+      renderSession();
+      applyLanguage();
+      setDrawer(undefined);
+    }
+  })()`) as Record<string, boolean>;
+  for (const [name, passed] of Object.entries(checks)) {
+    if (!passed) throw new Error(`File diff rendering check failed: ${name}.`);
+  }
+}
+
 async function verifySessionNavigation(window: BrowserWindow, root: string): Promise<void> {
   const first = join(root, "ya-agent");
   const second = join(root, "notes");
@@ -571,6 +664,7 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
   mkdirSync(second);
   controller.setWorkspace(first);
   controller.setWorkspace(second);
+  const historyChange = createFileChange("src/gui/layout.ts", "const width = 860;\n", "const width = 920;\n", "edit");
   const navigation = await window.webContents.executeJavaScript(`(async () => {
     state = await bridge.state();
     const [second, first] = state.workspaces;
@@ -590,7 +684,7 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
     const source = sessions.find((session) => session.id === firstId);
     source.turns.push({ task: 'Summarize the YA desktop layout', images: [],
       answer: '## Desktop workspace\\nProject and session navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
-      status: 'complete', commands: [{ id: 'history-command', command: 'npm run check', cwd: first,
+      status: 'complete', changes: [${JSON.stringify(historyChange)}], commands: [{ id: 'history-command', command: 'npm run check', cwd: first,
         stdout: 'Checks passed', stderr: '', result: { status: 'success', exitCode: 0, durationMs: 500,
           stdout: 'Checks passed', stderr: '', stdoutTruncated: false, stderrTruncated: false } }] });
     source.title = 'Desktop layout';
@@ -598,7 +692,8 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
     source.activities = [{ operation: 'read', paths: ['src/gui/index.html'], status: 'success' }];
     await selectSession(source);
     const transcriptRestored = document.querySelector('#timeline').textContent.includes('Project and session navigation')
-      && document.querySelector('#timeline .command-run').textContent.includes('Checks passed');
+      && document.querySelector('#timeline .command-run').textContent.includes('Checks passed')
+      && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'const width = 920;';
     setRunning(true);
     const locked = document.querySelector('#new-session').disabled && document.querySelector('#choose-workspace').disabled
       && Array.from(document.querySelectorAll('.session-button')).every((button) => button.disabled);
@@ -634,9 +729,12 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
     id: currentSession.id, draft: document.querySelector('#task-input').value,
     transcript: document.querySelector('#timeline').textContent.includes('Project and session navigation'),
     commands: document.querySelector('#timeline .command-run').textContent.includes('Checks passed'),
-  }))()`) as { id: string; draft: string; transcript: boolean; commands: boolean };
-  if (restored.id !== navigation.activeId || restored.draft !== "A draft that survives reload" || !restored.transcript || !restored.commands) {
-    throw new Error("Session transcripts, commands or drafts did not survive renderer reload.");
+    changes: document.querySelector('#timeline .file-change .addition .diff-code')?.textContent === 'const width = 920;'
+      && currentSession.turns[0].changes[0].hunks[0].lines.includes('-const width = 860;')
+      && document.querySelector('#changes-count').textContent === '1',
+  }))()`) as { id: string; draft: string; transcript: boolean; commands: boolean; changes: boolean };
+  if (restored.id !== navigation.activeId || restored.draft !== "A draft that survives reload" || !restored.transcript || !restored.commands || !restored.changes) {
+    throw new Error("Session transcripts, commands, file changes or drafts did not survive renderer reload.");
   }
   await window.webContents.executeJavaScript("document.querySelector('#task-input').value = ''; currentSession.draft = ''; persistSessions(); setStatus(t('ready'));");
 }
@@ -660,7 +758,14 @@ async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
           options.open = true;
           const popup = options.querySelector('.task-controls').getBoundingClientRect();
           options.open = false;
-          return document.documentElement.scrollWidth <= innerWidth && composer.right <= innerWidth
+          setDrawer('changes');
+          const drawer = document.querySelector('#details-drawer').getBoundingClientRect();
+          const tabs = document.querySelector('.drawer-tabs').getBoundingClientRect();
+          const close = document.querySelector('#close-drawer').getBoundingClientRect();
+          const changesFit = drawer.right <= innerWidth && drawer.left >= sidebar.right
+            && tabs.right <= close.left && document.documentElement.scrollWidth <= innerWidth;
+          setDrawer(undefined);
+          return changesFit && document.documentElement.scrollWidth <= innerWidth && composer.right <= innerWidth
             && composer.left >= sidebar.right && composer.bottom <= innerHeight
             && sidebar.bottom - settings.bottom < 32 && popup.left >= sidebar.right
             && popup.right <= innerWidth && popup.top >= 0;
@@ -752,6 +857,21 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       const approvalCompleted = currentSession.turns.at(-1).status === 'complete'
         && currentSession.activities.some((activity) => activity.operation === 'write' && activity.status === 'success')
         && state.workspace === originalProject;
+      const changeDelivered = currentSession.turns.at(-1).changes.length === 1
+        && currentSession.turns.at(-1).changes[0].operation === 'create'
+        && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
+      document.querySelector('#toggle-changes').click();
+      const changesPanel = drawerPage === 'changes' && !document.querySelector('#drawer-changes').hidden
+        && document.querySelectorAll('#change-list .file-change').length === 1;
+      input.value = 'smoke-denied';
+      const deniedRun = runTask();
+      const deniedDeadline = Date.now() + 3000;
+      while (!pendingAction && Date.now() < deniedDeadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      if (!pendingAction) { await bridge.cancelTask(); await deniedRun; throw new Error('Denied task did not request approval.'); }
+      document.querySelector('#action-deny').click();
+      await deniedRun;
+      const deniedChanges = currentSession.turns.at(-1).changes.length === 0
+        && sessionChanges().length === 1 && document.querySelectorAll('#timeline .file-change').length === 1;
       input.value = 'smoke-error';
       await runTask();
       const failureSaved = currentSession.turns.at(-1).status === 'error'
@@ -760,10 +880,12 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       await selectSession(originalSession);
       await selectSession(testSession);
       const historyRestored = document.querySelector('#timeline').textContent.includes('A streamed reply.')
-        && document.querySelector('#timeline').textContent.includes('Expected smoke failure');
+        && document.querySelector('#timeline').textContent.includes('Expected smoke failure')
+        && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
       sessions = sessions.filter((session) => session.id !== testSession.id);
       await selectSession(originalSession);
-      return { streamed, automaticApproval, projectLocked, navigationLocked, approvalCompleted, failureSaved, historyRestored };
+      return { streamed, automaticApproval, projectLocked, navigationLocked, approvalCompleted, changeDelivered,
+        changesPanel, deniedChanges, failureSaved, historyRestored };
       } catch (error) { return { failure: errorText(error) }; }
     })()`) as Record<string, boolean | string>;
     for (const [name, value] of Object.entries(results)) {
@@ -917,11 +1039,11 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
   }
 }
 
-/** YA_SMOKE_CAPTURE=<file> writes a PNG of one page (YA_SMOKE_CAPTURE_PAGE=workspace|memory|settings) during the smoke test. */
+/** YA_SMOKE_CAPTURE=<file> writes a PNG; YA_SMOKE_CAPTURE_PAGE=changes also opens the diff drawer. */
 async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
   const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
-  if (!["workspace", "memory", "settings"].includes(page)) {
-    throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, memory, or settings.");
+  if (!["workspace", "changes", "memory", "settings"].includes(page)) {
+    throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, changes, memory, or settings.");
   }
   const language = process.env.YA_SMOKE_LANGUAGE;
   if (language && LANGUAGES.includes(language as Language)) {
@@ -931,7 +1053,8 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
   const size = process.env.YA_SMOKE_SIZE?.match(/^(\d+)x(\d+)$/u);
   if (size) window.setSize(Number(size[1]), Number(size[2]));
-  await window.webContents.executeJavaScript(`switchPage('${page}')`);
+  await window.webContents.executeJavaScript(`switchPage('${page === "changes" ? "workspace" : page}');
+    ${page === "changes" ? "setDrawer('changes'); document.querySelector('#change-list .file-change')?.setAttribute('open', '');" : ""}`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());
 }
@@ -984,6 +1107,7 @@ app.whenReady().then(async () => {
   if (smokeTest) {
     const window = await createWindow(false);
     await verifyRenderer(window);
+    await verifyFileDiffRendering(window);
     await verifyApplicationMenu(window);
     await verifySessionNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);

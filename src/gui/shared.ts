@@ -1,5 +1,6 @@
 import type { ModelId, ReasoningEffort } from "../config";
 import type { CommandEvent } from "../commands";
+import type { FileChange } from "../file-diff";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
@@ -68,7 +69,11 @@ export type TaskEvent =
   | { type: "content"; content: string }
   | { type: "activity"; activity: LocalActivity }
   | { type: "command"; event: CommandEvent }
+  | { type: "file-change"; change: FileChange }
   | { type: "local-action"; id: string; action: LocalAction };
+
+/** Private transport marker; never forwarded to the renderer's task event listener. */
+export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };
 
 export interface YaBridge {
   state(): Promise<AppState>;
