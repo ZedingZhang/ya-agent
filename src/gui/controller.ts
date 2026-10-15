@@ -23,7 +23,7 @@ import {
 } from "../memory";
 import { shouldUseWeb, type RunResult } from "../orchestrator";
 import { runTask, type RunTaskOptions } from "../service";
-import type { UserImageContentPart, WebMode } from "../types";
+import type { ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
 
@@ -39,6 +39,7 @@ export interface GuiPreferences {
 
 export interface GuiTaskOptions {
   task: string;
+  history?: ConversationMessage[];
   webMode?: WebMode;
   toa?: boolean;
   toaWorkers?: number;
@@ -221,6 +222,7 @@ export class GuiController {
       );
     }
     return this.taskRunner(apiKey, options.task, this.config, {
+      history: options.history,
       webMode: options.webMode ?? "auto",
       toa: options.toa ?? false,
       toaWorkers: options.toaWorkers ?? 2,

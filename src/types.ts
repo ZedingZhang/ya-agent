@@ -24,6 +24,11 @@ export interface ChatFileContentPart {
 export type UserImageContentPart = ChatImageUrlContentPart | ChatFileContentPart;
 export type UserContentPart = ChatTextContentPart | UserImageContentPart;
 
+export type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string | UserContentPart[] | null;

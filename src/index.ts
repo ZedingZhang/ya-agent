@@ -34,6 +34,7 @@ export type {
   ChatFileContentPart,
   ChatImageUrlContentPart,
   ChatTextContentPart,
+  ConversationMessage,
   ImageDetail,
   UserContentPart,
   UserImageContentPart,
