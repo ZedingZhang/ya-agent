@@ -154,6 +154,16 @@
             </div>
           </section>
           <section class="panel form-card">
+            <h1 data-i18n="deepseekAccount">DeepSeek platform account</h1>
+            <div id="account-state" class="state-pill" role="status" aria-live="polite">Signed out</div>
+            <p class="muted" data-i18n="accountHint">Sign in and authorize Ya in your browser to use your DeepSeek platform account.</p>
+            <div class="account-actions">
+              <button id="account-login" class="primary" type="button" data-i18n="accountLogin">Sign in with DeepSeek</button>
+              <button id="account-cancel" type="button" data-i18n="accountCancel" hidden>Cancel sign-in</button>
+              <button id="account-logout" type="button" data-i18n="accountLogout" hidden>Sign out</button>
+            </div>
+          </section>
+          <section class="panel form-card">
             <h1 data-i18n="apiKey">DeepSeek API key</h1>
             <div id="api-state" class="state-pill">No API key configured</div>
             <input id="setting-api-key" type="password" autocomplete="off" data-i18n-placeholder="apiPlaceholder" placeholder="Leave blank to keep the current key">

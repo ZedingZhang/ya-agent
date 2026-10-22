@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   listeners: new Map<string, (...args: any[]) => any>(),
   run: vi.fn(),
   windows: [] as any[],
+  login: vi.fn(),
+  logout: vi.fn(),
+  accountCredential: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -21,6 +24,7 @@ vi.mock("electron", () => ({
     });
     constructor() { super(); mocks.windows.push(this); }
     removeMenu() {}
+    focus() {}
     loadFile() { return Promise.resolve(); }
     isDestroyed() { return false; }
   },
@@ -30,6 +34,11 @@ vi.mock("electron", () => ({
   },
   screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1200, height: 800 } }) },
   dialog: {}, net: {}, shell: {},
+}));
+
+vi.mock("../src/account", () => ({ loginDeepSeek: mocks.login, logoutDeepSeek: mocks.logout }));
+vi.mock("../src/credentials", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/credentials")>(), loadAccountCredential: mocks.accountCredential,
 }));
 
 vi.mock("../src/gui/controller", () => ({
@@ -62,6 +71,9 @@ describe("GUI pending action lifecycle", () => {
     mocks.handlers.clear();
     mocks.listeners.clear();
     mocks.windows.length = 0;
+    mocks.login.mockReset().mockResolvedValue(undefined);
+    mocks.logout.mockReset().mockResolvedValue(true);
+    mocks.accountCredential.mockReset().mockReturnValue(undefined);
     mocks.run.mockReset().mockImplementation(async (_options, callbacks) => {
       await callbacks.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });
       return "done";
@@ -72,6 +84,51 @@ describe("GUI pending action lifecycle", () => {
   });
 
   afterEach(() => { vi.useRealTimers(); });
+
+  it("returns only safe account state after sign-in, never the grant token", async () => {
+    mocks.login.mockImplementation(async () => {
+      mocks.accountCredential.mockReturnValue({ kind: "account", token: "private-account-token" });
+    });
+    const state = await mocks.handlers.get("account:login")!(event);
+    expect(state.accountSignedIn).toBe(true);
+    expect(JSON.stringify(state)).not.toContain("private-account-token");
+    expect(mocks.login.mock.calls[0][0].signal.aborted).toBe(false);
+  });
+
+  it.each(["account:login", "account:cancel", "account:logout"])("rejects an untrusted %s request", async (channel) => {
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    await expect(Promise.resolve().then(() => mocks.handlers.get(channel)!(untrusted))).rejects.toThrow("Untrusted");
+    expect(mocks.login).not.toHaveBeenCalled();
+    expect(mocks.logout).not.toHaveBeenCalled();
+  });
+
+  it.each(["did-start-loading", "destroyed", "render-process-gone", "cancel"])("cancels browser sign-in on %s and releases the login lock", async (name) => {
+    mocks.login.mockImplementation(({ signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+    const login = mocks.handlers.get("account:login")!(event);
+    const rejection = expect(login).rejects.toThrow(/cancelled/u);
+    await expect(mocks.handlers.get("account:login")!(event)).rejects.toThrow(/sign-in attempt/u);
+    await expect(start()).rejects.toThrow(/sign-in/u);
+    if (name === "cancel") await mocks.handlers.get("account:cancel")!(event);
+    else sender.emit(name);
+    await rejection;
+    mocks.login.mockResolvedValue(undefined);
+    await expect(mocks.handlers.get("account:login")!(event)).resolves.toMatchObject({ accountSignedIn: false });
+  });
+
+  it("prevents account changes while a task is running", async () => {
+    const task = start();
+    await expect(mocks.handlers.get("account:login")!(event)).rejects.toThrow(/current task/u);
+    await expect(mocks.handlers.get("account:logout")!(event)).rejects.toThrow(/current task/u);
+    respond(true);
+    await task;
+  });
+
+  it("reports local sign-out even if the platform session could not be revoked", async () => {
+    mocks.logout.mockResolvedValue(false);
+    await expect(mocks.handlers.get("account:logout")!(event)).resolves.toMatchObject({ revoked: false, state: { accountSignedIn: false } });
+  });
 
   it.each([true, false])("clears the timer on approval response %s", async (approved) => {
     const task = start();

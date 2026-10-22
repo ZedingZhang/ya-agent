@@ -28,6 +28,9 @@ const bridge: YaBridge = {
   workspaceEntries: (path = ".") => ipcRenderer.invoke("workspace:entries", path),
   saveWorkspaceModelSelection: (selection: WorkspaceModelSelection) => ipcRenderer.invoke("workspace:model-selection", selection),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
+  loginDeepSeek: () => ipcRenderer.invoke("account:login"),
+  cancelDeepSeekLogin: () => ipcRenderer.invoke("account:cancel"),
+  logoutDeepSeek: () => ipcRenderer.invoke("account:logout"),
   runTask: async (options: RendererTaskOptions) => {
     try {
       return await ipcRenderer.invoke("task:run", options);

@@ -24,6 +24,7 @@ export interface AppState {
   workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
+  accountSignedIn: boolean;
   config: SerializedConfig;
   cards: MemoryCard[];
   auditLogCount: number;
@@ -84,6 +85,9 @@ export interface YaBridge {
   workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
+  loginDeepSeek(): Promise<AppState>;
+  cancelDeepSeekLogin(): Promise<void>;
+  logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask(options: RendererTaskOptions): Promise<RunResult>;
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<MemoryMatch[]>;

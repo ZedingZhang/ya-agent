@@ -4,6 +4,7 @@ import { LocalWorkspace } from "./local";
 import { singleAgent, toaAgent, type RunResult } from "./orchestrator";
 import type { ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search } from "./web";
+import type { DeepSeekCredential } from "./credentials";
 
 export interface RunTaskOptions {
   webMode?: WebMode;
@@ -11,14 +12,14 @@ export interface RunTaskOptions {
   toaWorkers?: number;
   onContent?: (content: string) => void;
   localWorkspace?: LocalWorkspace;
-  clientFactory?: (apiKey: string, signal?: AbortSignal) => DeepSeekClient;
+  clientFactory?: (apiKey: DeepSeekCredential, signal?: AbortSignal) => DeepSeekClient;
   webSearch?: ToolHandler;
   images?: UserImageContentPart[];
   signal?: AbortSignal;
 }
 
 export async function runTask(
-  apiKey: string,
+  apiKey: DeepSeekCredential,
   task: string,
   config: ModelConfig,
   options: RunTaskOptions = {},

@@ -13,6 +13,7 @@ import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
 import type { UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
+import { clearAccountCredential, saveAccountCredential } from "../src/credentials";
 
 describe("GUI controller", () => {
   let home: TempHome;
@@ -82,6 +83,22 @@ describe("GUI controller", () => {
     controller.saveModelConfig(config);
     controller.setSessionApiKey(" session-key ");
     expect(loadConfig()).toEqual(config);
+    expect(controller.apiKey()).toBe("session-key");
+  });
+
+  it("shares a stored account login with task execution and preserves the session API key after sign-out", async () => {
+    const account = { kind: "account", token: "account-test-token" } as const;
+    let usedCredential: unknown;
+    const controller = new GuiController(async (credential) => {
+      usedCredential = credential;
+      return { content: "Account answer", mode: "single", usage: {} };
+    });
+    controller.setSessionApiKey("session-key");
+    saveAccountCredential(account);
+    expect(controller.apiKey()).toEqual(account);
+    await controller.run({ task: "Hello", webMode: "off" });
+    expect(usedCredential).toEqual(account);
+    clearAccountCredential();
     expect(controller.apiKey()).toBe("session-key");
   });
 

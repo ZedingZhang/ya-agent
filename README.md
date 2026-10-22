@@ -19,7 +19,7 @@ Navigate projects and sessions on the left, chat with Ya on the right, and open 
 - **Bounded ToA:** one root coordinator uses at most two temporary workers with explicit token and timeout limits.
 - **Shared typed core:** the CLI and desktop application use the same configuration, memory, orchestration, API, web-search, and local-workspace modules.
 - **Code verification:** approved commands return exit codes and bounded output so Ya can run tests, type checks and builds, repair failures, and rerun checks.
-- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support, through the same OpenAI-compatible chat-completions path.
+- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support. API keys use Chat Completions; platform accounts use Messages.
 - **Isolated desktop renderer:** the Electron renderer has no Node.js or direct filesystem access. Privileged operations pass through a narrow preload bridge into the main process.
 
 ## Platform support
@@ -32,7 +32,26 @@ Release assets are self-contained and do not require Node.js. Node.js 22 or newe
 | Linux x64 (glibc) | Standalone executable | AppImage | `DEEPSEEK_API_KEY` or a session-only GUI key |
 | Windows x64 | Standalone `.exe` | Portable `.exe` | `DEEPSEEK_API_KEY` or a session-only GUI key |
 
-`ya auth deepseek` is macOS-only because it uses the system `security` utility. On Linux and Windows, use `DEEPSEEK_API_KEY` or enter a session-only key in Settings.
+Browser account sign-in is available on all three platforms. The API-key command `ya auth deepseek` is macOS-only because it uses the system `security` utility. On Linux and Windows, API-key users can use `DEEPSEEK_API_KEY` or enter a session-only key in Settings.
+
+## DeepSeek platform account sign-in
+
+Open **Settings → DeepSeek platform account → Sign in with DeepSeek** in the desktop app. Your browser opens [DeepSeek's platform](https://platform.deepseek.com/), where you sign in and approve the connection. Return to Ya after authorization. You can cancel while waiting, or sign out from the same settings card.
+
+The CLI uses the same browser flow:
+
+```sh
+ya login deepseek
+ya auth-status deepseek
+ya ask "Explain this project" --web off
+ya logout deepseek
+```
+
+Run the command and browser on the same computer. If the browser does not open automatically, open the URL printed by the CLI; Ctrl+C cancels the attempt. The callback listens only on `127.0.0.1` on a temporary port, and authorization expires after at most ten minutes.
+
+Account sign-in uses the PKCE protocol implemented by [DeepSeek's official Harness](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform). Ya receives a platform account grant and sends it to the official Messages API as `x-dsh-auth-token`; it does not request your password. Available access and billing follow your platform account. While signed in, the account takes priority over API keys. Signing out removes the account grant and attempts remote session revocation; existing API keys remain available. A rejected account token prompts you to sign in again.
+
+The account grant is stored separately from settings at `~/.ya/auth/credentials.json` (or `$YA_HOME/auth/credentials.json`). On Unix, the directory and file use permissions `0700` and `0600`; Windows uses the directory's access controls. Keep this user data directory private. The grant is never returned to the desktop renderer or stored in conversation history, and local file tools block reading the credential file.
 
 ## Install from source
 

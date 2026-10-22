@@ -29,6 +29,7 @@ interface AppState {
   workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
+  accountSignedIn: boolean;
   config: {
     model: "deepseek-flash" | "deepseek-v4-pro";
     thinkingEnabled: boolean;
@@ -91,6 +92,9 @@ interface YaRendererBridge {
     reasoningEffort: AppState["config"]["reasoningEffort"];
   }): Promise<AppState>;
   saveSettings(settings: Record<string, unknown>): Promise<AppState>;
+  loginDeepSeek(): Promise<AppState>;
+  cancelDeepSeekLogin(): Promise<void>;
+  logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask(options: Record<string, unknown>): Promise<RunResult>;
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number }>>;
@@ -134,6 +138,11 @@ const TEXT = {
     timeout: "ToA timeout (seconds)", apiKey: "DeepSeek API key", apiPlaceholder: "Leave blank to keep the current key",
     keychain: "Save in macOS Keychain", saveSettings: "Save settings", clearAudit: "Clear audit history", apiReady: "API key available",
     apiMissing: "No API key configured", saved: "Saved.", about: "About Ya", partial: "Some ToA worker results were unavailable.",
+    deepseekAccount: "DeepSeek platform account", accountHint: "Sign in and authorize Ya in your browser to use your DeepSeek platform account.",
+    accountLogin: "Sign in with DeepSeek", accountCancel: "Cancel sign-in", accountLogout: "Sign out",
+    accountSignedIn: "Signed in to DeepSeek", accountSignedOut: "Signed out", accountWaiting: "Complete sign-in in your browser…",
+    accountActive: "DeepSeek account available", accountLoggingOut: "Signing out…",
+    accountRevokeFailed: "Signed out locally. The platform session could not be revoked.",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
@@ -168,6 +177,11 @@ const TEXT = {
     timeout: "ToA 超时（秒）", apiKey: "DeepSeek API 密钥", apiPlaceholder: "留空以保留当前密钥",
     keychain: "保存到 macOS 钥匙串", saveSettings: "保存设置", clearAudit: "清除操作审计", apiReady: "API 密钥可用",
     apiMissing: "尚未配置 API 密钥", saved: "已保存。", about: "关于 Ya", partial: "部分 ToA 工作 Agent 未返回结果。",
+    deepseekAccount: "DeepSeek 开放平台账号", accountHint: "在浏览器中登录 DeepSeek 并授权 Ya，即可使用开放平台账号。",
+    accountLogin: "登录 DeepSeek", accountCancel: "取消登录", accountLogout: "退出登录",
+    accountSignedIn: "已登录 DeepSeek", accountSignedOut: "尚未登录", accountWaiting: "请在浏览器中完成登录和授权…",
+    accountActive: "DeepSeek 账号可用", accountLoggingOut: "正在退出登录…",
+    accountRevokeFailed: "已在本机退出，未能撤销平台会话。",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
@@ -187,6 +201,7 @@ let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
+let accountPending: "login" | "logout" | undefined;
 type CommandResult = Extract<ShellCommandEvent, { type: "finish" }>["result"];
 interface ConversationCommand {
   id: string;
@@ -870,6 +885,10 @@ async function runTask(): Promise<void> {
     activeTurn.answer = activeAnswer.textContent;
     activeTurn.status = "error";
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+    if (state.accountSignedIn) {
+      try { state = await bridge.state(); fillSettings(); }
+      catch { /* Keep the task error visible if refreshing account state also fails. */ }
+    }
   } finally {
     pendingAction = undefined;
     renderPendingAction();
@@ -1286,7 +1305,8 @@ function fillSettings(): void {
   element<HTMLInputElement>("setting-stream").checked = state.stream;
   element<HTMLInputElement>("setting-keychain").hidden = state.platform !== "darwin";
   element<HTMLElement>("setting-keychain-label").hidden = state.platform !== "darwin";
-  element<HTMLSpanElement>("api-state").textContent = state.hasApiKey ? t("apiReady") : t("apiMissing");
+  element<HTMLSpanElement>("api-state").textContent = state.accountSignedIn ? t("accountActive") : state.hasApiKey ? t("apiReady") : t("apiMissing");
+  renderAccount();
   element<HTMLSpanElement>("audit-state").textContent = `${state.auditLogCount} · ${state.auditLogBytes} bytes`;
   renderImages();
 }
@@ -1310,6 +1330,49 @@ function syncWorkspaceControls(): void {
   element<HTMLSelectElement>("web-mode").disabled = running;
   element<HTMLInputElement>("toa-enabled").disabled = running;
   element<HTMLSelectElement>("toa-workers").disabled = running || !element<HTMLInputElement>("toa-enabled").checked;
+  renderAccount();
+}
+
+function renderAccount(): void {
+  const running = document.body.classList.contains("task-running");
+  element<HTMLElement>("account-state").textContent = accountPending === "login" ? t("accountWaiting")
+    : accountPending === "logout" ? t("accountLoggingOut") : state.accountSignedIn ? t("accountSignedIn") : t("accountSignedOut");
+  element<HTMLButtonElement>("account-login").hidden = state.accountSignedIn || accountPending === "login";
+  element<HTMLButtonElement>("account-login").disabled = running || Boolean(accountPending);
+  element<HTMLButtonElement>("account-cancel").hidden = accountPending !== "login";
+  element<HTMLButtonElement>("account-logout").hidden = !state.accountSignedIn || accountPending === "login";
+  element<HTMLButtonElement>("account-logout").disabled = running || Boolean(accountPending);
+}
+
+async function signInDeepSeek(): Promise<void> {
+  accountPending = "login";
+  renderAccount();
+  try {
+    state = await bridge.loginDeepSeek();
+    setStatus(t("accountSignedIn"));
+  } catch (error) {
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  } finally {
+    try { state = await bridge.state(); }
+    catch { /* Release the sign-in controls even if the state refresh fails. */ }
+    accountPending = undefined;
+    fillSettings();
+  }
+}
+
+async function signOutDeepSeek(): Promise<void> {
+  accountPending = "logout";
+  renderAccount();
+  try {
+    const result = await bridge.logoutDeepSeek();
+    state = result.state;
+    setStatus(t(result.revoked ? "accountSignedOut" : "accountRevokeFailed"));
+  } catch (error) {
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  } finally {
+    accountPending = undefined;
+    fillSettings();
+  }
 }
 
 async function saveWorkspaceModelSelection(): Promise<void> {
@@ -1581,6 +1644,11 @@ function registerEvents(): void {
   element<HTMLButtonElement>("memory-create").addEventListener("click", () => void createMemory());
   element<HTMLButtonElement>("memory-prune").addEventListener("click", () => void pruneMemory());
   element<HTMLButtonElement>("settings-save").addEventListener("click", () => void saveSettings());
+  element<HTMLButtonElement>("account-login").addEventListener("click", () => void signInDeepSeek());
+  element<HTMLButtonElement>("account-cancel").addEventListener("click", () => {
+    void bridge.cancelDeepSeekLogin().catch((error: unknown) => setStatus(`${t("taskError")}: ${errorText(error)}`, "error"));
+  });
+  element<HTMLButtonElement>("account-logout").addEventListener("click", () => void signOutDeepSeek());
   element<HTMLButtonElement>("audit-clear").addEventListener("click", () => void clearAudit());
   element<HTMLButtonElement>("learn-button").addEventListener("click", learnFromAnswer);
 
