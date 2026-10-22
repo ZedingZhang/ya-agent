@@ -980,7 +980,7 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
       syncWorkspaceControls();
       document.querySelector('#task-input').value = '新建一个 md 文件，内容是 Ya 的介绍';
       await runTask();
-      if (source.turns.at(-1).status !== 'error' || !source.turns.at(-1).answer.includes('No DeepSeek API key')) {
+      if (source.turns.at(-1).status !== 'error' || !source.turns.at(-1).answer.includes('Sign in to DeepSeek or add an API key')) {
         throw new Error('The missing-key conversation fixture did not fail as expected.');
       }
       return { originalId, sourceId: source.id };

@@ -201,7 +201,7 @@ describe("GUI controller", () => {
       return { content: "Creating ya.md", mode: "single", usage: {} };
     });
     const key = vi.spyOn(controller, "apiKey").mockReturnValue(undefined);
-    await expect(controller.run({ task: "Create ya.md" })).rejects.toThrow("No DeepSeek API key");
+    await expect(controller.run({ task: "Create ya.md" })).rejects.toThrow("Sign in to DeepSeek or add an API key");
     expect(calls).toHaveLength(0);
     key.mockRestore();
     controller.setSessionApiKey("test-key");
