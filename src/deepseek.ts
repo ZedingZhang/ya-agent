@@ -248,7 +248,12 @@ export class DeepSeekClient {
         }
         if (!isRecord(chunk)) return false;
         if (typeof this.apiKey !== "string") {
-          if (chunk.type === "error") throw new DeepSeekError("DeepSeek account stream returned an error.");
+          if (chunk.type === "error") {
+            const type = isRecord(chunk.error) ? chunk.error.type : undefined;
+            const status = type === "rate_limit_error" ? 429 : type === "overloaded_error" ? 529 : type === "api_error" ? 500 : undefined;
+            throw new DeepSeekError("DeepSeek account stream returned an error.", status,
+              retryAfterMilliseconds(response.headers.get("Retry-After")));
+          }
           if (chunk.type === "message_start" && isRecord(chunk.message) && isRecord(chunk.message.usage)) Object.assign(usage, chunk.message.usage);
           if (isRecord(chunk.usage)) Object.assign(usage, chunk.usage);
           if (chunk.type === "content_block_start") {
@@ -266,7 +271,7 @@ export class DeepSeekClient {
           if (chunk.type === "content_block_delta" && isRecord(chunk.delta)) {
             const block = accountBlocks[chunk.index as number];
             if (!block) throw new DeepSeekError("Invalid DeepSeek account stream block.");
-            if (typeof chunk.delta.text === "string") {
+            if (typeof chunk.delta.text === "string" && chunk.delta.text) {
               block.text = String(block.text ?? "") + chunk.delta.text;
               content.push(chunk.delta.text);
               markDelivered();

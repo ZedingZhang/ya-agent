@@ -25,6 +25,7 @@ export interface AppState {
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
+  accountError: boolean;
   config: SerializedConfig;
   cards: MemoryCard[];
   auditLogCount: number;

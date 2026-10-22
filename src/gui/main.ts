@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   app,
@@ -32,7 +32,7 @@ import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
 import { search } from "../web";
 import { loginDeepSeek, logoutDeepSeek } from "../account";
-import { loadAccountCredential } from "../credentials";
+import { accountCredentialPath, loadAccountCredential, type DeepSeekCredential } from "../credentials";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
 import { installApplicationMenu } from "./menu";
@@ -80,6 +80,10 @@ function createController(): GuiController {
 function appState(): AppState {
   const logs = controller.auditLogs();
   const validWorkspace = controller.validWorkspace();
+  let credential: DeepSeekCredential | undefined;
+  let accountError = false;
+  try { credential = controller.apiKey(); }
+  catch { accountError = true; }
   return {
     version: VERSION,
     platform: process.platform,
@@ -88,8 +92,9 @@ function appState(): AppState {
     ...(validWorkspace ? { validWorkspace } : {}),
     workspaces: controller.workspaces,
     stream: controller.stream,
-    hasApiKey: Boolean(controller.apiKey()),
-    accountSignedIn: Boolean(loadAccountCredential()),
+    hasApiKey: Boolean(credential),
+    accountSignedIn: typeof credential === "object" && credential.kind === "account",
+    accountError,
     config: {
       model: controller.config.model,
       thinkingEnabled: controller.config.thinkingEnabled,
@@ -1197,12 +1202,32 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
     }
   };
   try {
+    const credentialFile = accountCredentialPath();
+    mkdirSync(dirname(credentialFile), { recursive: true });
+    writeFileSync(credentialFile, "{}");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const cleared = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('[data-page="settings"]').click();
+      const recoverable = state.accountError && !state.accountSignedIn
+        && !document.querySelector('#account-login').hidden && !document.querySelector('#account-logout').hidden
+        && document.querySelector('#account-logout').textContent === t('accountClear')
+        && document.querySelector('#account-state').textContent === t('accountInvalid');
+      document.querySelector('#account-logout').click();
+      const deadline = Date.now() + 5000;
+      while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      return recoverable && !state.accountError && !state.accountSignedIn && document.querySelector('#account-logout').hidden;
+    })()`) as boolean;
+    if (!cleared || loadAccountCredential()) throw new Error("Invalid account credentials blocked desktop startup or cleanup.");
+    writeFileSync(credentialFile, "{");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
     const signedIn = await window.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-page="settings"]').click();
       document.querySelector('#account-login').click();
       const deadline = Date.now() + 5000;
       while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
-      return state.accountSignedIn && document.querySelector('#account-login').hidden
+      return state.accountSignedIn && !state.accountError && document.querySelector('#account-login').hidden
         && !document.querySelector('#account-logout').hidden && !document.body.textContent.includes('smoke-account-token')
         && !JSON.stringify(localStorage).includes('smoke-account-token');
     })()`) as boolean;

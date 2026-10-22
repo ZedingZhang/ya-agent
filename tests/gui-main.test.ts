@@ -49,7 +49,7 @@ vi.mock("../src/gui/controller", () => ({
     auditLogs() { return []; }
     auditLogTotalBytes() { return 0; }
     validWorkspace() { return undefined; }
-    apiKey() { return "test-key"; }
+    apiKey() { return mocks.accountCredential() ?? "test-key"; }
     cards() { return []; }
     run = mocks.run;
   },
@@ -84,6 +84,31 @@ describe("GUI pending action lifecycle", () => {
   });
 
   afterEach(() => { vi.useRealTimers(); });
+
+  it("keeps startup state available when the saved account credential cannot be read", async () => {
+    mocks.accountCredential.mockImplementation(() => { throw new Error("private-credential-record"); });
+    const state = await mocks.handlers.get("state:get")!(event);
+    expect(state).toMatchObject({ accountSignedIn: false, accountError: true });
+    expect(JSON.stringify(state)).not.toContain("private-credential-record");
+  });
+
+  it.each(["login", "logout"])("can recover invalid account state through %s", async (action) => {
+    mocks.accountCredential.mockImplementation(() => { throw new Error("Invalid saved credential"); });
+    expect(await mocks.handlers.get("state:get")!(event)).toMatchObject({ accountError: true });
+    mocks.login.mockImplementation(async () => {
+      mocks.accountCredential.mockReturnValue({ kind: "account", token: "replacement-token" });
+    });
+    mocks.logout.mockImplementation(async () => {
+      mocks.accountCredential.mockReturnValue(undefined);
+      return true;
+    });
+    const result = await mocks.handlers.get(`account:${action}`)!(event);
+    const state = action === "logout" ? result.state : result;
+    expect(state.accountError).toBeFalsy();
+    expect(state.accountSignedIn).toBe(action === "login");
+    expect(state.hasApiKey).toBe(true);
+    expect(JSON.stringify(state)).not.toContain("replacement-token");
+  });
 
   it("returns only safe account state after sign-in, never the grant token", async () => {
     mocks.login.mockImplementation(async () => {

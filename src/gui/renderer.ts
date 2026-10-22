@@ -30,6 +30,7 @@ interface AppState {
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
+  accountError: boolean;
   config: {
     model: "deepseek-flash" | "deepseek-v4-pro";
     thinkingEnabled: boolean;
@@ -144,6 +145,7 @@ const TEXT = {
     accountSignedIn: "Signed in to DeepSeek", accountSignedOut: "Signed out", accountWaiting: "Complete sign-in in your browser…",
     accountActive: "DeepSeek account available", accountLoggingOut: "Signing out…",
     accountRevokeFailed: "Signed out locally. The platform session could not be revoked.",
+    accountInvalid: "Saved sign-in is invalid. Sign in again or clear it.", accountClear: "Clear saved sign-in",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
@@ -183,6 +185,7 @@ const TEXT = {
     accountSignedIn: "已登录 DeepSeek", accountSignedOut: "尚未登录", accountWaiting: "请在浏览器中完成登录和授权…",
     accountActive: "DeepSeek 账号可用", accountLoggingOut: "正在退出登录…",
     accountRevokeFailed: "已在本机退出，未能撤销平台会话。",
+    accountInvalid: "保存的登录信息无效，请重新登录或清除。", accountClear: "清除登录信息",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
@@ -1312,7 +1315,8 @@ function fillSettings(): void {
   element<HTMLInputElement>("setting-stream").checked = state.stream;
   element<HTMLInputElement>("setting-keychain").hidden = state.platform !== "darwin";
   element<HTMLElement>("setting-keychain-label").hidden = state.platform !== "darwin";
-  element<HTMLSpanElement>("api-state").textContent = state.accountSignedIn ? t("accountActive") : state.hasApiKey ? t("apiReady") : t("apiMissing");
+  element<HTMLSpanElement>("api-state").textContent = state.accountError ? t("accountInvalid")
+    : state.accountSignedIn ? t("accountActive") : state.hasApiKey ? t("apiReady") : t("apiMissing");
   renderAccount();
   element<HTMLSpanElement>("audit-state").textContent = `${state.auditLogCount} · ${state.auditLogBytes} bytes`;
   renderImages();
@@ -1343,12 +1347,14 @@ function syncWorkspaceControls(): void {
 function renderAccount(): void {
   const running = document.body.classList.contains("task-running");
   element<HTMLElement>("account-state").textContent = accountPending === "login" ? t("accountWaiting")
-    : accountPending === "logout" ? t("accountLoggingOut") : state.accountSignedIn ? t("accountSignedIn") : t("accountSignedOut");
+    : accountPending === "logout" ? t("accountLoggingOut") : state.accountError ? t("accountInvalid")
+    : state.accountSignedIn ? t("accountSignedIn") : t("accountSignedOut");
   element<HTMLButtonElement>("account-login").hidden = state.accountSignedIn || accountPending === "login";
   element<HTMLButtonElement>("account-login").disabled = running || Boolean(accountPending);
   element<HTMLButtonElement>("account-cancel").hidden = accountPending !== "login";
-  element<HTMLButtonElement>("account-logout").hidden = !state.accountSignedIn || accountPending === "login";
+  element<HTMLButtonElement>("account-logout").hidden = (!state.accountSignedIn && !state.accountError) || accountPending === "login";
   element<HTMLButtonElement>("account-logout").disabled = running || Boolean(accountPending);
+  element<HTMLButtonElement>("account-logout").textContent = t(state.accountError ? "accountClear" : "accountLogout");
 }
 
 async function signInDeepSeek(): Promise<void> {

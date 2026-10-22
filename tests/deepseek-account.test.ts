@@ -113,6 +113,100 @@ describe("DeepSeek account inference", () => {
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
+  it.each(["overloaded_error", "api_error", "rate_limit_error"])("retries an in-band %s before delivering account text", async (type) => {
+    const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(stream([
+      { type: "error", error: { type, message: "Temporary failure" } },
+    ])).mockResolvedValueOnce(stream([
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Recovered" } },
+      { type: "message_stop" },
+    ]));
+    const sleep = vi.fn(async () => undefined);
+    const onContent = vi.fn();
+    const reply = await new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, onContent);
+    expect(reply.content).toBe("Recovered");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(500);
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Recovered");
+  });
+
+  it.each(["authentication_error", "invalid_request_error", "unknown_error"])("does not retry an in-band %s", async (type) => {
+    const fetcher = vi.fn<FetchLike>(async () => stream([{ type: "error", error: { type, message: "private-detail" } }]));
+    const sleep = vi.fn(async () => undefined);
+    await expect(new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, () => undefined))
+      .rejects.toThrow("DeepSeek account stream returned an error.");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("can retry after empty account text deltas before visible output", async () => {
+    const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(stream([
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "" } },
+      { type: "error", error: { type: "overloaded_error" } },
+    ])).mockResolvedValueOnce(stream([
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "Recovered" } },
+      { type: "message_stop" },
+    ]));
+    const sleep = vi.fn(async () => undefined);
+    const onContent = vi.fn();
+    const reply = await new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, onContent);
+    expect(reply.content).toBe("Recovered");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(500);
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Recovered");
+  });
+
+  it("bounds retries for repeated in-band overload errors", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => stream([{ type: "error", error: { type: "overloaded_error" } }]));
+    const sleep = vi.fn(async () => undefined);
+    await expect(new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, () => undefined))
+      .rejects.toThrow("DeepSeek account stream returned an error.");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([[500], [1_000]]);
+  });
+
+  it.each(["start", "delta"])("does not replay account text delivered in a block %s before an in-band error", async (stage) => {
+    const fetcher = vi.fn<FetchLike>(async () => stream([
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: stage === "start" ? "Partial" : "" } },
+      ...(stage === "delta" ? [{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Partial" } }] : []),
+      { type: "error", error: { type: "overloaded_error" } },
+    ]));
+    const sleep = vi.fn(async () => undefined);
+    const onContent = vi.fn();
+    await expect(new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, onContent))
+      .rejects.toThrow("DeepSeek account stream returned an error.");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Partial");
+  });
+
+  it("honors Retry-After when a transient failure arrives inside an account stream", async () => {
+    const response = stream([{ type: "error", error: { type: "rate_limit_error" } }]);
+    response.headers.set("Retry-After", "2");
+    const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(response)
+      .mockResolvedValueOnce(stream([{ type: "message_stop" }]));
+    const sleep = vi.fn(async () => undefined);
+    await new DeepSeekClient(credential, fetcher, sleep).completeStream([], new ModelConfig(), 500, () => undefined);
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(2_000);
+  });
+
+  it("can retry after thinking-only account output without replaying stale reasoning", async () => {
+    const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(stream([
+      { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "Incomplete thought" } },
+      { type: "error", error: { type: "api_error" } },
+    ])).mockResolvedValueOnce(stream([
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "Recovered" } },
+      { type: "message_stop" },
+    ]));
+    const onContent = vi.fn();
+    const reply = await new DeepSeekClient(credential, fetcher, async () => undefined)
+      .completeStream([], new ModelConfig(), 500, onContent);
+    expect(reply.content).toBe("Recovered");
+    expect(reply.reasoningContent).toBeUndefined();
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Recovered");
+  });
+
   it.each([false, true])("invalidates only the rejected login on HTTP 401 (replacement: %s)", async (replacement) => {
     saveAccountCredential(replacement ? { kind: "account", token: "replacement-token" } : credential);
     const fetcher = vi.fn<FetchLike>(async () => new Response(`error echoes ${credential.token}`, { status: 401 }));
