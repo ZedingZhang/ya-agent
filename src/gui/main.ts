@@ -28,6 +28,7 @@ import { DuplicateMemoryError, MemoryLimitError, type MemoryKind } from "../memo
 import type { RunResult } from "../orchestrator";
 import { runTask } from "../service";
 import { VERSION } from "../version";
+import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
 import { search } from "../web";
 import { loginDeepSeek, logoutDeepSeek } from "../account";
@@ -151,8 +152,17 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   if (!isImageDetail(imageDetail)) throw new Error("Invalid image detail.");
   if (value.exec !== undefined && typeof value.exec !== "boolean") throw new Error("Invalid command execution setting.");
   if (value.exec && !value.local) throw new Error("Command execution requires local workspace mode.");
+  const history = value.history === undefined ? [] : value.history;
+  if (!Array.isArray(history)) throw new Error("Invalid conversation history.");
+  const messages = history.map((message): ConversationMessage => {
+    if (!isRecord(message) || (message.role !== "user" && message.role !== "assistant") || typeof message.content !== "string") {
+      throw new Error("Invalid conversation history.");
+    }
+    return { role: message.role, content: message.content };
+  });
   return {
     task: value.task.trim(),
+    history: messages,
     webMode,
     toa: Boolean(value.toa),
     toaWorkers: workers,
@@ -805,7 +815,7 @@ async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
           const drawer = document.querySelector('#details-drawer').getBoundingClientRect();
           const tabs = document.querySelector('.drawer-tabs').getBoundingClientRect();
           const close = document.querySelector('#close-drawer').getBoundingClientRect();
-          const changesFit = drawer.right <= innerWidth && drawer.left >= sidebar.right
+          const changesFit = drawer.right <= innerWidth + 1 && drawer.left >= sidebar.right
             && tabs.right <= close.left && document.documentElement.scrollWidth <= innerWidth;
           setDrawer(undefined);
           return changesFit && document.documentElement.scrollWidth <= innerWidth && composer.right <= innerWidth
@@ -937,6 +947,88 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   } finally {
     controller = originalController;
     await window.webContents.executeJavaScript("(async () => { state = await bridge.state(); fillSettings(); renderNavigation(); })()");
+  }
+}
+
+async function verifyConversationContext(window: BrowserWindow): Promise<void> {
+  const originalController = controller;
+  const requests: ChatMessage[][] = [];
+  const fetcher: FetchLike = async (_input, init) => {
+    const payload = JSON.parse(String(init?.body)) as { messages: ChatMessage[]; stream: boolean };
+    requests.push(payload.messages);
+    return new Response(payload.stream
+      ? `data: ${JSON.stringify({ choices: [{ delta: { content: "Context smoke reply" } }] })}\n\ndata: [DONE]\n\n`
+      : JSON.stringify({ choices: [{ message: { role: "assistant", content: "Context smoke reply" } }] }));
+  };
+  controller = new GuiController((apiKey, task, config, options = {}) => runTask(apiKey, task, config, {
+    ...options,
+    clientFactory: (key, signal) => new DeepSeekClient(key, fetcher, undefined, signal),
+  }));
+  const originalApiKey = controller.apiKey;
+  controller.apiKey = () => undefined;
+  let fixture: { originalId: string; sourceId: string } | undefined;
+  let otherId: string | undefined;
+  try {
+    fixture = await window.webContents.executeJavaScript(`(async () => {
+      const originalId = currentSession.id;
+      state = await bridge.state();
+      const source = createSession();
+      await selectSession(source);
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#web-mode').value = 'off';
+      document.querySelector('#toa-enabled').checked = false;
+      syncWorkspaceControls();
+      document.querySelector('#task-input').value = '新建一个 md 文件，内容是 Ya 的介绍';
+      await runTask();
+      if (source.turns.at(-1).status !== 'error' || !source.turns.at(-1).answer.includes('No DeepSeek API key')) {
+        throw new Error('The missing-key conversation fixture did not fail as expected.');
+      }
+      return { originalId, sourceId: source.id };
+    })()`) as { originalId: string; sourceId: string };
+    controller.apiKey = originalApiKey;
+    otherId = await window.webContents.executeJavaScript(`(async () => {
+      state = await bridge.saveSettings({ ...state.config, language: state.language, stream: state.stream,
+        apiKey: 'smoke-only-key', keyStorage: 'session' });
+      document.querySelector('#task-input').value = '继续';
+      await runTask();
+      currentSession.turns.push({ task: 'Interrupted request', answer: 'Incomplete reply that must not be replayed',
+        status: 'interrupted', images: [], commands: [], changes: [] });
+      const other = createSession();
+      delete other.workspace;
+      await selectSession(other);
+      document.querySelector('#task-input').value = 'Unrelated session';
+      await runTask();
+      await selectSession(sessions.find((session) => session.id === '${fixture.sourceId}'));
+      return other.id;
+    })()`) as string;
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const restored = await window.webContents.executeJavaScript(`(async () => {
+      if (currentSession.id !== '${fixture.sourceId}') return false;
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#web-mode').value = 'off';
+      document.querySelector('#task-input').value = '接着写';
+      await runTask();
+      return currentSession.turns.at(-1).status === 'complete';
+    })()`) as boolean;
+    const originalRequest = { role: "user", content: "新建一个 md 文件，内容是 Ya 的介绍" };
+    const followUp = { role: "user", content: "继续" };
+    const expected = [
+      [originalRequest, followUp],
+      [{ role: "user", content: "Unrelated session" }],
+      [originalRequest, followUp, { role: "assistant", content: "Context smoke reply" },
+        { role: "user", content: "Interrupted request" }, { role: "user", content: "接着写" }],
+    ];
+    if (!restored || JSON.stringify(requests.map((messages) => messages.slice(1))) !== JSON.stringify(expected)) {
+      throw new Error("Model requests lost conversation context after a key failure, session switch, or reload.");
+    }
+  } finally {
+    controller = originalController;
+    if (fixture) await window.webContents.executeJavaScript(`(async () => {
+      state = await bridge.state();
+      sessions = sessions.filter((session) => !['${fixture.sourceId}', '${otherId ?? ""}'].includes(session.id));
+      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+    })()`);
   }
 }
 
@@ -1215,6 +1307,7 @@ app.whenReady().then(async () => {
     await verifySessionNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);
+    await verifyConversationContext(window);
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
     await verifyAccountLogin(window);

@@ -56,6 +56,7 @@ interface LocalActivity {
 }
 
 type FileChange = import("../file-diff").FileChange;
+type ConversationMessage = import("../types").ConversationMessage;
 
 type TaskEvent =
   | { type: "content"; content: string }
@@ -828,6 +829,11 @@ async function runTask(): Promise<void> {
     if (!window.confirm(message)) return;
   }
 
+  const history = currentSession.turns.flatMap((turn): ConversationMessage[] => {
+    const messages: ConversationMessage[] = [{ role: "user", content: turn.task }];
+    if (turn.status === "complete" && turn.answer) messages.push({ role: "assistant", content: turn.answer });
+    return messages;
+  });
   input.value = "";
   resizeTaskInput();
   currentSession.draft = "";
@@ -853,6 +859,7 @@ async function runTask(): Promise<void> {
   try {
     const result = await bridge.runTask({
       task,
+      history,
       webMode: element<HTMLSelectElement>("web-mode").value,
       toa,
       toaWorkers: Number(element<HTMLSelectElement>("toa-workers").value),

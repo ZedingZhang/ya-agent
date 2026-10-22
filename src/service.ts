@@ -2,11 +2,12 @@ import { ModelConfig } from "./config";
 import { DeepSeekClient } from "./deepseek";
 import { LocalWorkspace } from "./local";
 import { singleAgent, toaAgent, type RunResult } from "./orchestrator";
-import type { ToolHandler, UserImageContentPart, WebMode } from "./types";
+import type { ConversationMessage, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search } from "./web";
 import type { DeepSeekCredential } from "./credentials";
 
 export interface RunTaskOptions {
+  history?: ConversationMessage[];
   webMode?: WebMode;
   toa?: boolean;
   toaWorkers?: number;
@@ -30,7 +31,8 @@ export async function runTask(
   const webSearch = options.webSearch ?? ((arguments_) => search(arguments_, undefined, undefined, options.signal));
   const localWorkspace = options.localWorkspace?.withSignal(options.signal);
   const images = options.images ?? [];
-  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, webSearch, images);
+  const history = options.history ?? [];
+  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, webSearch, images, history);
   return singleAgent(
     client,
     task,
@@ -40,5 +42,6 @@ export async function runTask(
     localWorkspace,
     webSearch,
     images,
+    history,
   );
 }

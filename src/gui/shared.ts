@@ -4,7 +4,7 @@ import type { FileChange } from "../file-diff";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
-import type { ImageDetail, WebMode } from "../types";
+import type { ConversationMessage, ImageDetail, WebMode } from "../types";
 import type { Language } from "./controller";
 
 export interface SerializedConfig {
@@ -48,6 +48,7 @@ export interface SettingsUpdate {
 
 export interface RendererTaskOptions {
   task: string;
+  history?: ConversationMessage[];
   webMode: WebMode;
   toa: boolean;
   toaWorkers: 1 | 2;
