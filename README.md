@@ -19,7 +19,7 @@ Navigate projects and sessions on the left, chat with Ya on the right, and open 
 - **Bounded ToA:** one root coordinator uses at most two temporary workers with explicit token and timeout limits.
 - **Shared typed core:** the CLI and desktop application use the same configuration, memory, orchestration, API, web-search, and local-workspace modules.
 - **Code verification:** approved commands return exit codes and bounded output so Ya can run tests, type checks and builds, repair failures, and rerun checks.
-- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support, through the same OpenAI-compatible chat-completions path.
+- **Vision input:** the CLI and desktop application can send verified JPEG, PNG, GIF, and WebP inputs to `deepseek-flash`, which has native vision support. API keys use Chat Completions; platform accounts use Messages.
 - **Isolated desktop renderer:** the Electron renderer has no Node.js or direct filesystem access. Privileged operations pass through a narrow preload bridge into the main process.
 
 ## Platform support
@@ -32,7 +32,26 @@ Release assets are self-contained and do not require Node.js. Node.js 22 or newe
 | Linux x64 (glibc) | Standalone executable | AppImage | `DEEPSEEK_API_KEY` or a session-only GUI key |
 | Windows x64 | Standalone `.exe` | Portable `.exe` | `DEEPSEEK_API_KEY` or a session-only GUI key |
 
-`ya auth deepseek` is macOS-only because it uses the system `security` utility. On Linux and Windows, use `DEEPSEEK_API_KEY` or enter a session-only key in Settings.
+Browser account sign-in is available on all three platforms. The API-key command `ya auth deepseek` is macOS-only because it uses the system `security` utility. On Linux and Windows, API-key users can use `DEEPSEEK_API_KEY` or enter a session-only key in Settings.
+
+## DeepSeek platform account sign-in
+
+Open **Settings → DeepSeek platform account → Sign in with DeepSeek** in the desktop app. Your browser opens [DeepSeek's platform](https://platform.deepseek.com/), where you sign in and approve the connection. Return to Ya after authorization. You can cancel while waiting, or sign out from the same settings card.
+
+The CLI uses the same browser flow:
+
+```sh
+ya login deepseek
+ya auth-status deepseek
+ya ask "Explain this project" --web off
+ya logout deepseek
+```
+
+Run the command and browser on the same computer. If the browser does not open automatically, open the URL printed by the CLI; Ctrl+C cancels the attempt. The callback listens only on `127.0.0.1` on a temporary port, and authorization expires after at most ten minutes.
+
+Account sign-in uses the PKCE protocol implemented by [DeepSeek's official Harness](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform). Ya receives a platform account grant and sends it to the official Messages API as `x-dsh-auth-token`; it does not request your password. Available access and billing follow your platform account. While signed in, the account takes priority over API keys. Signing out removes the account grant and attempts remote session revocation; existing API keys remain available. A rejected account token prompts you to sign in again.
+
+The account grant is stored separately from settings at `~/.ya/auth/credentials.json` (or `$YA_HOME/auth/credentials.json`). On Unix, the directory and file use permissions `0700` and `0600`; Windows uses the directory's access controls. Keep this user data directory private. The grant is never returned to the desktop renderer or stored in conversation history, and local file tools block reading the credential file.
 
 ## Install from source
 
@@ -135,7 +154,7 @@ ya ask --image ./chart.png \
 ya ask --image file-api-EXISTING_ID "Read this uploaded image"
 ```
 
-`--image-detail` accepts `auto` (the default), `low`, `high`, or `original`. `low` downsizes an image to 512×512 before inference; the other values currently preserve the original image. Local files are checked by their actual file signature—not their extension—and converted to canonical data URLs only after validation. JPEG, PNG, GIF, and WebP are supported. Image content is allowed only with `deepseek-flash` and is placed only in the user message, as required by DeepSeek's [vision guide](https://api-docs.deepseek.com/guides/vision/) and [chat-completions schema](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/).
+`--image-detail` accepts `auto` (the default), `low`, `high`, or `original`. With API-key authentication, `low` downsizes an image to 512×512 before inference; the other values currently preserve the original image. Account sign-in supports `auto`, `high`, and `original`; it rejects `low` for local files, data URLs, and external image URLs before sending a request. The desktop labels this option as API-key-only while signed in. Files API IDs are unaffected by the detail setting. Local files are checked by their actual file signature—not their extension—and converted to canonical data URLs only after validation. JPEG, PNG, GIF, and WebP are supported. Image content is allowed only with `deepseek-flash` and is placed only in the user message, as required by DeepSeek's [vision guide](https://api-docs.deepseek.com/guides/vision/) and [chat-completions schema](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/).
 
 Ya enforces DeepSeek's limit of 600 images and 8,192 characters per external URL. A single local or data-URL image may contain at most 32 MiB; Ya conservatively caps all inline image bytes at 32 MiB so base64 expansion and the prompt stay below the API's 48 MiB request-body limit. A `file-api-*` value must refer to an image already uploaded through DeepSeek's Files API; Ya does not upload it for you.
 

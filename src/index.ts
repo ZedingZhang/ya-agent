@@ -9,6 +9,9 @@ export {
   saveConfig,
 } from "./config";
 export { DeepSeekClient, DeepSeekError } from "./deepseek";
+export { loginDeepSeek, logoutDeepSeek } from "./account";
+export type { AccountLoginOptions } from "./account";
+export type { AccountCredential, DeepSeekCredential } from "./credentials";
 export {
   MAX_IMAGES_PER_REQUEST,
   MAX_IMAGE_URL_LENGTH,

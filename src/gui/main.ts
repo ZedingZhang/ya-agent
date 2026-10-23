@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   app,
@@ -31,6 +31,8 @@ import { VERSION } from "../version";
 import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
 import { search } from "../web";
+import { loginDeepSeek, logoutDeepSeek } from "../account";
+import { accountCredentialPath, loadAccountCredential, type DeepSeekCredential } from "../credentials";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
 import { installApplicationMenu } from "./menu";
@@ -50,6 +52,8 @@ let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 let activeTaskController: AbortController | undefined;
 let activeTaskPromise: Promise<RunResult> | undefined;
+let activeLoginController: AbortController | undefined;
+let activeLoginPromise: Promise<void> | undefined;
 const LOCAL_ACTION_TIMEOUT_MS = 120_000;
 const pendingActions = new Map<string, {
   resolve: (approved: boolean) => void;
@@ -76,6 +80,10 @@ function createController(): GuiController {
 function appState(): AppState {
   const logs = controller.auditLogs();
   const validWorkspace = controller.validWorkspace();
+  let credential: DeepSeekCredential | undefined;
+  let accountError = false;
+  try { credential = controller.apiKey(); }
+  catch { accountError = true; }
   return {
     version: VERSION,
     platform: process.platform,
@@ -84,7 +92,9 @@ function appState(): AppState {
     ...(validWorkspace ? { validWorkspace } : {}),
     workspaces: controller.workspaces,
     stream: controller.stream,
-    hasApiKey: Boolean(controller.apiKey()),
+    hasApiKey: Boolean(credential),
+    accountSignedIn: typeof credential === "object" && credential.kind === "account",
+    accountError,
     config: {
       model: controller.config.model,
       thinkingEnabled: controller.config.thinkingEnabled,
@@ -281,8 +291,42 @@ function registerIpc(): void {
     return appState();
   });
 
+  ipcMain.handle("account:login", async (event) => {
+    assertTrustedSender(event);
+    if (taskRunning || activeLoginPromise) throw new Error("Finish the current task or sign-in attempt first.");
+    const cancellation = new AbortController();
+    activeLoginController = cancellation;
+    activeLoginPromise = loginDeepSeek({
+      openBrowser: (url) => shell.openExternal(url), fetcher: electronFetch,
+      locale: controller.language, signal: cancellation.signal,
+    });
+    try {
+      await activeLoginPromise;
+      mainWindow?.focus();
+      return appState();
+    } finally {
+      activeLoginController = undefined;
+      activeLoginPromise = undefined;
+    }
+  });
+
+  ipcMain.handle("account:cancel", (event) => {
+    assertTrustedSender(event);
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled."));
+  });
+
+  ipcMain.handle("account:logout", async (event) => {
+    assertTrustedSender(event);
+    if (taskRunning) throw new Error("Finish the current task before signing out.");
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled."));
+    await activeLoginPromise?.catch(() => undefined);
+    const revoked = await logoutDeepSeek(electronFetch, controller.language);
+    return { state: appState(), revoked };
+  });
+
   ipcMain.handle("task:run", async (event, raw: unknown) => {
     assertTrustedSender(event);
+    if (activeLoginPromise) throw new Error("Finish or cancel DeepSeek sign-in before starting a task.");
     if (taskRunning) throw new Error("A task is already running.");
     const options = validateTaskOptions(raw);
     if (options.imageIds.length > 0 && !isVisionModel(controller.config.model)) {
@@ -432,15 +476,19 @@ async function createWindow(show = true): Promise<BrowserWindow> {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
   mainWindow.webContents.on("did-start-loading", () => {
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window reload."));
     cancelTask(new Error("The renderer was reloaded while running a task."));
   });
   mainWindow.webContents.on("destroyed", () => {
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window close."));
     cancelTask(new Error("The renderer was destroyed while running a task."));
   });
   mainWindow.webContents.on("render-process-gone", () => {
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by renderer exit."));
     cancelTask(new Error("The renderer exited while running a task."));
   });
   mainWindow.on("closed", () => {
+    activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window close."));
     mainWindow = undefined;
     cancelTask(new Error("The window was closed while running a task."));
     selectedImages.clear();
@@ -937,7 +985,7 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
       syncWorkspaceControls();
       document.querySelector('#task-input').value = '新建一个 md 文件，内容是 Ya 的介绍';
       await runTask();
-      if (source.turns.at(-1).status !== 'error' || !source.turns.at(-1).answer.includes('No DeepSeek API key')) {
+      if (source.turns.at(-1).status !== 'error' || !source.turns.at(-1).answer.includes('Sign in to DeepSeek or add an API key')) {
         throw new Error('The missing-key conversation fixture did not fail as expected.');
       }
       return { originalId, sourceId: source.id };
@@ -1131,6 +1179,90 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
   }
 }
 
+async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
+  const originalFetch = net.fetch;
+  const originalOpen = shell.openExternal;
+  let initialization: { redirect_uri: string; state: string } | undefined;
+  let approve = true;
+  let callback: Promise<Response> | undefined;
+  const envelope = (value: unknown): Response => Response.json({ code: 0, data: { biz_code: 0, biz_data: value } });
+  net.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    if (url.origin !== "https://platform.deepseek.com") throw new Error("Unexpected account smoke-test destination.");
+    if (url.pathname.endsWith("auth_init")) {
+      initialization = JSON.parse(String(init?.body)) as typeof initialization;
+      return envelope({ authorize_id: "smoke-attempt", authorize_url: "https://platform.deepseek.com/dsh/authorize", expires_in: 600 });
+    }
+    if (url.pathname.endsWith("auth_exchange")) return envelope({ token: "smoke-account-token", authorized_url: "https://platform.deepseek.com/dsh/authorized" });
+    return envelope({});
+  };
+  shell.openExternal = async () => {
+    if (approve && initialization) {
+      callback = fetch(`${initialization.redirect_uri}?state=${initialization.state}&code=smoke-code`, { redirect: "manual" });
+    }
+  };
+  try {
+    const credentialFile = accountCredentialPath();
+    mkdirSync(dirname(credentialFile), { recursive: true });
+    writeFileSync(credentialFile, "{}");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const cleared = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('[data-page="settings"]').click();
+      const recoverable = state.accountError && !state.accountSignedIn
+        && !document.querySelector('#account-login').hidden && !document.querySelector('#account-logout').hidden
+        && document.querySelector('#account-logout').textContent === t('accountClear')
+        && document.querySelector('#account-state').textContent === t('accountInvalid');
+      document.querySelector('#account-logout').click();
+      const deadline = Date.now() + 5000;
+      while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      return recoverable && !state.accountError && !state.accountSignedIn && document.querySelector('#account-logout').hidden;
+    })()`) as boolean;
+    if (!cleared || loadAccountCredential()) throw new Error("Invalid account credentials blocked desktop startup or cleanup.");
+    writeFileSync(credentialFile, "{");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const signedIn = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('[data-page="settings"]').click();
+      document.querySelector('#image-detail').value = 'low';
+      document.querySelector('#account-login').click();
+      const deadline = Date.now() + 5000;
+      while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      return state.accountSignedIn && !state.accountError && document.querySelector('#account-login').hidden
+        && document.querySelector('#image-detail-low').disabled && document.querySelector('#image-detail').value === 'low'
+        && document.querySelector('#image-detail-low').textContent === t('lowApiKeyOnly')
+        && !document.querySelector('#account-logout').hidden && !document.body.textContent.includes('smoke-account-token')
+        && !JSON.stringify(localStorage).includes('smoke-account-token');
+    })()`) as boolean;
+    if (!signedIn || (await callback)?.status !== 302) throw new Error("Desktop account login did not settle safely.");
+    const signedOut = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#account-logout').click();
+      const deadline = Date.now() + 5000;
+      while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      return !state.accountSignedIn && !document.querySelector('#account-login').hidden
+        && !document.querySelector('#image-detail-low').disabled && document.querySelector('#image-detail-low').textContent === 'low'
+        && document.querySelector('#account-logout').hidden;
+    })()`) as boolean;
+    if (!signedOut || loadAccountCredential()) throw new Error("Desktop account sign-out did not remove the local grant.");
+    approve = false;
+    const cancelled = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#account-login').click();
+      const waiting = !document.querySelector('#account-cancel').hidden && document.querySelector('#account-login').hidden;
+      document.querySelector('#account-cancel').click();
+      const deadline = Date.now() + 5000;
+      while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      return waiting && !accountPending && !state.accountSignedIn && document.querySelector('#account-cancel').hidden;
+    })()`) as boolean;
+    if (!cancelled || loadAccountCredential()) throw new Error("Desktop account sign-in cancellation failed.");
+    await window.webContents.executeJavaScript(`document.querySelector('[data-page="workspace"]').click(); setStatus(t('ready'));`);
+  } finally {
+    activeLoginController?.abort(new Error("Account smoke test finished."));
+    await activeLoginPromise?.catch(() => undefined);
+    net.fetch = originalFetch;
+    shell.openExternal = originalOpen;
+  }
+}
+
 /** YA_SMOKE_CAPTURE=<file> writes a PNG; YA_SMOKE_CAPTURE_PAGE=changes also opens the diff drawer. */
 async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
   const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
@@ -1207,6 +1339,7 @@ app.whenReady().then(async () => {
     await verifyConversationContext(window);
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
+    await verifyAccountLogin(window);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();

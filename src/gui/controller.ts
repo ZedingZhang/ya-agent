@@ -26,6 +26,7 @@ import { runTask, type RunTaskOptions } from "../service";
 import type { ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
+import { loadAccountCredential, type DeepSeekCredential } from "../credentials";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -60,7 +61,7 @@ export interface GuiRunCallbacks {
 }
 
 export type TaskRunner = (
-  apiKey: string,
+  apiKey: DeepSeekCredential,
   task: string,
   config: ModelConfig,
   options?: RunTaskOptions,
@@ -192,8 +193,8 @@ export class GuiController {
     this.sessionApiKey = apiKey.trim();
   }
 
-  apiKey(): string | undefined {
-    return this.sessionApiKey ?? loadApiKey();
+  apiKey(): DeepSeekCredential | undefined {
+    return loadAccountCredential() ?? this.sessionApiKey ?? loadApiKey();
   }
 
   canStream(options: GuiTaskOptions): boolean {
@@ -206,7 +207,7 @@ export class GuiController {
   async run(options: GuiTaskOptions, callbacks: GuiRunCallbacks = {}): Promise<RunResult> {
     callbacks.signal?.throwIfAborted();
     const apiKey = this.apiKey();
-    if (!apiKey) throw new Error("No DeepSeek API key found. Add one in Settings.");
+    if (!apiKey) throw new Error("Sign in to DeepSeek or add an API key in Settings.");
     if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
     if (options.exec && !options.local) throw new Error("Command execution requires local workspace mode.");
     let localWorkspace: LocalWorkspace | undefined;

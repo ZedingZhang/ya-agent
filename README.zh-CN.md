@@ -19,7 +19,7 @@ Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V
 - **受限 ToA**：一个根协调 Agent 最多使用两个临时工作 Agent，并受 Token 与超时预算约束。
 - **共享类型核心**：CLI 和桌面端复用配置、记忆、编排、API、网页检索和本地工作区模块。
 - **代码验证**：已批准的命令返回退出码与有大小上限的输出，Ya 可以运行测试、类型检查和构建，修复失败原因后再次验证。
-- **视觉输入**：CLI 与桌面端都可通过同一条 OpenAI 兼容的 Chat Completions 链路，把经过校验的 JPEG、PNG、GIF 和 WebP 输入发送给原生支持视觉的 `deepseek-flash`。
+- **视觉输入**：CLI 与桌面端都可把经过校验的 JPEG、PNG、GIF 和 WebP 输入发送给原生支持视觉的 `deepseek-flash`。API Key 使用 Chat Completions，平台账号使用 Messages。
 - **隔离桌面渲染器**：Electron 渲染进程没有 Node.js 或直接文件系统权限；特权操作通过窄化的 preload 桥接进入主进程。
 
 ## 平台支持
@@ -32,7 +32,26 @@ Release 产物是自包含文件，不要求安装 Node.js。只有源码开发�
 | Linux x64（glibc） | 独立可执行文件 | AppImage | `DEEPSEEK_API_KEY` 或 GUI 会话密钥 |
 | Windows x64 | 独立 `.exe` | 便携 `.exe` | `DEEPSEEK_API_KEY` 或 GUI 会话密钥 |
 
-`ya auth deepseek` 仅支持 macOS，因为它调用系统的 `security` 工具。Linux 和 Windows 请使用 `DEEPSEEK_API_KEY`，或在设置页输入仅本次会话使用的密钥。
+三个平台均支持浏览器账号登录。API 密钥命令 `ya auth deepseek` 仅支持 macOS，因为它调用系统的 `security` 工具。Linux 和 Windows 的 API Key 用户可使用 `DEEPSEEK_API_KEY`，或在设置页输入仅本次会话使用的密钥。
+
+## DeepSeek 开放平台账号登录
+
+在桌面端打开 **设置 → DeepSeek 开放平台账号 → 登录 DeepSeek**。Ya 会在浏览器中打开 [DeepSeek 开放平台](https://platform.deepseek.com/)，由你完成登录与授权，然后返回 Ya。等待期间可以取消登录，登录后可在同一设置卡片中退出。
+
+CLI 使用同一套浏览器授权流程：
+
+```sh
+ya login deepseek
+ya auth-status deepseek
+ya ask "介绍一下这个项目" --web off
+ya logout deepseek
+```
+
+命令和浏览器应在同一台电脑运行。浏览器未自动打开时，可手动打开 CLI 输出的链接；按 Ctrl+C 取消。回调仅监听 `127.0.0.1` 的临时端口，授权最多等待十分钟。
+
+账号登录遵循 [DeepSeek 官方 Harness 的 PKCE 实现](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform)。Ya 获取平台账号凭证，并通过 `x-dsh-auth-token` 请求头调用官方 Messages API，无需向 Ya 提供账号密码。可用权限和计费取决于你的开放平台账号。登录期间优先使用账号；退出会删除本机账号凭证并尝试撤销平台会话，已有 API Key 仍可使用。账号凭证失效时会提示重新登录。
+
+账号凭证与普通设置分开，保存在 `~/.ya/auth/credentials.json`（或 `$YA_HOME/auth/credentials.json`）。Unix 上目录和文件权限分别为 `0700`、`0600`；Windows 沿用目录的访问控制。请将此用户数据目录保留为私有。凭证不会返回桌面渲染进程或进入会话记录，本地文件工具也会阻止读取凭证文件。
 
 ## 从源码安装
 
@@ -135,7 +154,7 @@ ya ask --image ./chart.png \
 ya ask --image file-api-EXISTING_ID "读取这张已上传的图片"
 ```
 
-`--image-detail` 可取 `auto`（默认）、`low`、`high` 或 `original`。`low` 会在推理前把图片缩放到 512×512；其他取值目前都会保留原图。本地文件按照真实文件签名而不是扩展名检查，校验通过后才转换为规范的 data URL；支持 JPEG、PNG、GIF 与 WebP。图片内容只能与 `deepseek-flash` 搭配，并且只会放入 user 消息，符合 DeepSeek 的[视觉理解指南](https://api-docs.deepseek.com/guides/vision/)和 [Chat Completions 参数说明](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
+`--image-detail` 可取 `auto`（默认）、`low`、`high` 或 `original`。使用 API Key 时，`low` 会在推理前把图片缩放到 512×512；其他取值目前都会保留原图。账号登录支持 `auto`、`high` 和 `original`；本地文件、data URL 和外部图片 URL 选择 `low` 时，会在发送请求前报错。桌面端登录账号后会将此选项标为“仅 API Key”。Files API ID 不受图片细节参数影响。本地文件按照真实文件签名而不是扩展名检查，校验通过后才转换为规范的 data URL；支持 JPEG、PNG、GIF 与 WebP。图片内容只能与 `deepseek-flash` 搭配，并且只会放入 user 消息，符合 DeepSeek 的[视觉理解指南](https://api-docs.deepseek.com/guides/vision/)和 [Chat Completions 参数说明](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
 
 Ya 会执行 DeepSeek 的 600 张图片上限和外部 URL 8,192 字符上限。单个本地图片或 data URL 的二进制内容最多 32 MiB；为给 base64 膨胀和提示词留出空间、确保请求低于 API 的 48 MiB body 上限，Ya 还会把所有内联图片的二进制总量保守限制为 32 MiB。`file-api-*` 必须指向已经通过 DeepSeek Files API 上传的图片；Ya 不负责上传该文件。
 

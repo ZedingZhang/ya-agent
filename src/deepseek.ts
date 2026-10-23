@@ -9,6 +9,8 @@ import type {
 import { assertImageInputSupported, ModelConfig } from "./config";
 import { assertImageCount } from "./images";
 import { abortable, delay as waitDelay } from "./cancellation";
+import { clearAccountCredential, type DeepSeekCredential } from "./credentials";
+import { ACCOUNT_API_URL, messagesPayload, messagesReply } from "./messages";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
 export const MAX_TOOL_CALL_ROUNDS = 6;
@@ -60,7 +62,7 @@ export interface ModelReply {
   assistantMessage: ChatMessage;
 }
 
-interface DeepSeekPayload {
+export interface DeepSeekPayload {
   model: string;
   messages: ChatMessage[];
   thinking: { type: "enabled" | "disabled" };
@@ -112,11 +114,11 @@ function validateImageMessages(messages: ChatMessage[]): number {
 }
 
 export class DeepSeekClient {
-  readonly apiKey: string;
+  readonly apiKey: DeepSeekCredential;
   private readonly fetcher: FetchLike;
   private readonly sleep: Sleep;
 
-  constructor(apiKey: string, fetcher: FetchLike = fetch, sleep: Sleep = defaultSleep, private readonly signal?: AbortSignal) {
+  constructor(apiKey: DeepSeekCredential, fetcher: FetchLike = fetch, sleep: Sleep = defaultSleep, private readonly signal?: AbortSignal) {
     this.apiKey = apiKey;
     this.fetcher = fetcher;
     this.sleep = sleep;
@@ -145,18 +147,33 @@ export class DeepSeekClient {
 
   private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
     const timeout = AbortSignal.timeout(timeoutSeconds * 1_000);
-    return readNetwork(() => abortable(this.fetcher(API_URL, {
+    const account = typeof this.apiKey !== "string";
+    // Invalid request content is a caller error, not a retryable network failure.
+    const body = JSON.stringify(account ? messagesPayload(payload) : payload);
+    return readNetwork(() => abortable(this.fetcher(account ? ACCOUNT_API_URL : API_URL, {
       method: "POST",
+      redirect: "error",
       headers: {
-        Authorization: `Bearer ${this.apiKey}`,
+        ...(typeof this.apiKey === "string" ? { Authorization: `Bearer ${this.apiKey}` } : {
+          "x-dsh-auth-token": this.apiKey.token, "anthropic-version": "2023-06-01", "anthropic-beta": "files-api-2025-04-14",
+        }),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body,
       signal: this.signal ? AbortSignal.any([timeout, this.signal]) : timeout,
     }), this.signal));
   }
 
   private async httpError(response: Response): Promise<DeepSeekError> {
+    if (typeof this.apiKey !== "string") {
+      if (response.status === 401) {
+        try { clearAccountCredential(this.apiKey.token); } catch { /* Preserve the inference error if local removal fails. */ }
+      }
+      void response.body?.cancel();
+      return new DeepSeekError(`DeepSeek account returned HTTP ${response.status}.` +
+        (response.status === 401 ? " Sign in again in Settings or run: ya login deepseek" : ""),
+        response.status, retryAfterMilliseconds(response.headers.get("Retry-After")));
+    }
     // A broken error body must not discard the status (e.g. turn a 401 into a retry).
     const detail = await abortable(response.text(), this.signal).catch(() => response.statusText);
     return new DeepSeekError(`DeepSeek API returned HTTP ${response.status}: ${detail}`,
@@ -204,7 +221,7 @@ export class DeepSeekClient {
     return this.withRetry(async () => {
       const response = await this.request(payload, config.toaTimeout);
       const body = JSON.parse(await readNetwork(() => abortable(response.text(), this.signal))) as unknown;
-      return replyFromBody(body);
+      return typeof this.apiKey === "string" ? replyFromBody(body) : messagesReply(body);
     });
   }
 
@@ -220,6 +237,7 @@ export class DeepSeekClient {
       const content: string[] = [];
       const reasoning: string[] = [];
       const usage: TokenUsage = {};
+      const accountBlocks: Record<string, unknown>[] = [];
       const response = await this.request(payload, config.toaTimeout);
       const done = await readServerSentEvents(response, (data) => {
         if (data === "[DONE]") return true;
@@ -231,6 +249,44 @@ export class DeepSeekClient {
             undefined, undefined, { cause: error });
         }
         if (!isRecord(chunk)) return false;
+        if (typeof this.apiKey !== "string") {
+          if (chunk.type === "error") {
+            const type = isRecord(chunk.error) ? chunk.error.type : undefined;
+            const status = type === "rate_limit_error" ? 429 : type === "overloaded_error" ? 529 : type === "api_error" ? 500 : undefined;
+            throw new DeepSeekError("DeepSeek account stream returned an error.", status,
+              retryAfterMilliseconds(response.headers.get("Retry-After")));
+          }
+          if (chunk.type === "message_start" && isRecord(chunk.message) && isRecord(chunk.message.usage)) Object.assign(usage, chunk.message.usage);
+          if (isRecord(chunk.usage)) Object.assign(usage, chunk.usage);
+          if (chunk.type === "content_block_start") {
+            if (chunk.index !== accountBlocks.length || !isRecord(chunk.content_block)) throw new DeepSeekError("Invalid DeepSeek account stream block.");
+            const block = chunk.content_block;
+            if (block.type !== "text" && block.type !== "thinking") throw new DeepSeekError("Unexpected DeepSeek account stream content.");
+            accountBlocks.push({ ...block });
+            if (typeof block.text === "string" && block.text) {
+              content.push(block.text);
+              markDelivered();
+              onContent(block.text);
+            }
+            if (typeof block.thinking === "string") reasoning.push(block.thinking);
+          }
+          if (chunk.type === "content_block_delta" && isRecord(chunk.delta)) {
+            const block = accountBlocks[chunk.index as number];
+            if (!block) throw new DeepSeekError("Invalid DeepSeek account stream block.");
+            if (typeof chunk.delta.text === "string" && chunk.delta.text) {
+              block.text = String(block.text ?? "") + chunk.delta.text;
+              content.push(chunk.delta.text);
+              markDelivered();
+              onContent(chunk.delta.text);
+            }
+            if (typeof chunk.delta.thinking === "string") {
+              block.thinking = String(block.thinking ?? "") + chunk.delta.thinking;
+              reasoning.push(chunk.delta.thinking);
+            }
+            if (typeof chunk.delta.signature === "string") block.signature = String(block.signature ?? "") + chunk.delta.signature;
+          }
+          return chunk.type === "message_stop";
+        }
         if (isRecord(chunk.usage)) Object.assign(usage, chunk.usage);
         const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
         const first = isRecord(choices[0]) ? choices[0] : undefined;
@@ -243,7 +299,7 @@ export class DeepSeekClient {
         }
         return false;
       }, this.signal);
-      void done;
+      if (typeof this.apiKey !== "string" && !done) throw new NetworkError("DeepSeek account stream ended before completion.");
       const joinedContent = content.join("");
       const joinedReasoning = reasoning.join("");
       return {
@@ -251,7 +307,8 @@ export class DeepSeekClient {
         ...(joinedReasoning ? { reasoningContent: joinedReasoning } : {}),
         toolCalls: [],
         usage,
-        assistantMessage: { role: "assistant", content: joinedContent },
+        assistantMessage: { role: "assistant", content: joinedContent,
+          ...(typeof this.apiKey === "string" ? {} : { account_content: accountBlocks }) },
       };
     });
   }

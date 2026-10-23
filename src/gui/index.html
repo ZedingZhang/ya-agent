@@ -87,7 +87,7 @@
                       <label><span data-i18n="web">Web</span><select id="web-mode"><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
                       <label class="check"><input id="toa-enabled" type="checkbox"><span data-i18n="toa">Tree of Agents</span></label>
                       <label><span data-i18n="workers">Workers</span><select id="toa-workers" disabled><option value="1">1</option><option value="2" selected>2</option></select></label>
-                      <label><span data-i18n="imageDetail">Image detail</span><select id="image-detail"><option value="auto" selected>auto</option><option value="low">low</option><option value="high">high</option><option value="original">original</option></select></label>
+                      <label><span data-i18n="imageDetail">Image detail</span><select id="image-detail"><option value="auto" selected>auto</option><option id="image-detail-low" value="low">low</option><option value="high">high</option><option value="original">original</option></select></label>
                     </div>
                   </details>
                   <span class="control-spacer"></span>
@@ -151,6 +151,16 @@
               <label><span data-i18n="budget">ToA token budget</span><input id="setting-budget" type="number" min="1000" max="16000" step="100"></label>
               <label><span data-i18n="timeout">ToA timeout (seconds)</span><input id="setting-timeout" type="number" min="30" max="180"></label>
               <label class="check setting-check span-two"><input id="setting-stream" type="checkbox"><span data-i18n="stream">Stream simple answers</span></label>
+            </div>
+          </section>
+          <section class="panel form-card">
+            <h1 data-i18n="deepseekAccount">DeepSeek platform account</h1>
+            <div id="account-state" class="state-pill" role="status" aria-live="polite">Signed out</div>
+            <p class="muted" data-i18n="accountHint">Sign in and authorize Ya in your browser to use your DeepSeek platform account.</p>
+            <div class="account-actions">
+              <button id="account-login" class="primary" type="button" data-i18n="accountLogin">Sign in with DeepSeek</button>
+              <button id="account-cancel" type="button" data-i18n="accountCancel" hidden>Cancel sign-in</button>
+              <button id="account-logout" type="button" data-i18n="accountLogout" hidden>Sign out</button>
             </div>
           </section>
           <section class="panel form-card">

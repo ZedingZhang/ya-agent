@@ -33,6 +33,9 @@ import { VERSION } from "./version";
 import { abortable } from "./cancellation";
 import type { CommandEvent } from "./commands";
 import { search } from "./web";
+import { spawn } from "node:child_process";
+import { loginDeepSeek, logoutDeepSeek, type AccountLoginOptions } from "./account";
+import { loadAccountCredential, type AccountCredential, type DeepSeekCredential } from "./credentials";
 
 interface InputStream extends NodeJS.ReadableStream {
   isTTY?: boolean;
@@ -55,7 +58,11 @@ interface CliRuntime {
   platform: NodeJS.Platform;
   loadApiKey: () => string | undefined;
   saveApiKey: (apiKey: string) => void;
-  createClient: (apiKey: string, signal?: AbortSignal) => DeepSeekClient;
+  loadAccountCredential: () => AccountCredential | undefined;
+  loginDeepSeek: (options: AccountLoginOptions) => Promise<void>;
+  logoutDeepSeek: () => Promise<boolean>;
+  openBrowser: (url: string) => Promise<void>;
+  createClient: (apiKey: DeepSeekCredential, signal?: AbortSignal) => DeepSeekClient;
 }
 
 export interface CliContext {
@@ -90,6 +97,16 @@ const defaultRuntime: CliRuntime = {
   platform: process.platform,
   loadApiKey,
   saveApiKey,
+  loadAccountCredential,
+  loginDeepSeek,
+  logoutDeepSeek,
+  openBrowser: (url) => new Promise((resolve, reject) => {
+    const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "rundll32.exe" : "xdg-open";
+    const arguments_ = process.platform === "win32" ? ["url.dll,FileProtocolHandler", url] : [url];
+    const child = spawn(command, arguments_, { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", () => reject(new Error("Could not open the browser.")));
+    child.once("spawn", () => { child.unref(); resolve(); });
+  }),
   createClient: (apiKey, signal) => new DeepSeekClient(apiKey, undefined, undefined, signal),
 };
 
@@ -283,9 +300,9 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
   if (options.approveCommands && !options.exec) throw new Error("--approve-commands requires --exec.");
   const config = resolveConfig(options);
   assertImageInputSupported(config.model, options.image.length);
-  const apiKey = runtime.loadApiKey();
+  const apiKey = runtime.loadAccountCredential() ?? runtime.loadApiKey();
   if (!apiKey) {
-    throw new Error("No DeepSeek API key found. Set DEEPSEEK_API_KEY or, on macOS, run: ya auth deepseek");
+    throw new Error("Sign in with: ya login deepseek. Alternatively, set DEEPSEEK_API_KEY or, on macOS, run: ya auth deepseek");
   }
   if (options.showMemory) showMemory(task, io);
   const images = imageContentPartsFromSources(options.image, options.imageDetail);
@@ -438,7 +455,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .option("--exec", "Enable approved shell commands for tests, type checks and builds (requires --local)", false)
     .option("--approve-commands", "Approve all commands for this non-interactive task (requires --exec)", false)
     .option("--image <source>", "Attach a local image, HTTP(S) URL, data URL, or file-api-* ID (repeatable)", collectValue, [])
-    .addOption(new Option("--image-detail <detail>").choices(["low", "high", "original", "auto"]).default("auto"))
+    .addOption(new Option("--image-detail <detail>", "Image detail (low requires API-key authentication)").choices(["low", "high", "original", "auto"]).default("auto"))
     .action(async (task: string, options: AskOptions) => ask(task, options, io, runtime));
 
   program.command("auth")
@@ -452,6 +469,48 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
       const apiKey = await io.prompt("DeepSeek API key: ", true);
       runtime.saveApiKey(apiKey);
       write(io.stdout, "DeepSeek API key saved to the macOS Keychain.\n");
+    });
+
+  program.command("login")
+    .description("Sign in to the DeepSeek platform in your browser")
+    .argument("[provider]", "account provider", "deepseek")
+    .action(async (provider: string) => {
+      if (provider !== "deepseek") throw new Error("provider must be 'deepseek'.");
+      const cancellation = new AbortController();
+      const interrupt = (): void => cancellation.abort(new Error("DeepSeek sign-in cancelled."));
+      process.once("SIGINT", interrupt);
+      try {
+        await runtime.loginDeepSeek({
+          signal: cancellation.signal,
+          locale: process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG,
+          openBrowser: async (url) => {
+            write(io.stdout, `Complete DeepSeek sign-in in your browser:\n${url}\nPress Ctrl+C to cancel.\n`);
+            try { await runtime.openBrowser(url); }
+            catch { write(io.stderr, "Could not open the browser. Open the URL above manually.\n"); }
+          },
+        });
+        write(io.stdout, "Signed in to the DeepSeek platform.\n");
+      } finally {
+        process.removeListener("SIGINT", interrupt);
+      }
+    });
+
+  program.command("logout")
+    .description("Remove the local DeepSeek account login and revoke its platform session")
+    .argument("[provider]", "account provider", "deepseek")
+    .action(async (provider: string) => {
+      if (provider !== "deepseek") throw new Error("provider must be 'deepseek'.");
+      const revoked = await runtime.logoutDeepSeek();
+      write(io.stdout, "Signed out of the DeepSeek account on this device.\n");
+      if (!revoked) write(io.stderr, "The platform session could not be revoked. The local credential was removed.\n");
+    });
+
+  program.command("auth-status")
+    .description("Show DeepSeek account sign-in status without revealing credentials")
+    .argument("[provider]", "account provider", "deepseek")
+    .action((provider: string) => {
+      if (provider !== "deepseek") throw new Error("provider must be 'deepseek'.");
+      write(io.stdout, runtime.loadAccountCredential() ? "DeepSeek account is signed in.\n" : "DeepSeek account is signed out.\n");
     });
 
   const config = program.command("config").description("Configure Ya defaults");

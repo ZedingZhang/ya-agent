@@ -91,6 +91,60 @@ describe("CLI", () => {
     expect(capture.stdout.output).toContain("ask");
   });
 
+  it.each(["darwin", "win32", "linux"] as const)("signs in through the browser on %s and confirms only after persistence", async (platform) => {
+    const capture = fakeIo();
+    const openBrowser = vi.fn(async () => undefined);
+    let finish!: () => void;
+    const loginDeepSeek = vi.fn(async (options) => {
+      await options.openBrowser("https://platform.deepseek.com/dsh/authorize");
+      await new Promise<void>((resolve) => { finish = resolve; });
+    });
+    const running = main(["login", "deepseek"], { io: capture.io, runtime: { platform, loginDeepSeek, openBrowser } });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(capture.stdout.output).not.toContain("Signed in to");
+    finish();
+    expect(await running).toBe(0);
+    expect(openBrowser).toHaveBeenCalledExactlyOnceWith("https://platform.deepseek.com/dsh/authorize");
+    expect(capture.stdout.output).toContain("Signed in to the DeepSeek platform.");
+    expect(capture.prompts).toEqual([]);
+  });
+
+  it("keeps a manual browser URL available when the system launcher fails", async () => {
+    const capture = fakeIo();
+    const loginDeepSeek = vi.fn(async (options) => { await options.openBrowser("https://platform.deepseek.com/dsh/authorize"); });
+    expect(await main(["login"], { io: capture.io, runtime: { loginDeepSeek,
+      openBrowser: async () => { throw new Error("launcher failed"); },
+    } })).toBe(0);
+    expect(capture.stdout.output).toContain("https://platform.deepseek.com/dsh/authorize");
+    expect(capture.stderr.output).toContain("Open the URL above manually");
+  });
+
+  it("reports account status without revealing the credential", async () => {
+    const capture = fakeIo();
+    expect(await main(["auth-status", "deepseek"], { io: capture.io,
+      runtime: { loadAccountCredential: () => ({ kind: "account", token: "private-account-token" }) },
+    })).toBe(0);
+    expect(capture.stdout.output).toBe("DeepSeek account is signed in.\n");
+    expect(capture.stdout.output).not.toContain("private-account-token");
+  });
+
+  it("prefers a signed-in account over an environment API key for inference", async () => {
+    const capture = fakeIo();
+    const credential = { kind: "account", token: "account-token" } as const;
+    const createClient = vi.fn(() => fakeClient());
+    expect(await main(["ask", "test", "--web", "off", "--no-feedback"], { io: capture.io, runtime: {
+      loadAccountCredential: () => credential, loadApiKey: () => "api-key", createClient,
+    } })).toBe(0);
+    expect(createClient.mock.calls[0]?.[0]).toEqual(credential);
+  });
+
+  it("confirms local logout when remote revocation is unavailable", async () => {
+    const capture = fakeIo();
+    expect(await main(["logout"], { io: capture.io, runtime: { logoutDeepSeek: async () => false } })).toBe(0);
+    expect(capture.stdout.output).toContain("Signed out");
+    expect(capture.stderr.output).toContain("local credential was removed");
+  });
+
   it.each(["win32", "linux"] as const)("directs %s auth users to the environment without requesting a key", async (platform) => {
     const capture = fakeIo();
     const saveApiKey = vi.fn();
@@ -261,6 +315,22 @@ describe("CLI", () => {
       "--no-feedback",
     ], context(capture.io, client))).toBe(2);
     expect(capture.stderr.output).toContain("deepseek-flash");
+  });
+
+  it("reports unsupported low-detail account images without sending a request", async () => {
+    const capture = fakeIo();
+    const path = join(home.path, "chart.png");
+    writeFileSync(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const credential = { kind: "account", token: "private-account-token" } as const;
+    const fetcher = vi.fn(async () => Response.json({ content: [{ type: "text", text: "Images" }] }));
+    expect(await main([
+      "ask", "Describe this image", "--image", path, "--image-detail", "low", "--web", "off", "--no-feedback",
+    ], { io: capture.io, runtime: {
+      loadAccountCredential: () => credential, createClient: () => new DeepSeekClient(credential, fetcher),
+    } })).toBe(2);
+    expect(capture.stderr.output).toContain("Low image detail is not supported with DeepSeek account sign-in");
+    expect(capture.stderr.output).not.toContain(credential.token);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("honors explicit Markdown and terminal output formats", async () => {
