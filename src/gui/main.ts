@@ -1224,10 +1224,13 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
     await verifyRenderer(window);
     const signedIn = await window.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-page="settings"]').click();
+      document.querySelector('#image-detail').value = 'low';
       document.querySelector('#account-login').click();
       const deadline = Date.now() + 5000;
       while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
       return state.accountSignedIn && !state.accountError && document.querySelector('#account-login').hidden
+        && document.querySelector('#image-detail-low').disabled && document.querySelector('#image-detail').value === 'low'
+        && document.querySelector('#image-detail-low').textContent === t('lowApiKeyOnly')
         && !document.querySelector('#account-logout').hidden && !document.body.textContent.includes('smoke-account-token')
         && !JSON.stringify(localStorage).includes('smoke-account-token');
     })()`) as boolean;
@@ -1237,6 +1240,7 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
       const deadline = Date.now() + 5000;
       while (accountPending && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
       return !state.accountSignedIn && !document.querySelector('#account-login').hidden
+        && !document.querySelector('#image-detail-low').disabled && document.querySelector('#image-detail-low').textContent === 'low'
         && document.querySelector('#account-logout').hidden;
     })()`) as boolean;
     if (!signedOut || loadAccountCredential()) throw new Error("Desktop account sign-out did not remove the local grant.");

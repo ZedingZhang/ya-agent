@@ -150,6 +150,7 @@ const TEXT = {
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
     attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
+    lowApiKeyOnly: "low (API key only)",
     visionOnly: "Image input requires the DeepSeek-V4.1-Flash model.", noImages: "No images attached.",
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
@@ -190,6 +191,7 @@ const TEXT = {
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
+    lowApiKeyOnly: "low（仅 API Key）",
     visionOnly: "图片输入需要选择 DeepSeek-V4.1-Flash 模型。", noImages: "尚未添加图片",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
@@ -669,6 +671,9 @@ function renderImages(): void {
   element<HTMLButtonElement>("choose-images").title = t(visionEnabled() ? "attachImages" : "visionOnly");
   element<HTMLButtonElement>("clear-images").disabled = running || workspaceModelSaving || selectedImages.length === 0;
   element<HTMLSelectElement>("image-detail").disabled = running || workspaceModelSaving || !visionEnabled() || selectedImages.length === 0;
+  const lowDetail = element<HTMLOptionElement>("image-detail-low");
+  lowDetail.disabled = state.accountSignedIn;
+  lowDetail.textContent = state.accountSignedIn ? t("lowApiKeyOnly") : "low";
   list.replaceChildren();
   element<HTMLDivElement>("image-controls").hidden = selectedImages.length === 0;
   if (!visionEnabled()) {

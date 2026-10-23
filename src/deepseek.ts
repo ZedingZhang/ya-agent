@@ -148,6 +148,8 @@ export class DeepSeekClient {
   private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
     const timeout = AbortSignal.timeout(timeoutSeconds * 1_000);
     const account = typeof this.apiKey !== "string";
+    // Invalid request content is a caller error, not a retryable network failure.
+    const body = JSON.stringify(account ? messagesPayload(payload) : payload);
     return readNetwork(() => abortable(this.fetcher(account ? ACCOUNT_API_URL : API_URL, {
       method: "POST",
       redirect: "error",
@@ -157,7 +159,7 @@ export class DeepSeekClient {
         }),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(account ? messagesPayload(payload) : payload),
+      body,
       signal: this.signal ? AbortSignal.any([timeout, this.signal]) : timeout,
     }), this.signal));
   }

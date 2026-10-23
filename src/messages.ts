@@ -24,6 +24,9 @@ function contentBlocks(message: ChatMessage): Record<string, unknown>[] {
       if (part.type === "text") { if (part.text) blocks.push({ type: "text", text: part.text }); }
       else if (part.type === "file") blocks.push({ type: "image", source: { type: "file", file_id: part.file_id } });
       else {
+        if (part.image_url.detail === "low") {
+          throw new Error("Low image detail is not supported with DeepSeek account sign-in. Choose auto, high, or original, or sign out and use an API key.");
+        }
         const data = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.+)$/u.exec(part.image_url.url);
         blocks.push({ type: "image", source: data
           ? { type: "base64", media_type: data[1], data: data[2] }

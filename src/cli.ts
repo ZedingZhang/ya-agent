@@ -455,7 +455,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .option("--exec", "Enable approved shell commands for tests, type checks and builds (requires --local)", false)
     .option("--approve-commands", "Approve all commands for this non-interactive task (requires --exec)", false)
     .option("--image <source>", "Attach a local image, HTTP(S) URL, data URL, or file-api-* ID (repeatable)", collectValue, [])
-    .addOption(new Option("--image-detail <detail>").choices(["low", "high", "original", "auto"]).default("auto"))
+    .addOption(new Option("--image-detail <detail>", "Image detail (low requires API-key authentication)").choices(["low", "high", "original", "auto"]).default("auto"))
     .action(async (task: string, options: AskOptions) => ask(task, options, io, runtime));
 
   program.command("auth")

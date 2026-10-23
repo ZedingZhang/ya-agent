@@ -154,7 +154,7 @@ ya ask --image ./chart.png \
 ya ask --image file-api-EXISTING_ID "读取这张已上传的图片"
 ```
 
-`--image-detail` 可取 `auto`（默认）、`low`、`high` 或 `original`。`low` 会在推理前把图片缩放到 512×512；其他取值目前都会保留原图。本地文件按照真实文件签名而不是扩展名检查，校验通过后才转换为规范的 data URL；支持 JPEG、PNG、GIF 与 WebP。图片内容只能与 `deepseek-flash` 搭配，并且只会放入 user 消息，符合 DeepSeek 的[视觉理解指南](https://api-docs.deepseek.com/guides/vision/)和 [Chat Completions 参数说明](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
+`--image-detail` 可取 `auto`（默认）、`low`、`high` 或 `original`。使用 API Key 时，`low` 会在推理前把图片缩放到 512×512；其他取值目前都会保留原图。账号登录支持 `auto`、`high` 和 `original`；本地文件、data URL 和外部图片 URL 选择 `low` 时，会在发送请求前报错。桌面端登录账号后会将此选项标为“仅 API Key”。Files API ID 不受图片细节参数影响。本地文件按照真实文件签名而不是扩展名检查，校验通过后才转换为规范的 data URL；支持 JPEG、PNG、GIF 与 WebP。图片内容只能与 `deepseek-flash` 搭配，并且只会放入 user 消息，符合 DeepSeek 的[视觉理解指南](https://api-docs.deepseek.com/guides/vision/)和 [Chat Completions 参数说明](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。
 
 Ya 会执行 DeepSeek 的 600 张图片上限和外部 URL 8,192 字符上限。单个本地图片或 data URL 的二进制内容最多 32 MiB；为给 base64 膨胀和提示词留出空间、确保请求低于 API 的 48 MiB body 上限，Ya 还会把所有内联图片的二进制总量保守限制为 32 MiB。`file-api-*` 必须指向已经通过 DeepSeek Files API 上传的图片；Ya 不负责上传该文件。
 

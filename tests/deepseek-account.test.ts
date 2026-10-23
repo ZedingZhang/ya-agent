@@ -73,6 +73,49 @@ describe("DeepSeek account inference", () => {
     expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("anthropic-beta")).toContain("files-api-2025-04-14");
   });
 
+  it.each([
+    ["data URL", "data:image/png;base64,aGVsbG8=", false],
+    ["remote URL", "https://example.com/image.png", false],
+    ["data URL", "data:image/png;base64,aGVsbG8=", true],
+    ["remote URL", "https://example.com/image.png", true],
+  ] as const)("rejects low-detail %s account images (%s; stream: %s)", async (_source, url, streaming) => {
+    const fetcher = vi.fn<FetchLike>(async () => streaming
+      ? stream([
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "Images" } },
+        { type: "message_stop" },
+      ])
+      : Response.json({ content: [{ type: "text", text: "Images" }] }));
+    const sleep = vi.fn(async () => undefined);
+    const onContent = vi.fn();
+    const client = new DeepSeekClient(credential, fetcher, sleep);
+    const messages: ChatMessage[] = [{ role: "user", content: [
+      { type: "image_url", image_url: { url, detail: "low" } },
+    ] }];
+    const request = streaming ? client.completeStream(messages, new ModelConfig(), 500, onContent)
+      : client.complete(messages, new ModelConfig(), 500);
+    await expect(request).rejects.toThrow(/Low image detail.*account sign-in/u);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(sleep).not.toHaveBeenCalled();
+    expect(onContent).not.toHaveBeenCalled();
+  });
+
+  it("keeps low-detail API-key images available", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => Response.json({ choices: [{ message: { role: "assistant", content: "Images" } }] }));
+    await new DeepSeekClient("test-api-key", fetcher).complete([{ role: "user", content: [
+      { type: "image_url", image_url: { url: "https://example.com/image.png", detail: "low" } },
+    ] }], new ModelConfig(), 500);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)).messages[0].content[0].image_url.detail).toBe("low");
+  });
+
+  it.each(["auto", "high", "original"] as const)("accepts %s account images", async (detail) => {
+    const fetcher = vi.fn<FetchLike>(async () => Response.json({ content: [{ type: "text", text: "Images" }] }));
+    await expect(new DeepSeekClient(credential, fetcher).complete([{ role: "user", content: [
+      { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=", detail } },
+      { type: "image_url", image_url: { url: "https://example.com/image.png", detail } },
+    ] }], new ModelConfig(), 500)).resolves.toMatchObject({ content: "Images" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("streams account text and reasoning while retaining usage and replay signatures", async () => {
     const fetcher: FetchLike = async () => stream([
       { type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 0 } } },

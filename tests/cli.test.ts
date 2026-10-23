@@ -317,6 +317,22 @@ describe("CLI", () => {
     expect(capture.stderr.output).toContain("deepseek-flash");
   });
 
+  it("reports unsupported low-detail account images without sending a request", async () => {
+    const capture = fakeIo();
+    const path = join(home.path, "chart.png");
+    writeFileSync(path, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const credential = { kind: "account", token: "private-account-token" } as const;
+    const fetcher = vi.fn(async () => Response.json({ content: [{ type: "text", text: "Images" }] }));
+    expect(await main([
+      "ask", "Describe this image", "--image", path, "--image-detail", "low", "--web", "off", "--no-feedback",
+    ], { io: capture.io, runtime: {
+      loadAccountCredential: () => credential, createClient: () => new DeepSeekClient(credential, fetcher),
+    } })).toBe(2);
+    expect(capture.stderr.output).toContain("Low image detail is not supported with DeepSeek account sign-in");
+    expect(capture.stderr.output).not.toContain(credential.token);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("honors explicit Markdown and terminal output formats", async () => {
     const markdown = fakeIo(true);
     await main(["ask", "test", "--format", "markdown", "--no-feedback"], context(markdown.io));
