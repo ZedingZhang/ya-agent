@@ -441,9 +441,7 @@ export class LocalWorkspace {
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`);
     const needle = query.toLocaleLowerCase("und");
     const results: Array<Record<string, unknown>> = [];
-    const paths = this.walkFiles(root);
-    for (const path of paths) {
-      if (results.length >= MAX_SEARCH_RESULTS) break;
+    for (const path of this.walkFiles(root)) {
       const relativePath = this.relativePath(path);
       if (basename(path).toLocaleLowerCase("und").includes(needle)) {
         results.push({ path: relativePath, match: "filename" });
@@ -462,26 +460,22 @@ export class LocalWorkspace {
       } catch {
         // Binary, oversized, and sensitive files are intentionally skipped.
       }
+      if (results.length >= MAX_SEARCH_RESULTS) break;
     }
     this.activity("search", [root], "success");
     return JSON.stringify({ query, results, limited: results.length >= MAX_SEARCH_RESULTS });
   }
 
-  private walkFiles(root: string): string[] {
-    const files: string[] = [];
-    const visit = (directory: string): void => {
-      const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
-        left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
-      );
-      for (const entry of entries) {
-        const path = join(directory, entry.name);
-        if (entry.isSymbolicLink() || this.isSensitive(path)) continue;
-        if (entry.isDirectory()) visit(path);
-        else if (entry.isFile()) files.push(path);
-      }
-    };
-    visit(root);
-    return files;
+  private *walkFiles(root: string): Generator<string> {
+    const entries = readdirSync(root, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
+    );
+    for (const entry of entries) {
+      const path = join(root, entry.name);
+      if (entry.isSymbolicLink() || this.isSensitive(path)) continue;
+      if (entry.isDirectory()) yield* this.walkFiles(path);
+      else if (entry.isFile()) yield path;
+    }
   }
 
   async mkdir(arguments_: ToolArguments): Promise<string> {
