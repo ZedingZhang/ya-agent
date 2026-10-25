@@ -144,8 +144,48 @@ describe("command execution and verification", () => {
     vi.stubEnv("DEEPSEEK_API_KEY", "private-api-key");
     vi.stubEnv("ELECTRON_RUN_AS_NODE", "1");
     vi.stubEnv("NODE_OPTIONS", "--trace-warnings");
-    writeFileSync(join(root, "env.cjs"), 'process.stdin.on("end", () => console.log(JSON.stringify({key:process.env.DEEPSEEK_API_KEY,home:process.env.YA_HOME,electron:process.env.ELECTRON_RUN_AS_NODE,options:process.env.NODE_OPTIONS}))); process.stdin.resume();');
+    vi.stubEnv("NAPI_RS_NATIVE_LIBRARY_PATH", "synthetic-private-sentinel");
+    writeFileSync(join(root, "env.cjs"), 'process.stdin.on("end", () => console.log(JSON.stringify({key:process.env.DEEPSEEK_API_KEY,home:process.env.YA_HOME,electron:process.env.ELECTRON_RUN_AS_NODE,options:process.env.NODE_OPTIONS,native:process.env.NAPI_RS_NATIVE_LIBRARY_PATH}))); process.stdin.resume();');
     expect(await execute(nodeCommand("env.cjs"))).toMatchObject({ status: "success", stdout: "{}\n" });
+  });
+
+  it.each(["runner", "workspace"])("does not inherit credentials, authentication helpers or arbitrary variables via %s", async (route) => {
+    const names = [
+      "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_WEB_IDENTITY_TOKEN_FILE",
+      "AZURE_CLIENT_SECRET", "AZURE_FEDERATED_TOKEN_FILE", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_OAUTH_ACCESS_TOKEN",
+      "GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "CI_JOB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
+      "NPM_TOKEN", "NODE_AUTH_TOKEN", "HF_TOKEN", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "GIT_ASKPASS", "SSH_ASKPASS",
+      "DOCKER_AUTH_CONFIG", "MY_PROJECT_SECRET", "DEEPSEEK_API_KEY", "YA_HOME",
+    ];
+    // Mix casing to exercise Windows' case-insensitive environment, too.
+    for (const name of names.filter((name) => name !== "YA_HOME")) {
+      vi.stubEnv(name, "synthetic-private-sentinel");
+      vi.stubEnv(name.toLowerCase(), "synthetic-private-sentinel");
+    }
+    writeFileSync(join(root, "private-env.cjs"), `const names = new Set(${JSON.stringify(names)}); console.log(JSON.stringify(Object.keys(process.env).filter(name => names.has(name.toUpperCase()))));`);
+    const result = route === "runner"
+      ? await execute(nodeCommand("private-env.cjs"))
+      : JSON.parse(await new LocalWorkspace(root, () => true, undefined, { commandsEnabled: true }).run({ command: nodeCommand("private-env.cjs") }));
+    expect(result).toMatchObject({ status: "success", stdout: "[]\n" });
+  });
+
+  it("preserves system paths, locale, temporary directories and common toolchain locations", async () => {
+    const supplied = {
+      HOME: root, USERPROFILE: root, LANG: "C.UTF-8", LC_ALL: "C", TMPDIR: root, TMP: root, TEMP: root,
+      JAVA_HOME: join(root, "jdk"), GOPATH: join(root, "go"), CARGO_HOME: join(root, "cargo"),
+      VIRTUAL_ENV: join(root, "venv"), PNPM_HOME: join(root, "pnpm"), NPM_CONFIG_CACHE: join(root, "npm-cache"),
+    };
+    for (const [name, value] of Object.entries(supplied)) vi.stubEnv(name, value);
+    const systemNames = ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA"];
+    const expected: Record<string, string> = { ...supplied };
+    for (const [name, value] of Object.entries(process.env)) {
+      if (value !== undefined && systemNames.includes(name.toUpperCase())) expected[name.toUpperCase()] = value;
+    }
+    writeFileSync(join(root, "public-env.cjs"), `const names = new Set(${JSON.stringify(Object.keys(expected))}); console.log(JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([name]) => names.has(name.toUpperCase())).map(([name,value]) => [name.toUpperCase(),value]))));`);
+    const result = await execute(nodeCommand("public-env.cjs"));
+    expect(result.status).toBe("success");
+    expect(JSON.parse(result.stdout)).toEqual(expected);
+    expect((await execute('node --version')).stdout.trim()).toBe(process.version);
   });
 
   it("kills a timed-out process tree, including a child with independent stdio", async () => {
