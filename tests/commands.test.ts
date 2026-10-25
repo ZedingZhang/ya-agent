@@ -176,6 +176,7 @@ describe("command execution and verification", () => {
       VIRTUAL_ENV: join(root, "venv"), PNPM_HOME: join(root, "pnpm"), NPM_CONFIG_CACHE: join(root, "npm-cache"),
     };
     for (const [name, value] of Object.entries(supplied)) vi.stubEnv(name, value);
+    vi.stubEnv("npm_config_cache", supplied.NPM_CONFIG_CACHE);
     const systemNames = ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "APPDATA", "LOCALAPPDATA"];
     const expected: Record<string, string> = { ...supplied };
     for (const [name, value] of Object.entries(process.env)) {
