@@ -8,6 +8,19 @@ export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 600;
 export const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
 
+// Inherit locations and display settings needed by common project tools, not
+// arbitrary application configuration, credentials or authentication helpers.
+const COMMAND_ENVIRONMENT_NAMES = new Set([
+  "PATH", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "USER", "LOGNAME", "USERNAME",
+  "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "ALLUSERSPROFILE", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+  "PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "COMMONPROGRAMW6432",
+  "TEMP", "TMP", "TMPDIR", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_MESSAGES", "LC_COLLATE", "LC_TIME", "LC_NUMERIC", "LC_MONETARY",
+  "TZ", "TERM", "COLORTERM", "NO_COLOR", "FORCE_COLOR", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+  "JAVA_HOME", "JDK_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT", "GOROOT", "GOPATH", "CARGO_HOME", "RUSTUP_HOME",
+  "VIRTUAL_ENV", "CONDA_PREFIX", "PYENV_ROOT", "DOTNET_ROOT", "DOTNET_ROOT(X86)",
+  "NVM_DIR", "NVM_HOME", "NVM_SYMLINK", "PNPM_HOME", "COREPACK_HOME", "NPM_CONFIG_CACHE", "NPM_CONFIG_PREFIX",
+]);
+
 export function validateCommand(command: unknown): asserts command is string {
   if (typeof command !== "string" || !command.trim() || command.length > 8_192) {
     throw new Error("Command must be a non-empty string with at most 8192 characters.");
@@ -77,12 +90,8 @@ export function runCommand(options: CommandOptions): Promise<CommandResult> {
   const emit = (event: CommandEvent): void => {
     try { options.onEvent?.(event); } catch { /* Presentation cannot affect execution. */ }
   };
-  const environment = { ...process.env };
-  // Project programs do not need Ya's API credentials or application runtime flags.
-  const privateNames = ["DEEPSEEK_API_KEY", "YA_HOME", "NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "NAPI_RS_NATIVE_LIBRARY_PATH"];
-  for (const name of Object.keys(environment)) {
-    if (privateNames.includes(name.toUpperCase())) delete environment[name];
-  }
+  const environment = Object.fromEntries(Object.entries(process.env)
+    .filter(([name]) => COMMAND_ENVIRONMENT_NAMES.has(name.toUpperCase())));
   const windows = process.platform === "win32";
   const shell = windows ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe") : "/bin/sh";
   // cmd /s strips the outer quotes; preserve quoted executables/paths inside them.
