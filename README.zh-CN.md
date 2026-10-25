@@ -230,6 +230,8 @@ Windows 使用 `cmd.exe /d /s /c`，macOS/Linux 使用 `/bin/sh -c`，沿用已�
 
 只有命令的 **初始工作目录** 被限制在解析后的工作区内。命令以当前用户权限运行，可修改或删除工作区外文件、访问网络，执行环境并非沙箱。Ya 不向子进程传递自身的 `DEEPSEEK_API_KEY`、`YA_HOME` 和应用运行时标志。命令审计记录状态、工作目录元数据、退出码与耗时，不记录命令文本或 stdout/stderr。
 
+批准 `npm install` 或 `npm ci` 也可能执行[依赖的生命周期脚本](https://docs.npmjs.com/cli/v11/using-npm/scripts/#life-cycle-operation-order)，包括 `postinstall`。这些脚本可访问文件、网络及该命令可用的凭据；审批安装命令前，请检查仓库及其依赖。
+
 ### 配置
 
 ```sh
