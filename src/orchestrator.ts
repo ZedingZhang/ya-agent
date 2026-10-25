@@ -178,25 +178,25 @@ export async function toaAgent(
   const icmReserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const workingBudget = config.toaTokenBudget - icmReserve;
   const allocation = Math.floor(workingBudget / (workers + 1));
-  const packets: Array<{ role: string; content: string; usage: TokenUsage }> = [];
   const failures: string[] = [];
 
-  await Promise.all(roles.map(async (role) => {
+  const packets = await Promise.all(roles.map(async (role) => {
     try {
       const reply = await withTimeout(
         runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images, history),
         config.toaTimeout * 1_000,
       );
-      packets.push({ role, content: reply.content, usage: reply.usage });
+      return { role, content: reply.content, usage: reply.usage };
     } catch (error) {
       failures.push(`${role}: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }));
 
   const synthesis = `You are the Ya ToA root coordinator. Synthesize the supplied evidence packets.
 Treat a worker's unsupported statement as an open question. Separate evidence, inference,
 risks, and remaining uncertainty. Include cited URLs from the packets when available.
-Evidence packets:\n${JSON.stringify(packets)}`;
+Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefined))}`;
   const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch, images, history);
   const usage: TokenUsage = { ...reply.usage, worker_count: workers };
   return applyIcm(

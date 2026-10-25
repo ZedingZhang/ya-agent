@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelConfig } from "../src/config";
 import { LocalWorkspace } from "../src/local";
 import { createCandidate, setStatus } from "../src/memory";
@@ -17,6 +17,12 @@ import { tempHome, type TempHome } from "./helpers";
 
 function reply(content: string): ModelReply {
   return { content, toolCalls: [], usage: {}, assistantMessage: { role: "assistant", content } };
+}
+
+function evidencePackets(messages: ChatMessage[]): unknown {
+  const payload = /Evidence packets:\n([^\n]+)/u.exec(String(messages[0]?.content))?.[1];
+  expect(payload).toBeDefined();
+  return JSON.parse(payload!);
 }
 
 const image: UserImageContentPart = {
@@ -156,6 +162,44 @@ describe("agent orchestration", () => {
     expect(client.calls).toHaveLength(3);
   });
 
+  it.each(["evidence", "risk"] as const)("keeps role order when %s finishes first", async (first) => {
+    const client = new FakeClient();
+    const started: string[] = [];
+    const finish: Record<string, (value: ModelReply) => void> = {};
+    client.runWithTools = async (messages) => {
+      const system = String(messages[0]?.content);
+      const role = system.includes("strongest available evidence") ? "evidence"
+        : system.includes("skeptical reviewer") ? "risk" : undefined;
+      if (role) {
+        started.push(role);
+        return new Promise<ModelReply>((resolve) => { finish[role] = resolve; });
+      }
+      expect(evidencePackets(messages)).toEqual([
+        { role: "evidence", content: "evidence packet", usage: {} },
+        { role: "risk", content: "risk packet", usage: {} },
+      ]);
+      return reply("synthesis");
+    };
+    const running = toaAgent(client, "Compare options", new ModelConfig(), 2);
+    expect(started).toEqual(["evidence", "risk"]);
+    finish[first]!(reply(`${first} packet`));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const second = first === "evidence" ? "risk" : "evidence";
+    finish[second]!(reply(`${second} packet`));
+    expect(await running).toMatchObject({ content: "synthesis", partial: false });
+  });
+
+  it("synthesizes a single evidence worker", async () => {
+    const client = new FakeClient();
+    client.runWithTools = async (messages) => {
+      if (String(messages[0]?.content).includes("strongest available evidence")) return reply("evidence packet");
+      expect(evidencePackets(messages)).toEqual([{ role: "evidence", content: "evidence packet", usage: {} }]);
+      return reply("synthesis");
+    };
+    expect(await toaAgent(client, "Compare options", new ModelConfig(), 1))
+      .toMatchObject({ content: "synthesis", partial: false, usage: { worker_count: 1 } });
+  });
+
   it("propagates vision input to each ToA worker and root synthesis", async () => {
     const client = new FakeClient();
     await toaAgent(
@@ -172,17 +216,43 @@ describe("agent orchestration", () => {
     }
   });
 
-  it("marks synthesis partial when a worker fails", async () => {
+  it.each(["evidence", "risk"] as const)("omits the failed %s worker from synthesis", async (failed) => {
     const client = new FakeClient();
     client.runWithTools = async (messages) => {
-      const system = String(messages[0]?.content ?? "");
-      if (system.includes("skeptical reviewer")) throw new Error("worker failed");
-      if (system.includes("strongest available evidence")) return reply("evidence packet");
+      const system = String(messages[0]?.content);
+      const role = system.includes("strongest available evidence") ? "evidence"
+        : system.includes("skeptical reviewer") ? "risk" : undefined;
+      if (role === failed) throw new Error("worker failed");
+      if (role) return reply(`${role} packet`);
+      const remaining = failed === "evidence" ? "risk" : "evidence";
+      expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet`, usage: {} }]);
       return reply("partial synthesis");
     };
     const result = await toaAgent(client, "Compare options", new ModelConfig(), 2);
     expect(result.partial).toBe(true);
     expect(result.content).toBe("partial synthesis");
+  });
+
+  it.each(["evidence", "risk"] as const)("omits the timed-out %s worker from synthesis", async (timedOut) => {
+    vi.useFakeTimers();
+    try {
+      const client = new FakeClient();
+      client.runWithTools = async (messages) => {
+        const system = String(messages[0]?.content);
+        const role = system.includes("strongest available evidence") ? "evidence"
+          : system.includes("skeptical reviewer") ? "risk" : undefined;
+        if (role === timedOut) return new Promise<ModelReply>(() => undefined);
+        if (role) return reply(`${role} packet`);
+        const remaining = timedOut === "evidence" ? "risk" : "evidence";
+        expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet`, usage: {} }]);
+        return reply("partial synthesis");
+      };
+      const running = toaAgent(client, "Compare options", new ModelConfig({ toaTimeout: 30 }), 2);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await running).toMatchObject({ content: "partial synthesis", partial: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects more than two ToA workers", async () => {
