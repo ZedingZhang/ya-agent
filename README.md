@@ -129,7 +129,7 @@ ya ask --help
 ya ask "Explain recursion"
 ya ask --web on "Compare the latest evidence for two approaches"
 ya ask --thinking on --reasoning-effort max "Analyze this decision"
-ya ask --model vision --image ./chart.png "Explain this chart"
+ya ask --image ./chart.png "Explain this chart"
 ```
 
 Interactive terminals render Ya's common Markdown subset. Redirected output preserves raw Markdown for scripts and files:

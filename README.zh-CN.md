@@ -129,7 +129,7 @@ ya ask --help
 ya ask "解释递归"
 ya ask --web on "比较两种方案的最新证据"
 ya ask --thinking on --reasoning-effort max "分析这个决策"
-ya ask --model vision --image ./chart.png "解释这张图表"
+ya ask --image ./chart.png "解释这张图表"
 ```
 
 交互终端会渲染 Ya 常用的 Markdown。重定向时保留原始 Markdown，方便脚本或文件处理：
