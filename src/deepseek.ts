@@ -17,6 +17,9 @@ export const MAX_TOOL_CALL_ROUNDS = 6;
 export const MAX_CODING_TOOL_CALL_ROUNDS = 20;
 export const MAX_REQUEST_ATTEMPTS = 3;
 
+const REQUEST_TIMEOUT_MS = 90_000;
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 export type Sleep = (milliseconds: number) => Promise<void>;
 
@@ -145,8 +148,7 @@ export class DeepSeekClient {
     return payload;
   }
 
-  private async requestOnce(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
-    const timeout = AbortSignal.timeout(timeoutSeconds * 1_000);
+  private async requestOnce(payload: DeepSeekPayload, signal: AbortSignal): Promise<Response> {
     const account = typeof this.apiKey !== "string";
     // Invalid request content is a caller error, not a retryable network failure.
     const body = JSON.stringify(account ? messagesPayload(payload) : payload);
@@ -160,11 +162,11 @@ export class DeepSeekClient {
         "Content-Type": "application/json",
       },
       body,
-      signal: this.signal ? AbortSignal.any([timeout, this.signal]) : timeout,
-    }), this.signal));
+      signal,
+    }), signal));
   }
 
-  private async httpError(response: Response): Promise<DeepSeekError> {
+  private async httpError(response: Response, signal: AbortSignal): Promise<DeepSeekError> {
     if (typeof this.apiKey !== "string") {
       if (response.status === 401) {
         try { clearAccountCredential(this.apiKey.token); } catch { /* Preserve the inference error if local removal fails. */ }
@@ -175,15 +177,39 @@ export class DeepSeekClient {
         response.status, retryAfterMilliseconds(response.headers.get("Retry-After")));
     }
     // A broken error body must not discard the status (e.g. turn a 401 into a retry).
-    const detail = await abortable(response.text(), this.signal).catch(() => response.statusText);
+    const detail = await abortable(response.text(), signal).catch(() => response.statusText);
     return new DeepSeekError(`DeepSeek API returned HTTP ${response.status}: ${detail}`,
       response.status, retryAfterMilliseconds(response.headers.get("Retry-After")));
   }
 
-  private async request(payload: DeepSeekPayload, timeoutSeconds: number): Promise<Response> {
-    const response = await this.requestOnce(payload, timeoutSeconds);
-    if (!response.ok) throw await this.httpError(response);
-    return response;
+  private async request<T>(
+    payload: DeepSeekPayload,
+    consume: (response: Response, signal: AbortSignal, onActivity: () => void) => Promise<T>,
+  ): Promise<T> {
+    const timeout = new AbortController();
+    const signal = this.signal ? AbortSignal.any([timeout.signal, this.signal]) : timeout.signal;
+    let streaming = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const resetTimeout = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => timeout.abort(new DOMException(
+        streaming ? "DeepSeek stream idle timeout (90 seconds)." : "DeepSeek API request timed out (90 seconds).",
+        "TimeoutError",
+      )), streaming ? STREAM_IDLE_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
+    };
+    resetTimeout();
+    try {
+      const response = await this.requestOnce(payload, signal);
+      if (!response.ok) throw await this.httpError(response, signal);
+      if (payload.stream) {
+        streaming = true;
+        resetTimeout();
+      }
+      return await consume(response, signal, resetTimeout);
+    } finally {
+      clearTimeout(timer);
+      timeout.abort();
+    }
   }
 
   private async withRetry<T>(operation: (markDelivered: () => void) => Promise<T>): Promise<T> {
@@ -218,9 +244,8 @@ export class DeepSeekClient {
   ): Promise<ModelReply> {
     config.validate();
     const payload = this.payload(messages, config, maxTokens, tools, false);
-    return this.withRetry(async () => {
-      const response = await this.request(payload, config.toaTimeout);
-      const text = await readNetwork(() => abortable(response.text(), this.signal));
+    return this.withRetry(() => this.request(payload, async (response, signal) => {
+      const text = await readNetwork(() => abortable(response.text(), signal));
       let body: unknown;
       try {
         body = JSON.parse(text) as unknown;
@@ -228,7 +253,7 @@ export class DeepSeekClient {
         throw new NetworkError("DeepSeek API returned invalid JSON.", undefined, undefined, { cause: error });
       }
       return typeof this.apiKey === "string" ? replyFromBody(body) : messagesReply(body);
-    });
+    }));
   }
 
   async completeStream(
@@ -239,12 +264,11 @@ export class DeepSeekClient {
   ): Promise<ModelReply> {
     config.validate();
     const payload = this.payload(messages, config, maxTokens, undefined, true);
-    return this.withRetry(async (markDelivered) => {
+    return this.withRetry((markDelivered) => this.request(payload, async (response, signal, onActivity) => {
       const content: string[] = [];
       const reasoning: string[] = [];
       const usage: TokenUsage = {};
       const accountBlocks: Record<string, unknown>[] = [];
-      const response = await this.request(payload, config.toaTimeout);
       const done = await readServerSentEvents(response, (data) => {
         if (data === "[DONE]") return true;
         let chunk: unknown;
@@ -304,7 +328,7 @@ export class DeepSeekClient {
           onContent(delta.content);
         }
         return false;
-      }, this.signal);
+      }, signal, onActivity);
       if (typeof this.apiKey !== "string" && !done) throw new NetworkError("DeepSeek account stream ended before completion.");
       const joinedContent = content.join("");
       const joinedReasoning = reasoning.join("");
@@ -316,7 +340,7 @@ export class DeepSeekClient {
         assistantMessage: { role: "assistant", content: joinedContent,
           ...(typeof this.apiKey === "string" ? {} : { account_content: accountBlocks }) },
       };
-    });
+    }));
   }
 
   async runWithTools(
@@ -366,7 +390,12 @@ export class DeepSeekClient {
   }
 }
 
-async function readServerSentEvents(response: Response, onData: (data: string) => boolean, signal?: AbortSignal): Promise<boolean> {
+async function readServerSentEvents(
+  response: Response,
+  onData: (data: string) => boolean,
+  signal: AbortSignal,
+  onActivity: () => void,
+): Promise<boolean> {
   if (!response.body) throw new DeepSeekError("DeepSeek streaming response had no body.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -375,6 +404,7 @@ async function readServerSentEvents(response: Response, onData: (data: string) =
     while (true) {
       signal?.throwIfAborted();
       const { done, value } = await readNetwork(() => abortable(reader.read(), signal));
+      if (value?.byteLength) onActivity();
       pending += decoder.decode(value, { stream: !done });
       let newline = pending.indexOf("\n");
       while (newline >= 0) {
