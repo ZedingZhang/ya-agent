@@ -45,6 +45,8 @@ export const MAX_DIFF_LINES = 200;
 export let AUDIT_LOG_MAX_BYTES = 1024 * 1024;
 export const MAX_AUDIT_ARCHIVES = 3;
 
+const EXCLUDED_SEARCH_DIRECTORIES = new Set(["node_modules", "dist", ".next"]);
+
 export interface LocalAction {
   operation: "mkdir" | "write" | "edit" | "move" | "run";
   paths: string[];
@@ -107,7 +109,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_search",
-      description: "Search file names and non-sensitive UTF-8 text files inside the authorized workspace.",
+      description: "Search file names and non-sensitive UTF-8 text files inside the authorized workspace, skipping node_modules, dist, and .next directories unless selected as the search root.",
       parameters: {
         type: "object",
         properties: { query: { type: "string" }, path: { type: "string" } },
@@ -473,8 +475,9 @@ export class LocalWorkspace {
     for (const entry of entries) {
       const path = join(root, entry.name);
       if (entry.isSymbolicLink() || this.isSensitive(path)) continue;
-      if (entry.isDirectory()) yield* this.walkFiles(path);
-      else if (entry.isFile()) yield path;
+      if (entry.isDirectory()) {
+        if (!EXCLUDED_SEARCH_DIRECTORIES.has(entry.name)) yield* this.walkFiles(path);
+      } else if (entry.isFile()) yield path;
     }
   }
 
