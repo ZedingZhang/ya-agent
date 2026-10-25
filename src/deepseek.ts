@@ -220,7 +220,13 @@ export class DeepSeekClient {
     const payload = this.payload(messages, config, maxTokens, tools, false);
     return this.withRetry(async () => {
       const response = await this.request(payload, config.toaTimeout);
-      const body = JSON.parse(await readNetwork(() => abortable(response.text(), this.signal))) as unknown;
+      const text = await readNetwork(() => abortable(response.text(), this.signal));
+      let body: unknown;
+      try {
+        body = JSON.parse(text) as unknown;
+      } catch (error) {
+        throw new NetworkError("DeepSeek API returned invalid JSON.", undefined, undefined, { cause: error });
+      }
       return typeof this.apiKey === "string" ? replyFromBody(body) : messagesReply(body);
     });
   }

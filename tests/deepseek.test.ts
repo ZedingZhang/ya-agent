@@ -188,10 +188,48 @@ describe("DeepSeek client", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("does not retry invalid JSON", async () => {
-    const fetcher = vi.fn<FetchLike>(async () => new Response("invalid JSON"));
-    await expect(new DeepSeekClient("key", fetcher).complete([], new ModelConfig(), 100)).rejects.toThrow(SyntaxError);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+  describe.each([
+    ["API key", "key", () => jsonResponse({ choices: [{ message: { content: "ok" } }] })],
+    ["account", { kind: "account", token: "synthetic-account-token" },
+      () => jsonResponse({ content: [{ type: "text", text: "ok" }] })],
+  ] as const)("%s non-stream JSON recovery", (_name, credential, success) => {
+    it.each(["<html>temporary proxy response</html>", '{"content":'])("retries a malformed body: %s", async (body) => {
+      const fetcher = vi.fn<FetchLike>().mockResolvedValueOnce(new Response(body)).mockImplementation(async () => success());
+      const sleep = vi.fn(async (_milliseconds: number) => undefined);
+      await expect(new DeepSeekClient(credential, fetcher, sleep).complete([], new ModelConfig(), 100))
+        .resolves.toMatchObject({ content: "ok" });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(sleep.mock.calls).toEqual([[500]]);
+    });
+
+    it("bounds malformed-JSON retries without exposing the response body", async () => {
+      const fetcher = vi.fn<FetchLike>(async () => new Response("synthetic-private-body"));
+      const sleep = vi.fn(async (_milliseconds: number) => undefined);
+      const error = await new DeepSeekClient(credential, fetcher, sleep).complete([], new ModelConfig(), 100)
+        .catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(DeepSeekError);
+      expect(error).toMatchObject({ message: "DeepSeek API returned invalid JSON.", cause: expect.any(SyntaxError) });
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(sleep.mock.calls).toEqual([[500], [1_000]]);
+    });
+
+    it("does not retry a valid JSON body with an invalid response shape", async () => {
+      const fetcher = vi.fn<FetchLike>(async () => jsonResponse({}));
+      const sleep = vi.fn(async () => undefined);
+      await expect(new DeepSeekClient(credential, fetcher, sleep).complete([], new ModelConfig(), 100)).rejects.toThrow();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(sleep).not.toHaveBeenCalled();
+    });
+
+    it("respects cancellation during malformed-JSON retry backoff", async () => {
+      const cancellation = new AbortController();
+      const fetcher = vi.fn<FetchLike>(async () => new Response("invalid JSON"));
+      const sleep = vi.fn(async () => { cancellation.abort(new Error("Stop JSON retry")); });
+      await expect(new DeepSeekClient(credential, fetcher, sleep, cancellation.signal).complete([], new ModelConfig(), 100))
+        .rejects.toThrow("Stop JSON retry");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(sleep).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("does not retry or wrap invalid streaming JSON as a network error", async () => {
