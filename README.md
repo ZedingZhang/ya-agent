@@ -24,7 +24,7 @@ Navigate projects and sessions on the left, chat with Ya on the right, and open 
 
 ## Platform support
 
-Release assets are self-contained and do not require Node.js. Node.js 22 or newer is required only for source development or npm installation.
+Standalone CLI and desktop release assets are self-contained and do not require Node.js. Node.js 22 or newer is required for source development or installation of the npm package.
 
 | Operating system | CLI | Desktop GUI | API key storage |
 | --- | --- | --- | --- |
@@ -52,6 +52,19 @@ Run the command and browser on the same computer. If the browser does not open a
 Account sign-in uses the PKCE protocol implemented by [DeepSeek's official Harness](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform). Ya receives a platform account grant and sends it to the official Messages API as `x-dsh-auth-token`; it does not request your password. Available access and billing follow your platform account. While signed in, the account takes priority over API keys. Signing out removes the account grant and attempts remote session revocation; existing API keys remain available. A rejected account token prompts you to sign in again.
 
 The account grant is stored as plaintext (unencrypted JSON), separately from settings, at `~/.ya/auth/credentials.json` (or `$YA_HOME/auth/credentials.json`). On Unix, the directory and file use permissions `0700` and `0600`; Windows uses the directory's access controls. These permissions and access controls restrict file access but do not encrypt the grant. Use disk encryption and encrypted backups to protect the stored grant if a disk is lost or a backup is exposed. Keep this user data directory private. The grant is never returned to the desktop renderer or stored in conversation history, and local file tools block reading the credential file.
+
+## Install the CLI from a release tarball
+
+Install Node.js 22 or newer, then download `ya-agent-<version>.tgz` from the [GitHub Release assets](https://github.com/ZedingZhang/ya-agent/releases/latest). Before running the command, replace `<version>` with the package version in the downloaded filename, without the tag's leading `v`. Run it from the directory containing that file:
+
+```sh
+npm install -g "./ya-agent-<version>.tgz"
+ya --help
+```
+
+The release workflow attaches the npm tarball to GitHub Releases; it does not publish it to the npm registry. This package installs the CLI. For the desktop app or a CLI that does not require Node.js, use the separate [standalone release assets](#standalone-releases).
+
+The published `v0.8.0` tarball still uses legacy native bindings: a clean Windows installation fails to start with `Cannot find native binding`. Until a release built from the current TypeScript core is available, use [source installation](#install-from-source).
 
 ## Install from source
 

@@ -24,7 +24,7 @@ Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V
 
 ## 平台支持
 
-Release 产物是自包含文件，不要求安装 Node.js。只有源码开发或 npm 安装需要 Node.js 22 或更高版本。
+独立 CLI 和桌面 Release 产物是自包含文件，不要求安装 Node.js。源码开发或安装 npm 包需要 Node.js 22 或更高版本。
 
 | 操作系统 | CLI | 桌面 GUI | API 密钥存储 |
 | --- | --- | --- | --- |
@@ -52,6 +52,19 @@ ya logout deepseek
 账号登录遵循 [DeepSeek 官方 Harness 的 PKCE 实现](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform)。Ya 获取平台账号凭证，并通过 `x-dsh-auth-token` 请求头调用官方 Messages API，无需向 Ya 提供账号密码。可用权限和计费取决于你的开放平台账号。登录期间优先使用账号；退出会删除本机账号凭证并尝试撤销平台会话，已有 API Key 仍可使用。账号凭证失效时会提示重新登录。
 
 账号凭证以明文（未加密的 JSON）保存，与普通设置分开，路径为 `~/.ya/auth/credentials.json`（或 `$YA_HOME/auth/credentials.json`）。Unix 上目录和文件权限分别为 `0700`、`0600`；Windows 沿用目录的访问控制。这些权限和访问控制只能限制文件访问，并不会加密凭证。请启用磁盘加密并对备份加密，以便在磁盘丢失或备份泄露时保护其中保存的凭证。请将此用户数据目录保留为私有。凭证不会返回桌面渲染进程或进入会话记录，本地文件工具也会阻止读取凭证文件。
+
+## 从 Release tarball 安装 CLI
+
+先安装 Node.js 22 或更高版本，然后从 [GitHub Release 附件](https://github.com/ZedingZhang/ya-agent/releases/latest)下载 `ya-agent-<version>.tgz`。运行命令前，将 `<version>` 替换为下载文件名中的包版本号，不含标签开头的 `v`。进入该文件所在目录后执行：
+
+```sh
+npm install -g "./ya-agent-<version>.tgz"
+ya --help
+```
+
+发布流程将 npm tarball 附加到 GitHub Release，不会将包发布到 npm registry。此包安装 CLI；如需桌面应用或无需 Node.js 的 CLI，请下载单独提供的[独立 Release 产物](#独立-release)。
+
+已发布的 `v0.8.0` tarball 仍使用旧版原生绑定：在干净的 Windows 安装环境中，启动会报 `Cannot find native binding`。基于当前 TypeScript 核心构建的 Release 发布前，请使用[源码安装](#从源码安装)。
 
 ## 从源码安装
 
