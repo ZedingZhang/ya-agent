@@ -55,14 +55,16 @@ The account grant is stored as plaintext (unencrypted JSON), separately from set
 
 ## Install the CLI from a release tarball
 
-Install Node.js 22 or newer, then download `ya-agent-<version>.tgz` from the [GitHub Release assets](https://github.com/ZedingZhang/ya-agent/releases/latest). Replace `<version>` with the package version in the downloaded filename, without the tag's leading `v`. From the directory containing that file, run the following (using version `0.8.0` as an example):
+Install Node.js 22 or newer, then download `ya-agent-<version>.tgz` from the [GitHub Release assets](https://github.com/ZedingZhang/ya-agent/releases/latest). Before running the command, replace `<version>` with the package version in the downloaded filename, without the tag's leading `v`. Run it from the directory containing that file:
 
 ```sh
-npm install -g ./ya-agent-0.8.0.tgz
+npm install -g "./ya-agent-<version>.tgz"
 ya --help
 ```
 
 The release workflow attaches the npm tarball to GitHub Releases; it does not publish it to the npm registry. This package installs the CLI. For the desktop app or a CLI that does not require Node.js, use the separate [standalone release assets](#standalone-releases).
+
+The published `v0.8.0` tarball still uses legacy native bindings: a clean Windows installation fails to start with `Cannot find native binding`. Until a release built from the current TypeScript core is available, use [source installation](#install-from-source).
 
 ## Install from source
 

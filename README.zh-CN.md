@@ -55,14 +55,16 @@ ya logout deepseek
 
 ## 从 Release tarball 安装 CLI
 
-先安装 Node.js 22 或更高版本，然后从 [GitHub Release 附件](https://github.com/ZedingZhang/ya-agent/releases/latest)下载 `ya-agent-<version>.tgz`。将 `<version>` 替换为下载文件名中的包版本号，不含标签开头的 `v`。进入该文件所在目录后执行以下命令（以 `0.8.0` 为例）：
+先安装 Node.js 22 或更高版本，然后从 [GitHub Release 附件](https://github.com/ZedingZhang/ya-agent/releases/latest)下载 `ya-agent-<version>.tgz`。运行命令前，将 `<version>` 替换为下载文件名中的包版本号，不含标签开头的 `v`。进入该文件所在目录后执行：
 
 ```sh
-npm install -g ./ya-agent-0.8.0.tgz
+npm install -g "./ya-agent-<version>.tgz"
 ya --help
 ```
 
 发布流程将 npm tarball 附加到 GitHub Release，不会将包发布到 npm registry。此包安装 CLI；如需桌面应用或无需 Node.js 的 CLI，请下载单独提供的[独立 Release 产物](#独立-release)。
+
+已发布的 `v0.8.0` tarball 仍使用旧版原生绑定：在干净的 Windows 安装环境中，启动会报 `Cannot find native binding`。基于当前 TypeScript 核心构建的 Release 发布前，请使用[源码安装](#从源码安装)。
 
 ## 从源码安装
 
