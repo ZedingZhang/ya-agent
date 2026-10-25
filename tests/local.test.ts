@@ -7,15 +7,17 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_AUDIT_ARCHIVES,
   MAX_DIFF_LINES,
+  MAX_SEARCH_RESULTS,
   MAX_TEXT_BYTES,
   LocalWorkspace,
   appendAuditRecord,
@@ -27,6 +29,11 @@ import {
   type LocalActivity,
 } from "../src/local";
 import { tempHome, type TempHome } from "./helpers";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync), readFileSync: vi.fn(actual.readFileSync) };
+});
 
 describe("local workspace", () => {
   let home: TempHome;
@@ -59,6 +66,50 @@ describe("local workspace", () => {
     expect(textResults[0]).toMatchObject({ match: "text", line: 2 });
     const nameResults = (JSON.parse(workspace.search({ query: "notes" })) as { results: Array<Record<string, unknown>> }).results;
     expect(nameResults[0]).toMatchObject({ match: "filename" });
+  });
+
+  it.each(["text", "filename"])("stops traversal immediately when a %s match reaches the limit", (kind) => {
+    const first = join(workspace.root, "a-first.txt");
+    const lineCount = MAX_SEARCH_RESULTS - (kind === "filename" ? 1 : 0);
+    writeFileSync(first, "needle\n".repeat(lineCount));
+    if (kind === "filename") writeFileSync(join(workspace.root, "b-needle.txt"), "not read");
+    const later = join(workspace.root, "z-later");
+    mkdirSync(later);
+    writeFileSync(join(later, "later.txt"), "needle");
+    vi.mocked(readdirSync).mockClear();
+    vi.mocked(readFileSync).mockClear();
+    const result = JSON.parse(workspace.search({ query: "needle" }));
+    expect(result.results).toHaveLength(MAX_SEARCH_RESULTS);
+    expect(result.limited).toBe(true);
+    expect(result.results.at(-1).match).toBe(kind);
+    expect(vi.mocked(readdirSync).mock.calls.map(([path]) => String(path))).toEqual([workspace.root]);
+    expect(vi.mocked(readFileSync).mock.calls.map(([path]) => String(path))).toEqual([first]);
+  });
+
+  it("preserves depth-first search ordering below the limit", () => {
+    mkdirSync(join(root, "a"));
+    writeFileSync(join(root, "a", "one.txt"), "context\nneedle");
+    writeFileSync(join(root, "b-needle.txt"), "needle");
+    writeFileSync(join(root, "c.txt"), "needle");
+    const result = JSON.parse(workspace.search({ query: "needle" }));
+    expect(result.limited).toBe(false);
+    expect(result.results.map(({ path, match, line }: { path: string; match: string; line?: number }) => ({ path, match, line })))
+      .toEqual([
+        { path: join("a", "one.txt"), match: "text", line: 2 },
+        { path: "b-needle.txt", match: "filename", line: undefined },
+        { path: "b-needle.txt", match: "text", line: 1 },
+        { path: "c.txt", match: "text", line: 1 },
+      ]);
+  });
+
+  it("keeps sensitive, binary, invalid and oversized files out of text search", () => {
+    writeFileSync(join(root, ".env"), "needle");
+    writeFileSync(join(root, "binary.bin"), Buffer.from("needle\0"));
+    writeFileSync(join(root, "invalid.txt"), Buffer.from([0xff]));
+    writeFileSync(join(root, "large.txt"), "needle".padEnd(MAX_TEXT_BYTES + 1, "x"));
+    writeFileSync(join(root, "ordinary.txt"), "needle");
+    const result = JSON.parse(workspace.search({ query: "needle" }));
+    expect(result).toMatchObject({ limited: false, results: [{ path: "ordinary.txt", match: "text", line: 1 }] });
   });
 
   it("preserves UTF-8 BOM bytes when reading and writing back a file", async () => {
