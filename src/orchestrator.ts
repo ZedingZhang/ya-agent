@@ -7,6 +7,9 @@ import { relevantContext } from "./memory";
 import type { ChatMessage, ConversationMessage, TokenUsage, ToolDefinition, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search, WEB_SEARCH_TOOL } from "./web";
 
+const ICM_MARKER = "[ICM_GAP]";
+const MAX_ICM_PENDING_CHARS = 32;
+
 export const CORE_PROMPT = `You are Ya, a consent-first personal research assistant.
 Use the current user task, conversation history, and supplied approved memory. Do not claim unverified facts.
 For research answers, distinguish evidence, inference, and open questions. Cite URLs
@@ -150,8 +153,42 @@ export async function singleAgent(
   const reserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const maxTokens = Math.min(4_096, config.toaTokenBudget - reserve);
   if (onContent && !localWorkspace && !shouldUseWeb(task, webMode)) {
-    const reply = await client.completeStream(messagesForTask(task, "", false, images, history), config, maxTokens, onContent);
-    return { content: reply.content, mode: "single", usage: reply.usage };
+    let pending = "";
+    let emittedLength = 0;
+    let deferRemaining = false;
+    const reply = await client.completeStream(messagesForTask(task, "", false, images, history), config, maxTokens, (chunk) => {
+      if (deferRemaining) return;
+      const clean = stripIcmMarkers(pending + chunk);
+      // Nested marker deletion can join several unresolved prefix fragments.
+      let boundary = clean.length;
+      while (boundary > 0) {
+        const start = clean.lastIndexOf("[", boundary - 1);
+        if (start < 0) break;
+        const fragment = clean.slice(start, boundary);
+        if (fragment.length >= ICM_MARKER.length || !ICM_MARKER.startsWith(fragment.toUpperCase())) break;
+        boundary = start;
+      }
+      const ready = clean.slice(0, boundary);
+      pending = clean.slice(boundary);
+      if (pending.length > MAX_ICM_PENDING_CHARS) {
+        // Use the client's final reply for catch-up instead of buffering it twice.
+        deferRemaining = true;
+        pending = "";
+      }
+      if (ready) {
+        emittedLength += ready.length;
+        onContent(ready);
+      }
+    });
+    const draft = stripIcmMarkers(reply.content);
+    const remaining = draft.slice(emittedLength);
+    if (remaining) onContent(remaining);
+    const result = await applyIcm(client, task, config,
+      { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch, images, history);
+    const content = stripIcmMarkers(result.content);
+    const supplement = content.slice(draft.length);
+    if (supplement) onContent(supplement);
+    return { ...result, content };
   }
   const reply = await runAgent(client, task, config, maxTokens, "", webMode, localWorkspace, webSearch, images, history);
   const result: RunResult = { content: reply.content, mode: "single", usage: reply.usage };
@@ -213,6 +250,15 @@ Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefi
 
 export function icmFollowUpNeeded(content: string): boolean {
   return content.toLocaleLowerCase("und").includes("[icm_gap]");
+}
+
+function stripIcmMarkers(content: string): string {
+  let previous: string;
+  do {
+    previous = content;
+    content = content.replace(/\[ICM_GAP\]/giu, "");
+  } while (content !== previous);
+  return content;
 }
 
 async function applyIcm(
