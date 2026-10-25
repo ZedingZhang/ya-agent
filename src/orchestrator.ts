@@ -7,6 +7,8 @@ import { relevantContext } from "./memory";
 import type { ChatMessage, ConversationMessage, TokenUsage, ToolDefinition, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search, WEB_SEARCH_TOOL } from "./web";
 
+const ICM_MARKER = "[ICM_GAP]";
+
 export const CORE_PROMPT = `You are Ya, a consent-first personal research assistant.
 Use the current user task, conversation history, and supplied approved memory. Do not claim unverified facts.
 For research answers, distinguish evidence, inference, and open questions. Cite URLs
@@ -150,8 +152,23 @@ export async function singleAgent(
   const reserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const maxTokens = Math.min(4_096, config.toaTokenBudget - reserve);
   if (onContent && !localWorkspace && !shouldUseWeb(task, webMode)) {
-    const reply = await client.completeStream(messagesForTask(task, "", false, images, history), config, maxTokens, onContent);
-    return { content: reply.content, mode: "single", usage: reply.usage };
+    let pending = "";
+    const reply = await client.completeStream(messagesForTask(task, "", false, images, history), config, maxTokens, (chunk) => {
+      const clean = stripIcmMarkers(pending + chunk);
+      // Only a possible marker prefix needs to wait for the next chunk.
+      let retained = Math.min(ICM_MARKER.length - 1, clean.length);
+      while (retained > 0 && !ICM_MARKER.startsWith(clean.slice(-retained).toUpperCase())) retained -= 1;
+      const ready = clean.slice(0, clean.length - retained);
+      pending = clean.slice(clean.length - retained);
+      if (ready) onContent(ready);
+    });
+    if (pending) onContent(pending);
+    const result = await applyIcm(client, task, config,
+      { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch, images, history);
+    const content = stripIcmMarkers(result.content);
+    const supplement = content.slice(stripIcmMarkers(reply.content).length);
+    if (supplement) onContent(supplement);
+    return { ...result, content };
   }
   const reply = await runAgent(client, task, config, maxTokens, "", webMode, localWorkspace, webSearch, images, history);
   const result: RunResult = { content: reply.content, mode: "single", usage: reply.usage };
@@ -213,6 +230,15 @@ Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefi
 
 export function icmFollowUpNeeded(content: string): boolean {
   return content.toLocaleLowerCase("und").includes("[icm_gap]");
+}
+
+function stripIcmMarkers(content: string): string {
+  let previous: string;
+  do {
+    previous = content;
+    content = content.replace(/\[ICM_GAP\]/giu, "");
+  } while (content !== previous);
+  return content;
 }
 
 async function applyIcm(

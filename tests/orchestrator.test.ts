@@ -79,6 +79,83 @@ describe("agent orchestration", () => {
     expect(client.streamed).toBe(true);
   });
 
+  it.each(Array.from({ length: "[ICM_GAP]".length + 1 }, (_, index) => index))(
+    "filters an ICM marker split at offset %i and emits one supplement", async (offset) => {
+      const client = new FakeClient();
+      const output: string[] = [];
+      const marker = "[ICM_GAP]";
+      client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+        onContent(`Draft ${marker.slice(0, offset)}`);
+        expect(output.join("")).toBe("Draft ");
+        onContent(`${marker.slice(offset)} tail`);
+        return { ...reply(`Draft ${marker} tail`), usage: { output_tokens: 5 } };
+      };
+      client.runWithTools = async (messages, _config, maxTokens, tools, handlers) => {
+        client.calls.push({ messages, tools, handlers });
+        expect(maxTokens).toBeLessThanOrEqual(1_024);
+        return { ...reply("Supplement"), usage: { output_tokens: 3 } };
+      };
+      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+      expect(result.content).toBe("Draft  tail\n\nEvidence supplement:\nSupplement");
+      expect(output.join("")).toBe(result.content);
+      expect(client.calls).toHaveLength(1);
+      expect(client.calls[0]!.tools?.map((tool) => tool.function.name)).toContain("web_search");
+      expect(result.usage).toMatchObject({ output_tokens: 5, icm_follow_up: { output_tokens: 3 } });
+    },
+  );
+
+  it("emits ordinary chunks immediately", async () => {
+    const client = new FakeClient();
+    const output: string[] = [];
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+      onContent("Hello ");
+      expect(output).toEqual(["Hello "]);
+      onContent("world");
+      expect(output).toEqual(["Hello ", "world"]);
+      return reply("Hello world");
+    };
+    const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+    expect(result.content).toBe("Hello world");
+    expect(client.calls).toEqual([]);
+  });
+
+  it("flushes an incomplete marker prefix as ordinary text at normal completion", async () => {
+    const client = new FakeClient();
+    const output: string[] = [];
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+      onContent("Use [ICM_");
+      return reply("Use [ICM_");
+    };
+    const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+    expect(output.join("")).toBe("Use [ICM_");
+    expect(result.content).toBe("Use [ICM_");
+    expect(client.calls).toEqual([]);
+  });
+
+  it.each([
+    ["One [icm_gap] two [ICM_GAP] end", "One  two  end"],
+    ["Before [ICM_[ICM_GAP]GAP] after", "Before  after"],
+  ])("removes markers from draft %s and the supplement", async (draft, clean) => {
+    const client = new FakeClient();
+    const output: string[] = [];
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => { onContent(draft); return reply(draft); };
+    client.runWithTools = async (messages) => { client.calls.push({ messages }); return reply("Supplement [ICM_GAP]"); };
+    const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+    expect(result.content).toBe(`${clean}\n\nEvidence supplement:\nSupplement `);
+    expect(output.join("")).toBe(result.content);
+    expect(client.calls).toHaveLength(1);
+  });
+
+  it("propagates stream failures without starting a supplement or leaking a pending marker prefix", async () => {
+    const client = new FakeClient();
+    const output: string[] = [];
+    const failure = new Error("Stream failed");
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => { onContent("Partial [ICM_"); throw failure; };
+    await expect(singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text))).rejects.toBe(failure);
+    expect(output.join("")).toBe("Partial ");
+    expect(client.calls).toEqual([]);
+  });
+
   it("injects only task-relevant approved memory", () => {
     const matching = setStatus(createCandidate("Use PostgreSQL indexes", "evidence").id, "approved");
     const unrelated = setStatus(createCandidate("Use dark terminal themes", "evidence").id, "approved");
