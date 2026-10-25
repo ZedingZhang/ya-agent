@@ -195,7 +195,7 @@ The tool set can:
 
 The file tools cannot delete files. Every change shows an absolute path and requires approval. Replacements include a unified diff capped at 200 lines. In a non-interactive shell, file changes are denied unless that invocation includes `--approve`.
 
-Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, credentials, private keys, binary files, invalid UTF-8, and files larger than 1 MiB are blocked. Action audit logs contain metadata—not file content or diffs—and rotate at 1 MiB with three archives.
+Reads remain inside the resolved workspace. Symlink escapes, `.git`, `.env`, credentials, private keys, binary files, invalid UTF-8, and files larger than 1 MiB are blocked. Writes, edits, and moves also reject sensitive paths before approval. Action audit logs contain metadata—not file content or diffs—and rotate at 1 MiB with three archives.
 
 For existing files, Ya prefers `local_edit`: `local_read` returns exact content and a SHA-256 `revision`, which the edit submits as `expected_revision` with 1–100 `{old_text, new_text}` replacements. Each non-empty `old_text` must match exactly once in the original file; ambiguous, missing or overlapping matches reject the whole batch before approval. Use surrounding context for insertion and an empty `new_text` for deletion. No fuzzy matching or newline normalization is performed.
 
@@ -266,7 +266,7 @@ The desktop application uses a two-column workspace inspired by the [official De
 
 After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current session's file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching sessions or restarting preserves the diff at the time of each operation, without requiring Git.
 
-Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive files and non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
+Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive-path writes are rejected before approval; non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
 
 Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
 

@@ -110,8 +110,10 @@ describe("successful file change delivery", () => {
   });
 
   it("does not announce cancelled writes or sensitive content", async () => {
-    await workspace.write({ path: ".env", content: "TOKEN=private" });
-    await workspace.write({ path: ".env", content: "TOKEN=updated" });
+    await expect(workspace.write({ path: ".env", content: "TOKEN=private" })).rejects.toThrow(/sensitive/u);
+    writeFileSync(join(root, ".env"), "TOKEN=private");
+    await expect(workspace.write({ path: ".env", content: "TOKEN=updated" })).rejects.toThrow(/sensitive/u);
+    expect(readFileSync(join(root, ".env"), "utf8")).toBe("TOKEN=private");
     await workspace.write({ path: "binary.dat", content: "text\0binary" });
     expect(changes).toEqual([]);
     const cancellation = new AbortController();
