@@ -230,6 +230,8 @@ Commands use `cmd.exe /d /s /c` on Windows and `/bin/sh -c` on macOS/Linux, inhe
 
 Only the **initial working directory** is confined to the resolved workspace. Shell commands execute with your account's permissions and can modify or delete files elsewhere or access the network; execution is not sandboxed. Ya excludes its `DEEPSEEK_API_KEY`, `YA_HOME` and application runtime flags from the child environment. Audit logs record command status, working-directory metadata, exit code and duration, without command text or stdout/stderr.
 
+Approving `npm install` or `npm ci` can also run [dependency lifecycle scripts](https://docs.npmjs.com/cli/v11/using-npm/scripts/#life-cycle-operation-order), including `postinstall`. These scripts can access files, the network, and credentials available to the command; review the repository and its dependencies before approving installation.
+
 ### Configuration
 
 ```sh
