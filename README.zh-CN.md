@@ -51,7 +51,7 @@ ya logout deepseek
 
 账号登录遵循 [DeepSeek 官方 Harness 的 PKCE 实现](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/credentials/deepseek-account-platform)。Ya 获取平台账号凭证，并通过 `x-dsh-auth-token` 请求头调用官方 Messages API，无需向 Ya 提供账号密码。可用权限和计费取决于你的开放平台账号。登录期间优先使用账号；退出会删除本机账号凭证并尝试撤销平台会话，已有 API Key 仍可使用。账号凭证失效时会提示重新登录。
 
-账号凭证与普通设置分开，保存在 `~/.ya/auth/credentials.json`（或 `$YA_HOME/auth/credentials.json`）。Unix 上目录和文件权限分别为 `0700`、`0600`；Windows 沿用目录的访问控制。请将此用户数据目录保留为私有。凭证不会返回桌面渲染进程或进入会话记录，本地文件工具也会阻止读取凭证文件。
+账号凭证以明文（未加密的 JSON）保存，与普通设置分开，路径为 `~/.ya/auth/credentials.json`（或 `$YA_HOME/auth/credentials.json`）。Unix 上目录和文件权限分别为 `0700`、`0600`；Windows 沿用目录的访问控制。这些权限和访问控制只能限制文件访问，并不会加密凭证。请启用磁盘加密并对备份加密，以便在磁盘丢失或备份泄露时保护其中保存的凭证。请将此用户数据目录保留为私有。凭证不会返回桌面渲染进程或进入会话记录，本地文件工具也会阻止读取凭证文件。
 
 ## 从源码安装
 
