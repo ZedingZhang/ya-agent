@@ -1,10 +1,13 @@
 import {
   basename,
+  dirname,
   join,
 } from "node:path";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -137,6 +140,66 @@ describe("local workspace", () => {
     expect(JSON.parse(await workspace.move({ source: "from.txt", destination: "to.txt" }))).toMatchObject({ status: "ok" });
     writeFileSync(join(root, "other.txt"), "x", "utf8");
     await expect(workspace.move({ source: "to.txt", destination: "other.txt" })).rejects.toThrow(/already exists/u);
+  });
+
+  it.each([".env", ".env.local", "credentials.json", "id_rsa", "private.pem", ".git/config"])(
+    "blocks moving sensitive source %s before ordinary approval", async (source) => {
+      mkdirSync(dirname(join(root, source)), { recursive: true });
+      writeFileSync(join(root, source), "synthetic-credential", "utf8");
+      await expect(workspace.move({ source, destination: "notes.txt" })).rejects.toThrow(/sensitive/u);
+      expect(actions).toEqual([]);
+      expect(readFileSync(join(root, source), "utf8")).toBe("synthetic-credential");
+      expect(existsSync(join(root, "notes.txt"))).toBe(false);
+      expect(readFileSync(join(home.path, "actions.jsonl"), "utf8")).not.toContain("synthetic-credential");
+    },
+  );
+
+  it.each([".env", ".env.production", "credentials.json", "id_ed25519", "client.key", ".git/config"])(
+    "blocks moving into sensitive destination %s before ordinary approval", async (destination) => {
+      mkdirSync(dirname(join(root, destination)), { recursive: true });
+      writeFileSync(join(root, "notes.txt"), "ordinary text", "utf8");
+      await expect(workspace.move({ source: "notes.txt", destination })).rejects.toThrow(/sensitive/u);
+      expect(actions).toEqual([]);
+      expect(readFileSync(join(root, "notes.txt"), "utf8")).toBe("ordinary text");
+      expect(existsSync(join(root, destination))).toBe(false);
+    },
+  );
+
+  it("blocks renaming the entire .git directory", async () => {
+    mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, ".git", "config"), "synthetic-credential", "utf8");
+    await expect(workspace.move({ source: ".git", destination: "metadata" })).rejects.toThrow(/sensitive/u);
+    expect(actions).toEqual([]);
+    expect(readFileSync(join(root, ".git", "config"), "utf8")).toBe("synthetic-credential");
+    expect(existsSync(join(root, "metadata"))).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("checks resolved move paths for sensitive aliases", async () => {
+    writeFileSync(join(root, ".env"), "synthetic-credential", "utf8");
+    symlinkSync(join(root, ".env"), join(root, "alias.txt"));
+    await expect(workspace.move({ source: "alias.txt", destination: "notes.txt" })).rejects.toThrow(/sensitive/u);
+    mkdirSync(join(root, ".git"));
+    symlinkSync(join(root, ".git"), join(root, "metadata"), "dir");
+    writeFileSync(join(root, "ordinary.txt"), "ordinary text", "utf8");
+    await expect(workspace.move({ source: "ordinary.txt", destination: "metadata/config" })).rejects.toThrow(/sensitive/u);
+    expect(actions).toEqual([]);
+    expect(readFileSync(join(root, ".env"), "utf8")).toBe("synthetic-credential");
+    expect(existsSync(join(root, ".git", "config"))).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("rejects a destination redirected into .git during approval", async () => {
+    mkdirSync(join(root, "target"));
+    mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, "ordinary.txt"), "ordinary text", "utf8");
+    workspace.confirm = () => {
+      renameSync(join(root, "target"), join(root, "original-target"));
+      symlinkSync(join(root, ".git"), join(root, "target"), "dir");
+      return true;
+    };
+    await expect(workspace.move({ source: "ordinary.txt", destination: "target/config" }))
+      .rejects.toThrow(/changed during approval/u);
+    expect(readFileSync(join(root, "ordinary.txt"), "utf8")).toBe("ordinary text");
+    expect(existsSync(join(root, ".git", "config"))).toBe(false);
   });
 
   it("truncates large overwrite diffs", async () => {

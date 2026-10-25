@@ -162,7 +162,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_move",
-      description: "Move or rename a file or directory inside the workspace without replacing a destination. The client asks before writing.",
+      description: "Move or rename a non-sensitive file or directory between non-sensitive paths inside the workspace without replacing a destination. The client asks before writing.",
       parameters: {
         type: "object",
         properties: { source: { type: "string" }, destination: { type: "string" } },
@@ -613,6 +613,9 @@ export class LocalWorkspace {
     const destination = this.resolveInput(arguments_.destination);
     const action: LocalAction = { operation: "move", paths: [source, destination], summary: `Move: ${source} -> ${destination}` };
     try {
+      if (this.isSensitive(source) || this.isSensitive(destination)) {
+        throw new Error("Moving sensitive files or directories is blocked in local mode.");
+      }
       if (source === this.root || !existsSync(source)) throw new Error(`Source does not exist: ${source}`);
       if (existsSync(destination)) throw new Error(`Destination already exists: ${destination}`);
       if (!existsSync(dirname(destination)) || !statSync(dirname(destination)).isDirectory()) {
@@ -626,6 +629,10 @@ export class LocalWorkspace {
       }
       if (!(await this.confirmed(action))) {
         return JSON.stringify({ status: "denied", operation: "move", path: this.relativePath(source), reason: "User declined this action." });
+      }
+      if (this.resolveInput(arguments_.source) !== source || this.resolveInput(arguments_.destination) !== destination
+        || this.resolveInput(source) !== source || this.resolveInput(destination) !== destination) {
+        throw new Error("Move paths changed during approval. Request approval again.");
       }
       renameSync(source, destination);
       this.audit("move", [source, destination], "success");
