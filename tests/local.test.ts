@@ -102,6 +102,51 @@ describe("local workspace", () => {
       ]);
   });
 
+  it.each(["needle", "target"])("skips dependency and build directories for query %s at every depth", (query) => {
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "target.txt"), "needle");
+    for (const parent of [root, join(root, "src")]) {
+      for (const name of ["node_modules", "dist", ".next"]) {
+        mkdirSync(join(parent, name));
+        writeFileSync(join(parent, name, "target.txt"), "needle");
+      }
+    }
+    vi.mocked(readdirSync).mockClear();
+    vi.mocked(readFileSync).mockClear();
+    const result = JSON.parse(workspace.search({ query }));
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].path).toBe(join("src", "target.txt"));
+    expect(result.limited).toBe(false);
+    expect(vi.mocked(readdirSync).mock.calls.map(([path]) => String(path)))
+      .toEqual([workspace.root, join(workspace.root, "src")]);
+    expect(vi.mocked(readFileSync).mock.calls.map(([path]) => String(path)))
+      .toEqual([join(workspace.root, "src", "target.txt")]);
+  });
+
+  it.each(["node_modules", "dist", ".next"])("searches an explicitly selected %s root", (path) => {
+    mkdirSync(join(root, path));
+    writeFileSync(join(root, path, "target.txt"), "needle");
+    mkdirSync(join(root, path, "node_modules"));
+    writeFileSync(join(root, path, "node_modules", "nested.txt"), "needle");
+    const result = JSON.parse(workspace.search({ query: "needle", path }));
+    expect(result).toMatchObject({ limited: false, results: [{ path: join(path, "target.txt"), match: "text", line: 1 }] });
+  });
+
+  it("keeps similarly named directories and ordinary files searchable", () => {
+    mkdirSync(join(root, "src"));
+    for (const name of ["node_modules", "dist", ".next"]) writeFileSync(join(root, "src", name), "needle");
+    for (const name of ["node_modules-copy", "dist-src", ".next-source"]) {
+      mkdirSync(join(root, name));
+      writeFileSync(join(root, name, "target.txt"), "needle");
+    }
+    const result = JSON.parse(workspace.search({ query: "needle" }));
+    expect(result.results.map(({ path }: { path: string }) => path).sort()).toEqual([
+      join("src", "node_modules"), join("src", "dist"), join("src", ".next"),
+      join("node_modules-copy", "target.txt"), join("dist-src", "target.txt"), join(".next-source", "target.txt"),
+    ].sort());
+    expect(result.limited).toBe(false);
+  });
+
   it("keeps sensitive, binary, invalid and oversized files out of text search", () => {
     writeFileSync(join(root, ".env"), "needle");
     writeFileSync(join(root, "binary.bin"), Buffer.from("needle\0"));
