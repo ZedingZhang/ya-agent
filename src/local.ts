@@ -127,7 +127,7 @@ export const LOCAL_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "local_write",
-      description: "Create a UTF-8 text file, or replace an entire file only when explicitly needed. Prefer local_edit for changes to existing files. Its parent must already exist. The client shows a diff and asks before writing.",
+      description: "Create a non-sensitive UTF-8 text file, or replace an entire non-sensitive file only when explicitly needed. Prefer local_edit for changes to existing files. Its parent must already exist. The client shows a diff and asks before writing.",
       parameters: {
         type: "object",
         properties: { path: { type: "string" }, content: { type: "string" } },
@@ -336,8 +336,8 @@ export class LocalWorkspace {
     return [".pem", ".key", ".p12", ".pfx", ".kdbx", ".der", ".token"].includes(extension) || lowered.includes("secret");
   }
 
-  private readText(path: string, allowSensitive = false): string {
-    if (this.isSensitive(path) && !allowSensitive) throw new Error("Reading sensitive files is blocked in local mode.");
+  private readText(path: string): string {
+    if (this.isSensitive(path)) throw new Error("Reading sensitive files is blocked in local mode.");
     if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`Not a file: ${path}`);
     if (statSync(path).size > MAX_TEXT_BYTES) throw new Error("Text files larger than 1 MiB cannot be read or replaced.");
     const data = readFileSync(path);
@@ -509,10 +509,11 @@ export class LocalWorkspace {
     const content = arguments_.content;
     if (typeof content !== "string") throw new Error("Text content is required.");
     try {
+      if (this.isSensitive(path)) throw new Error("Writing sensitive files is blocked in local mode.");
       if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) throw new Error("Text content larger than 1 MiB cannot be written.");
       if (existsSync(path) && statSync(path).isDirectory()) throw new Error(`Path is a directory: ${path}`);
       if (!existsSync(dirname(path)) || !statSync(dirname(path)).isDirectory()) throw new Error("Parent directory does not exist; create it first.");
-      const previous = existsSync(path) ? this.readText(path, true) : undefined;
+      const previous = existsSync(path) ? this.readText(path) : undefined;
       const action: LocalAction = previous === undefined
         ? { operation: "write", paths: [path], summary: `Create text file: ${path}` }
         : { operation: "write", paths: [path], summary: `Replace text file: ${path}`, diff: limitedDiff(path, previous, content) };
@@ -520,7 +521,7 @@ export class LocalWorkspace {
         return JSON.stringify({ status: "denied", operation: "write", path: this.relativePath(path), reason: "User declined this action." });
       }
       if (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path
-        || (existsSync(path) ? this.readText(path, true) : undefined) !== previous) {
+        || (existsSync(path) ? this.readText(path) : undefined) !== previous) {
         throw new Error("File changed during approval. Read again before writing.");
       }
       writeFileSync(path, content, "utf8");

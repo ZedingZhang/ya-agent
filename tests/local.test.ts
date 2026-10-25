@@ -130,9 +130,29 @@ describe("local workspace", () => {
     expect(audit).not.toContain("nope");
   });
 
-  it("allows confirmed sensitive writes but keeps them unreadable to the model", async () => {
-    expect(JSON.parse(await workspace.write({ path: ".env", content: "TOKEN=new" }))).toMatchObject({ status: "ok" });
-    expect(() => workspace.read({ path: ".env" })).toThrow(/sensitive/u);
+  it.each([".env", ".env.local", "credentials.json", "id_rsa", "client.key", ".git/config"])(
+    "blocks creating or replacing sensitive file %s before approval", async (path) => {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      await expect(workspace.write({ path, content: "synthetic-new-value" })).rejects.toThrow(/sensitive/u);
+      expect(existsSync(join(root, path))).toBe(false);
+      writeFileSync(join(root, path), "synthetic-old-value", "utf8");
+      await expect(workspace.write({ path, content: "synthetic-new-value" })).rejects.toThrow(/sensitive/u);
+      expect(actions).toEqual([]);
+      expect(readFileSync(join(root, path), "utf8")).toBe("synthetic-old-value");
+      expect(() => workspace.read({ path })).toThrow(/sensitive/u);
+      const audit = readFileSync(join(home.path, "actions.jsonl"), "utf8");
+      expect(audit).not.toContain("synthetic-old-value");
+      expect(audit).not.toContain("synthetic-new-value");
+    },
+  );
+
+  it("blocks writes through an alias into a sensitive directory", async () => {
+    mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, ".git", "config"), "synthetic-old-value", "utf8");
+    symlinkSync(join(root, ".git"), join(root, "metadata"), process.platform === "win32" ? "junction" : "dir");
+    await expect(workspace.write({ path: "metadata/config", content: "synthetic-new-value" })).rejects.toThrow(/sensitive/u);
+    expect(actions).toEqual([]);
+    expect(readFileSync(join(root, ".git", "config"), "utf8")).toBe("synthetic-old-value");
   });
 
   it("moves within the workspace without overwriting", async () => {
