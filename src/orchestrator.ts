@@ -8,6 +8,7 @@ import type { ChatMessage, ConversationMessage, TokenUsage, ToolDefinition, Tool
 import { search, WEB_SEARCH_TOOL } from "./web";
 
 const ICM_MARKER = "[ICM_GAP]";
+const MAX_ICM_PENDING_CHARS = 32;
 
 export const CORE_PROMPT = `You are Ya, a consent-first personal research assistant.
 Use the current user task, conversation history, and supplied approved memory. Do not claim unverified facts.
@@ -153,20 +154,39 @@ export async function singleAgent(
   const maxTokens = Math.min(4_096, config.toaTokenBudget - reserve);
   if (onContent && !localWorkspace && !shouldUseWeb(task, webMode)) {
     let pending = "";
+    let emittedLength = 0;
+    let deferRemaining = false;
     const reply = await client.completeStream(messagesForTask(task, "", false, images, history), config, maxTokens, (chunk) => {
+      if (deferRemaining) return;
       const clean = stripIcmMarkers(pending + chunk);
-      // Only a possible marker prefix needs to wait for the next chunk.
-      let retained = Math.min(ICM_MARKER.length - 1, clean.length);
-      while (retained > 0 && !ICM_MARKER.startsWith(clean.slice(-retained).toUpperCase())) retained -= 1;
-      const ready = clean.slice(0, clean.length - retained);
-      pending = clean.slice(clean.length - retained);
-      if (ready) onContent(ready);
+      // Nested marker deletion can join several unresolved prefix fragments.
+      let boundary = clean.length;
+      while (boundary > 0) {
+        const start = clean.lastIndexOf("[", boundary - 1);
+        if (start < 0) break;
+        const fragment = clean.slice(start, boundary);
+        if (fragment.length >= ICM_MARKER.length || !ICM_MARKER.startsWith(fragment.toUpperCase())) break;
+        boundary = start;
+      }
+      const ready = clean.slice(0, boundary);
+      pending = clean.slice(boundary);
+      if (pending.length > MAX_ICM_PENDING_CHARS) {
+        // Use the client's final reply for catch-up instead of buffering it twice.
+        deferRemaining = true;
+        pending = "";
+      }
+      if (ready) {
+        emittedLength += ready.length;
+        onContent(ready);
+      }
     });
-    if (pending) onContent(pending);
+    const draft = stripIcmMarkers(reply.content);
+    const remaining = draft.slice(emittedLength);
+    if (remaining) onContent(remaining);
     const result = await applyIcm(client, task, config,
       { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch, images, history);
     const content = stripIcmMarkers(result.content);
-    const supplement = content.slice(stripIcmMarkers(reply.content).length);
+    const supplement = content.slice(draft.length);
     if (supplement) onContent(supplement);
     return { ...result, content };
   }

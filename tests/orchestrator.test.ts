@@ -135,13 +135,38 @@ describe("agent orchestration", () => {
   it.each([
     ["One [icm_gap] two [ICM_GAP] end", "One  two  end"],
     ["Before [ICM_[ICM_GAP]GAP] after", "Before  after"],
+    [`Start ${"[ICM_".repeat(10)}[ICM_GAP]${"GAP]".repeat(10)} end`, "Start  end"],
   ])("removes markers from draft %s and the supplement", async (draft, clean) => {
+    for (let offset = 0; offset <= draft.length; offset += 1) {
+      const client = new FakeClient();
+      const output: string[] = [];
+      client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+        onContent(draft.slice(0, offset));
+        onContent(draft.slice(offset));
+        return reply(draft);
+      };
+      client.runWithTools = async (messages) => { client.calls.push({ messages }); return reply("Supplement [ICM_GAP]"); };
+      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+      expect(result.content).toBe(`${clean}\n\nEvidence supplement:\nSupplement `);
+      expect(output.join(""), `split offset ${offset}`).toBe(result.content);
+      expect(client.calls).toHaveLength(1);
+    }
+  });
+
+  it("defers pathological nested prefixes and catches up from the final reply", async () => {
     const client = new FakeClient();
     const output: string[] = [];
-    client.completeStream = async (_messages, _config, _maxTokens, onContent) => { onContent(draft); return reply(draft); };
-    client.runWithTools = async (messages) => { client.calls.push({ messages }); return reply("Supplement [ICM_GAP]"); };
+    const prefix = "[ICM_".repeat(10);
+    const tail = `[ICM_GAP]${"GAP]".repeat(10)} end`;
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+      onContent("Start ");
+      onContent(prefix);
+      onContent(tail);
+      expect(output.join("")).toBe("Start ");
+      return reply(`Start ${prefix}${tail}`);
+    };
     const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
-    expect(result.content).toBe(`${clean}\n\nEvidence supplement:\nSupplement `);
+    expect(result.content).toBe("Start  end\n\nEvidence supplement:\nanswer");
     expect(output.join("")).toBe(result.content);
     expect(client.calls).toHaveLength(1);
   });
