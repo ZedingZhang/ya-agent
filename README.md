@@ -255,6 +255,8 @@ ya config set thinking on
 ya config set reasoning-effort max
 ```
 
+API attempts allow up to 90 seconds for the initial response. Non-streaming attempts have a 90-second total deadline. After a streaming response starts, its 90-second idle timeout resets as data or heartbeats arrive, so an active answer can continue beyond 90 seconds. These limits apply to both API keys and platform accounts and are independent of the ToA worker timeout. Stop or Ctrl+C still cancels the request; a failed stream is not retried after visible text has been delivered.
+
 Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory. Model ids that are no longer served—`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, the `vision` alias, and the `deepseek-v4.1-flash` and `deepseek-v4-pro-0813` names this project briefly shipped before the API rejected them—are migrated when the file is loaded.
 
 ### Long-term memory

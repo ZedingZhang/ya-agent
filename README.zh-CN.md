@@ -255,6 +255,8 @@ ya config set thinking on
 ya config set reasoning-effort max
 ```
 
+每次 API 请求最多等待 90 秒取得初始响应；非流式请求每次尝试的总时限为 90 秒。流式响应开始后，90 秒空闲超时会随数据或心跳到达而重置，因此持续输出的回答可以超过 90 秒。这些限制同时适用于 API Key 和平台账号，独立于 ToA 工作 Agent 的超时预算。停止按钮或 Ctrl+C 仍可取消请求；流式请求已经交付可见文本后，失败不会触发自动重试。
+
 配置继续兼容旧 Python 版本，存储在 `~/.ya/config.json`。可设置 `YA_HOME` 选择其他状态目录。已不再提供服务的模型 ID（`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`vision` 别名，以及本项目在 API 拒绝前短暂使用过的 `deepseek-v4.1-flash` 与 `deepseek-v4-pro-0813`）会在加载配置时自动迁移。
 
 ### 长期记忆
