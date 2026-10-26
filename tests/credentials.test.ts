@@ -1,14 +1,18 @@
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountCredentialPath, clearAccountCredential, loadAccountCredential, saveAccountCredential } from "../src/credentials";
 import { LocalWorkspace } from "../src/local";
 import { tempHome, type TempHome } from "./helpers";
 
 describe("DeepSeek account credential storage", () => {
   let home: TempHome;
-  beforeEach(() => { home = tempHome(); });
-  afterEach(() => home.cleanup());
+  beforeEach(() => {
+    home = tempHome();
+    // Exercise the retained file backend even when the suite runs on macOS.
+    if (process.platform === "darwin") vi.stubGlobal("process", { ...process, platform: "linux" });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); home.cleanup(); });
 
   it("atomically persists an issuer-bound grant outside general configuration", () => {
     expect(loadAccountCredential()).toBeUndefined();

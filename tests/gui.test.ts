@@ -15,6 +15,12 @@ import type { ConversationMessage, UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 import { clearAccountCredential, saveAccountCredential } from "../src/credentials";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const { mockKeychain } = await import("./keychain-fixture");
+  return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
+});
+
 describe("GUI controller", () => {
   let home: TempHome;
   beforeEach(() => { home = tempHome(); });

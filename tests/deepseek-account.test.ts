@@ -6,6 +6,12 @@ import { ACCOUNT_API_URL } from "../src/messages";
 import type { ChatMessage, ToolDefinition } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const { mockKeychain } = await import("./keychain-fixture");
+  return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
+});
+
 const credential = { kind: "account", token: "test-account-token" } as const;
 const tool: ToolDefinition = { type: "function", function: { name: "lookup", description: "Look up an item", parameters: {
   type: "object", properties: { name: { type: "string" } }, required: ["name"],

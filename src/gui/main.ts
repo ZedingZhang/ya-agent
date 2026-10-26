@@ -32,7 +32,7 @@ import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
 import { search } from "../web";
 import { loginDeepSeek, logoutDeepSeek } from "../account";
-import { accountCredentialPath, loadAccountCredential, type DeepSeekCredential } from "../credentials";
+import { accountCredentialPath, clearAccountCredential, loadAccountCredential, type DeepSeekCredential } from "../credentials";
 import { GuiController, LANGUAGES, type Language } from "./controller";
 import { initialWindowGeometry } from "./layout";
 import { installApplicationMenu } from "./menu";
@@ -1260,6 +1260,7 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
     await activeLoginPromise?.catch(() => undefined);
     net.fetch = originalFetch;
     shell.openExternal = originalOpen;
+    clearAccountCredential();
   }
 }
 

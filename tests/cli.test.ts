@@ -10,6 +10,12 @@ import { createCandidate, listCards, setStatus } from "../src/memory";
 import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const { mockKeychain } = await import("./keychain-fixture");
+  return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
+});
+
 class CaptureStream extends Writable {
   output = "";
   isTTY: boolean;

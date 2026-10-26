@@ -5,6 +5,12 @@ import { DEEPSEEK_PLATFORM, loadAccountCredential, saveAccountCredential } from 
 import type { FetchLike } from "../src/deepseek";
 import { tempHome, type TempHome } from "./helpers";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const { mockKeychain } = await import("./keychain-fixture");
+  return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
+});
+
 function envelope(value: unknown): Response {
   return Response.json({ code: 0, data: { biz_code: 0, biz_data: value } });
 }
