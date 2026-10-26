@@ -125,7 +125,7 @@ The portable desktop application is `ya-gui-windows-x64.exe`.
 
 ### Verify downloads
 
-Releases are distributed without publisher code signing or Apple notarization. macOS builds may use ad-hoc signatures for execution, which do not verify the publisher. macOS Gatekeeper and Windows SmartScreen may warn about or block these downloads. See [release signing](docs/release-signing.md) for details. Download `checksums.txt` from the same release and compare the matching SHA-256 value:
+Read each Release's notes for its macOS signing mode. With complete release credentials, the workflow signs the CLI and GUI with Developer ID, enables hardened runtime, and verifies Apple notarization. Without credentials, the GUI uses ad-hoc signatures, which do not identify a publisher; Windows and Linux builds remain without publisher signing. Unsigned or ad-hoc downloads may trigger Gatekeeper or SmartScreen warnings. The existing `v0.8.0` assets predate this conditional workflow. See [release signing](docs/release-signing.md) for setup and verification. Download `checksums.txt` from the same release and compare the matching SHA-256 value:
 
 ```sh
 shasum -a 256 ya-macos-arm64

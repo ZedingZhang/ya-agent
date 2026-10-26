@@ -125,7 +125,7 @@ Invoke-WebRequest https://github.com/ZedingZhang/ya-agent/releases/latest/downlo
 
 ### 校验下载
 
-当前发布不包含发布者代码签名或 Apple 公证。macOS 构建可能使用保障运行的临时签名（ad-hoc），该签名不验证发布者身份。macOS Gatekeeper 和 Windows SmartScreen 可能提示或阻止运行，详见[发布签名说明](docs/release-signing.md)。请从同一 Release 下载 `checksums.txt` 并核对 SHA-256：
+请查看每个 Release 的说明，确认 macOS 签名模式。发布凭据齐全时，流程会为 CLI 和 GUI 使用 Developer ID 签名、开启加固运行时并验证 Apple 公证；无凭据时，GUI 使用不验证发布者身份的 ad-hoc 临时签名。Windows 和 Linux 构建仍无发布者签名。未签名或临时签名的下载可能触发 Gatekeeper 或 SmartScreen 警告；已有 `v0.8.0` 产物早于本次条件发布流程。配置与验证方式见[发布签名说明](docs/release-signing.md)。请从同一 Release 下载 `checksums.txt` 并核对 SHA-256：
 
 ```sh
 shasum -a 256 ya-macos-arm64

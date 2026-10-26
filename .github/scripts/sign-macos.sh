@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 work=$(mktemp -d "$RUNNER_TEMP/ya-signing.XXXXXX")
+case "$work" in "$RUNNER_TEMP"/ya-signing.*) ;; *) exit 1 ;; esac
 keychain="$work/signing.keychain-db"
 cleanup() {
   security delete-keychain "$keychain" >/dev/null 2>&1 || true
@@ -25,6 +27,8 @@ codesign --verify --strict --verbose=2 "$cli"
 # Enforce Apple's Developer ID trust anchor and the configured publisher team.
 requirement="anchor apple generic and certificate leaf[subject.OU] = \"$APPLE_TEAM_ID\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
 codesign --verify -R "$requirement" "$cli"
+signature=$(codesign --display --verbose=4 "$cli" 2>&1)
+grep -q 'flags=.*runtime' <<< "$signature" || { echo 'CLI hardened runtime verification failed' >&2; exit 1; }
 ditto -c -k --keepParent "$cli" "$work/cli.zip"
 xcrun notarytool submit "$work/cli.zip" --apple-id "$APPLE_ID" \
   --password "$APPLE_APP_SPECIFIC_PASSWORD" --team-id "$APPLE_TEAM_ID" \
@@ -33,13 +37,4 @@ node -e 'const r=require(process.argv[1]); if(r.status!=="Accepted") throw new E
 # Raw executables cannot carry a stapled ticket. Apple keeps the ticket online.
 
 # Check what users actually download, including the stapled GUI ticket.
-shopt -s nullglob
-archives=(release/electron/*.zip)
-test "${#archives[@]}" -eq 1
-ditto -x -k "${archives[0]}" "$work/gui"
-apps=("$work/gui/"*.app)
-test "${#apps[@]}" -eq 1
-codesign --verify --deep --strict --verbose=2 "${apps[0]}"
-codesign --verify -R "$requirement" "${apps[0]}"
-xcrun stapler validate "${apps[0]}"
-spctl --assess --type execute --verbose=2 "${apps[0]}"
+bash .github/scripts/verify-macos.sh signed
