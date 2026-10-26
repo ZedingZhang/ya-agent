@@ -1,4 +1,5 @@
 import type { execFileSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
 import { vi } from "vitest";
 
 /** Keep account/UI unit tests away from the developer's real Keychain. */
@@ -6,6 +7,12 @@ export function mockKeychain(original: typeof execFileSync): typeof execFileSync
   const entries = new Map<string, string>();
   return vi.fn(((...arguments_: Parameters<typeof execFileSync>) => {
     const [file, args] = arguments_;
+    if (file === "/usr/bin/shlock") {
+      const path = args?.[args.indexOf("-f") + 1];
+      if (!path || existsSync(path)) throw Object.assign(new Error("Synthetic lock busy"), { status: 1 });
+      writeFileSync(path, `${args?.[args.indexOf("-p") + 1]}\n`, { flag: "wx" });
+      return "";
+    }
     if (file !== "/usr/bin/security") return original(...arguments_);
     const service = args?.[args.indexOf("-s") + 1];
     const account = args?.[args.indexOf("-a") + 1];

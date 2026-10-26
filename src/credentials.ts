@@ -24,6 +24,28 @@ function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
+function withCredentialLock<T>(operation: () => T): T {
+  if (process.platform !== "darwin") return operation();
+  const directory = join(dataHome(), "auth");
+  const lock = join(directory, "account.lock");
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    chmodSync(directory, 0o700);
+    // shlock atomically acquires a PID lock and recovers exited owners. Keep
+    // every reader/writer in this boundary, including lazy migration and 401s.
+    execFileSync("/usr/bin/shlock", ["-f", lock, "-p", String(process.pid)], {
+      stdio: ["ignore", "pipe", "pipe"], timeout: 5_000,
+    });
+  } catch {
+    throw new Error("DeepSeek account storage is busy or unavailable. Retry after the other account operation finishes.");
+  }
+  try { return operation(); }
+  finally {
+    try { rmSync(lock); }
+    catch { throw new Error("Could not release the DeepSeek account storage lock. Restart Ya and retry."); }
+  }
+}
+
 function accountKeychain(operation: "find" | "add" | "delete", token?: string): string | undefined {
   // Share CLI/GUI logins while keeping different YA_HOME directories isolated.
   const account = createHash("sha256").update(dataHome()).digest("hex");
@@ -64,7 +86,7 @@ function loadFileCredential(): AccountCredential | undefined {
   return { kind: "account", token: value.token };
 }
 
-export function loadAccountCredential(): AccountCredential | undefined {
+function loadCredential(): AccountCredential | undefined {
   if (process.platform !== "darwin") return loadFileCredential();
   const token = accountKeychain("find");
   if (token !== undefined) {
@@ -73,12 +95,15 @@ export function loadAccountCredential(): AccountCredential | undefined {
     return { kind: "account", token };
   }
   const legacy = loadFileCredential();
-  if (legacy) saveAccountCredential(legacy);
+  if (legacy) saveCredential(legacy);
   return legacy;
 }
 
-export function saveAccountCredential(credential: AccountCredential): void {
-  if (!/^[\x21-\x7e]+$/u.test(credential.token)) throw new Error("Invalid DeepSeek account credential.");
+export function loadAccountCredential(): AccountCredential | undefined {
+  return withCredentialLock(loadCredential);
+}
+
+function saveCredential(credential: AccountCredential): void {
   if (process.platform === "darwin") {
     accountKeychain("add", credential.token);
     if (accountKeychain("find") !== credential.token) {
@@ -103,9 +128,16 @@ export function saveAccountCredential(credential: AccountCredential): void {
   }
 }
 
+export function saveAccountCredential(credential: AccountCredential): void {
+  if (!/^[\x21-\x7e]+$/u.test(credential.token)) throw new Error("Invalid DeepSeek account credential.");
+  withCredentialLock(() => saveCredential(credential));
+}
+
 /** A failed request from an older login must not remove a replacement credential. */
 export function clearAccountCredential(rejectedToken?: string): void {
-  if (rejectedToken !== undefined && loadAccountCredential()?.token !== rejectedToken) return;
-  if (process.platform === "darwin") accountKeychain("delete");
-  removeCredentialFile();
+  withCredentialLock(() => {
+    if (rejectedToken !== undefined && loadCredential()?.token !== rejectedToken) return;
+    if (process.platform === "darwin") accountKeychain("delete");
+    removeCredentialFile();
+  });
 }

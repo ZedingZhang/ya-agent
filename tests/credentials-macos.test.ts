@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,11 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
 });
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
+
 const nativePlatform = process.platform;
 const security = vi.mocked(execFileSync);
 const missing = () => { throw Object.assign(new Error("Synthetic missing item"), { status: 44 }); };
@@ -28,11 +34,21 @@ describe("macOS account Keychain storage", () => {
   });
   afterEach(() => {
     security.mockReset();
+    vi.mocked(readFileSync).mockRestore();
     clearAccountCredential();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     home.cleanup();
   });
+
+  const passwordCalls = () => security.mock.calls.filter(([file]) => file === "/usr/bin/security");
+  function passwordResponses(...responses: Array<typeof execFileSync>) {
+    const original = security.getMockImplementation()!;
+    security.mockImplementation((...args: Parameters<typeof execFileSync>) => {
+      const response = args[0] === "/usr/bin/security" ? responses.shift() : undefined;
+      return (response ?? original)(...args);
+    });
+  }
 
   function legacy(token = "legacy-synthetic-token") {
     const record = JSON.stringify({ version: 1, issuer: DEEPSEEK_PLATFORM, token });
@@ -46,7 +62,7 @@ describe("macOS account Keychain storage", () => {
     expect(loadAccountCredential()).toEqual({ kind: "account", token: "synthetic-new-token" });
     expect(existsSync(accountCredentialPath())).toBe(false);
     expect(security).toHaveBeenCalled();
-    for (const [file, args] of security.mock.calls) {
+    for (const [file, args] of passwordCalls()) {
       expect(file).toBe("/usr/bin/security");
       expect(args?.[args.indexOf("-s") + 1]).not.toBe(KEYCHAIN_SERVICE);
     }
@@ -67,7 +83,7 @@ describe("macOS account Keychain storage", () => {
     legacy();
     expect(loadAccountCredential()).toEqual({ kind: "account", token: "legacy-synthetic-token" });
     expect(existsSync(accountCredentialPath())).toBe(false);
-    expect(security.mock.calls.map(([, args]) => args?.[0])).toEqual([
+    expect(passwordCalls().map(([, args]) => args?.[0])).toEqual([
       "find-generic-password", "add-generic-password", "find-generic-password",
     ]);
     expect(loadAccountCredential()?.token).toBe("legacy-synthetic-token");
@@ -84,11 +100,11 @@ describe("macOS account Keychain storage", () => {
 
   it("retains the legacy grant and sanitizes errors when migration cannot save", () => {
     const record = legacy();
-    security.mockImplementationOnce(missing).mockImplementationOnce(() => { throw new Error("argv includes legacy-synthetic-token"); });
+    passwordResponses(missing, () => { throw new Error("argv includes legacy-synthetic-token"); });
     expect(() => loadAccountCredential()).toThrow(/Keychain/u);
     expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
     expect(() => {
-      security.mockImplementationOnce(missing).mockImplementationOnce(() => { throw new Error("argv includes legacy-synthetic-token"); });
+      passwordResponses(missing, () => { throw new Error("argv includes legacy-synthetic-token"); });
       loadAccountCredential();
     }).not.toThrow(/legacy-synthetic-token/u);
   });
@@ -96,23 +112,23 @@ describe("macOS account Keychain storage", () => {
   it.each(["read fails", "read differs"])("retains the legacy file when migration verification %s", (failure) => {
     const record = legacy();
     const original = security.getMockImplementation()!;
-    security.mockImplementationOnce(missing).mockImplementationOnce(original);
-    if (failure === "read fails") security.mockImplementationOnce(() => { throw Object.assign(new Error("Denied private-value"), { status: 36 }); });
-    else security.mockReturnValueOnce("different-token\n");
+    passwordResponses(missing, original, failure === "read fails"
+      ? () => { throw Object.assign(new Error("Denied private-value"), { status: 36 }); }
+      : () => "different-token\n");
     expect(() => loadAccountCredential()).toThrow(/Keychain/u);
     expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
   });
 
   it("surfaces Keychain read failures instead of falling back to plaintext", () => {
     const record = legacy();
-    security.mockImplementationOnce(() => { throw Object.assign(new Error("Denied private-value"), { status: 36 }); });
+    passwordResponses(() => { throw Object.assign(new Error("Denied private-value"), { status: 36 }); });
     expect(() => loadAccountCredential()).toThrow(/Keychain/u);
     expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
-    expect(security).toHaveBeenCalledTimes(1);
+    expect(passwordCalls()).toHaveLength(1);
   });
 
   it("does not write plaintext if a new Keychain save fails", () => {
-    security.mockImplementationOnce(() => { throw new Error("argv includes synthetic-new-token"); });
+    passwordResponses(() => { throw new Error("argv includes synthetic-new-token"); });
     expect(() => saveAccountCredential({ kind: "account", token: "synthetic-new-token" })).toThrow(/Keychain/u);
     expect(existsSync(accountCredentialPath())).toBe(false);
   });
@@ -130,7 +146,7 @@ describe("macOS account Keychain storage", () => {
   it("retains both backends if Keychain removal fails", () => {
     saveAccountCredential({ kind: "account", token: "current-token" });
     const record = legacy();
-    security.mockImplementationOnce(() => { throw new Error("Denied private-value"); });
+    passwordResponses(() => { throw new Error("Denied private-value"); });
     expect(() => clearAccountCredential()).toThrow(/Keychain/u);
     expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
     expect(loadAccountCredential()?.token).toBe("current-token");
@@ -138,7 +154,7 @@ describe("macOS account Keychain storage", () => {
 
   it("rejects a corrupt Keychain grant without exposing it and allows sign-out recovery", () => {
     saveAccountCredential({ kind: "account", token: "valid-token" });
-    security.mockReturnValueOnce("private-value with whitespace\n");
+    passwordResponses(() => "private-value with whitespace\n");
     expect(() => loadAccountCredential()).toThrow("Invalid DeepSeek account credential in Keychain");
     clearAccountCredential();
     expect(loadAccountCredential()).toBeUndefined();
@@ -170,6 +186,48 @@ describe("macOS account Keychain storage", () => {
     expect(loadAccountCredential()).toBeUndefined();
   });
 
+  it.each(["save", "logout", "401 cleanup"])("serializes migration against a competing %s", (action) => {
+    legacy();
+    const compete = () => action === "save"
+      ? saveAccountCredential({ kind: "account", token: "replacement-token" })
+      : clearAccountCredential(action === "401 cleanup" ? "legacy-synthetic-token" : undefined);
+    const read = vi.mocked(readFileSync).getMockImplementation()!;
+    let blocked = false;
+    vi.mocked(readFileSync).mockImplementationOnce(((...args: Parameters<typeof readFileSync>) => {
+      const snapshot = read(...args);
+      try { compete(); } catch (error) {
+        expect(String(error)).toMatch(/storage.*busy/iu);
+        blocked = true;
+      }
+      return snapshot;
+    }) as typeof readFileSync);
+    loadAccountCredential();
+    expect(blocked).toBe(true);
+    compete();
+    expect(loadAccountCredential()?.token).toBe(action === "save" ? "replacement-token" : undefined);
+    expect(existsSync(join(home.path, "auth", "account.lock"))).toBe(false);
+  });
+
+  it("holds the same lock across a conditional 401 read and deletion", () => {
+    saveAccountCredential({ kind: "account", token: "rejected-token" });
+    const original = security.getMockImplementation()!;
+    let blocked = false;
+    passwordResponses(((...args: Parameters<typeof execFileSync>) => {
+      const snapshot = original(...args);
+      try { saveAccountCredential({ kind: "account", token: "replacement-token" }); }
+      catch (error) {
+        expect(String(error)).toMatch(/storage.*busy/iu);
+        blocked = true;
+      }
+      return snapshot;
+    }) as typeof execFileSync);
+    clearAccountCredential("rejected-token");
+    expect(blocked).toBe(true);
+    saveAccountCredential({ kind: "account", token: "replacement-token" });
+    clearAccountCredential("rejected-token");
+    expect(loadAccountCredential()?.token).toBe("replacement-token");
+  });
+
   it("logs out and removes the same Keychain grant before remote revocation", async () => {
     saveAccountCredential({ kind: "account", token: "logout-token" });
     await expect(logoutDeepSeek(async (_url, init) => {
@@ -197,4 +255,39 @@ describe("macOS account Keychain storage", () => {
       security.mockReset();
     }
   });
+
+  it.runIf(nativePlatform === "darwin")("blocks a real competing process and recovers its exited PID lock", async () => {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    security.mockImplementation(actual.execFileSync);
+    const record = legacy();
+    const lock = join(home.path, "auth", "account.lock");
+    const holder = spawn(process.execPath, ["-e", `
+      require("node:child_process").execFileSync("/usr/bin/shlock", ["-f", process.argv[1], "-p", String(process.pid)], {stdio: "ignore"});
+      process.stdout.write("locked"); setTimeout(() => {}, 15000);
+    `, lock], { env: {}, stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      try {
+        await once(holder, "spawn");
+        await Promise.race([
+          once(holder.stdout!, "data"),
+          once(holder, "exit").then(() => { throw new Error("Lock holder exited before acquisition"); }),
+        ]);
+        expect(() => loadAccountCredential()).toThrow(/storage.*busy/iu);
+        expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
+      } finally {
+        if (holder.exitCode === null && holder.signalCode === null) {
+          const exited = once(holder, "exit");
+          holder.kill();
+          await exited;
+        }
+        // shlock protects recently created locks while their owner starts up.
+        await new Promise((resolve) => setTimeout(resolve, 1_100));
+      }
+      expect(loadAccountCredential()?.token).toBe("legacy-synthetic-token");
+      expect(existsSync(accountCredentialPath())).toBe(false);
+      expect(existsSync(lock)).toBe(false);
+    } finally {
+      try { clearAccountCredential(); } finally { security.mockReset(); }
+    }
+  }, 20_000);
 });
