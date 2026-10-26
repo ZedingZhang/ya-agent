@@ -112,6 +112,16 @@ describe("macOS release packaging", () => {
     expect(commands().some((call) => call.tool === "xcrun" && call.args[0] === "notarytool")).toBe(true);
   });
 
+  it("allows PR ad-hoc verification only in the CI step without credentials", () => {
+    const ci = readFileSync(join(home.path, ".github", "workflows", "ci.yml"), "utf8");
+    const step = ci.split(/\n {6}- /u).find((text) => text.startsWith("name: Verify macOS release packaging without credentials"))!;
+    expect(step).toContain('CSC_FOR_PULL_REQUEST: "true"');
+    expect(step).not.toContain("secrets.");
+    for (const name of [...Object.keys(credentials), "CSC_LINK", "CSC_KEY_PASSWORD"]) expect(step).toContain(`${name}: ""`);
+    expect(ci.match(/CSC_FOR_PULL_REQUEST:/gu)).toHaveLength(1);
+    expect(readFileSync(join(home.path, ".github", "workflows", "release.yml"), "utf8")).not.toContain("CSC_FOR_PULL_REQUEST");
+  });
+
   it.each(Array.from({ length: 30 }, (_, index) => index + 1))("rejects incomplete credential subset %i before building", (mask) => {
     const supplied = Object.fromEntries(Object.entries(credentials).filter((_entry, index) => mask & 1 << index));
     const result = run(supplied);

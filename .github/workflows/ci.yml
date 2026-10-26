@@ -60,6 +60,11 @@ jobs:
         env:
           CLI_ASSET: ya-macos-arm64
           ELECTRON_ARGS: --mac zip --arm64
+          # electron-builder's PR gate also skips ad-hoc signing. No signing
+          # keys or notarization credentials are available to this check.
+          CSC_FOR_PULL_REQUEST: "true"
+          CSC_LINK: ""
+          CSC_KEY_PASSWORD: ""
           MAC_CSC_LINK: ""
           MAC_CSC_KEY_PASSWORD: ""
           APPLE_ID: ""
