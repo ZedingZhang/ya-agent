@@ -29,6 +29,9 @@ describe("macOS release packaging", () => {
       if (tool === "npx") { fs.mkdirSync("release/electron", {recursive:true}); fs.writeFileSync("release/electron/Ya.zip", "synthetic-zip"); }
       if (tool === "openssl") process.stdout.write("ab".repeat(32));
       if (tool === "security" && args[0] === "find-identity" && !process.env.NO_IDENTITY) process.stdout.write('1) 0123456789ABCDEF0123456789ABCDEF01234567 "Developer ID Application: Synthetic"\\n');
+      if (tool === "security" && args[0] === "import" && fs.readFileSync(args[1],"utf8") !== "synthetic-certificate") {
+        process.stderr.write("Synthetic certificate import failed"); process.exit(9);
+      }
       if (tool === "codesign") {
         if (process.env.BAD_TEAM && args.includes("-R")) process.exit(8);
         if (args.includes("--display")) process.stderr.write(signed
@@ -105,7 +108,7 @@ describe("macOS release packaging", () => {
     expect(result.status, result.stderr).toBe(0);
     const builder = commands().find((call) => call.tool === "npx")!;
     expect(builder.args.some((arg) => arg.endsWith("=false") || arg === "--config.mac.identity=-")).toBe(false);
-    for (const name of Object.keys(credentials)) expect(step).toContain(`${name}: \u0024{{ secrets.${name} }}`);
+    for (const name of Object.keys(credentials)) expect(step).toContain(name + ": ${{ secrets." + name + " }}");
     expect(commands().some((call) => call.tool === "xcrun" && call.args[0] === "notarytool")).toBe(true);
   });
 
@@ -120,7 +123,7 @@ describe("macOS release packaging", () => {
 
   it.each([
     { FAIL_TOOL: "npx" }, { NO_IDENTITY: "1" }, { REJECT_NOTARY: "1" }, { BAD_TEAM: "1" }, { BAD_STAPLE: "1" }, { FAIL_TOOL: "spctl" },
-    { NO_RUNTIME: "1" }, { MAC_CSC_LINK: "invalid-base64" },
+    { NO_RUNTIME: "1" }, { MAC_CSC_LINK: "invalid-base64" }, { MAC_CSC_LINK: Buffer.from("invalid-certificate").toString("base64") },
   ])("fails a signed build without downgrading when validation fails (%j)", (failure) => {
     const result = run({ ...credentials, ...failure });
     expect(result.status).not.toBe(0);
