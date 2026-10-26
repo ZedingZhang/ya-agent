@@ -24,7 +24,8 @@ describe("macOS release packaging", () => {
       const fs = require("node:fs"), path = require("node:path");
       const [tool, ...args] = process.argv.slice(2);
       const signed = !!process.env.MAC_CSC_LINK;
-      fs.appendFileSync(process.env.TOOL_LOG, JSON.stringify({tool,args,csc:process.env.CSC_LINK,auto:process.env.CSC_IDENTITY_AUTO_DISCOVERY})+"\\n");
+      const cscInputs = ["CSC_LINK","CSC_KEY_PASSWORD","CSC_KEYCHAIN","CSC_INSTALLER_LINK","CSC_INSTALLER_KEY_PASSWORD"].filter(name => name in process.env);
+      fs.appendFileSync(process.env.TOOL_LOG, JSON.stringify({tool,args,csc:process.env.CSC_LINK,auto:process.env.CSC_IDENTITY_AUTO_DISCOVERY,cscInputs})+"\\n");
       if (process.env.FAIL_TOOL === tool) process.exit(9);
       if (tool === "npx") { fs.mkdirSync("release/electron", {recursive:true}); fs.writeFileSync("release/electron/Ya.zip", "synthetic-zip"); }
       if (tool === "openssl") process.stdout.write("ab".repeat(32));
@@ -62,7 +63,7 @@ describe("macOS release packaging", () => {
   afterEach(() => home.cleanup());
 
   const commands = () => existsSync(environment.TOOL_LOG!)
-    ? readFileSync(environment.TOOL_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { tool: string; args: string[]; csc?: string; auto?: string })
+    ? readFileSync(environment.TOOL_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { tool: string; args: string[]; csc?: string; auto?: string; cscInputs: string[] })
     : [];
   const run = (extra: NodeJS.ProcessEnv = {}, script = "package-macos.sh", args: string[] = []) => spawnSync(bash,
     [`.github/scripts/${script}`, ...args], { cwd: home.path, env: { ...environment, ...extra }, encoding: "utf8", timeout: 20_000 });
@@ -93,6 +94,17 @@ describe("macOS release packaging", () => {
     expect(calls.some((call) => call.tool === "xcrun" && call.args[0] === "stapler" && call.args[1] === "validate")).toBe(true);
     expect(calls.some((call) => call.tool === "spctl")).toBe(true);
     expect(calls.some((call) => call.tool === "security" && call.args[0] === "delete-keychain")).toBe(true);
+  });
+
+  it.each(["", "synthetic-ambient-input"])("removes all ambient certificate inputs from the ad-hoc builder (%j)", (value) => {
+    const inputs = Object.fromEntries(["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_KEYCHAIN", "CSC_INSTALLER_LINK", "CSC_INSTALLER_KEY_PASSWORD"]
+      .map((name) => [name, value]));
+    const result = run(inputs);
+    expect(result.status, result.stderr).toBe(0);
+    const builder = commands().find((call) => call.tool === "npx")!;
+    expect(builder.cscInputs).toEqual([]);
+    expect(builder.auto).toBe("false");
+    expect(readFileSync(modeFile(), "utf8").trim()).toBe("ad-hoc");
   });
 
   it("passes complete secrets through the actual macOS workflow command without disabling signing", () => {

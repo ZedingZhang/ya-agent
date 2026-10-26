@@ -15,9 +15,14 @@ fi
 
 read -r -a electron_args <<< "${ELECTRON_ARGS:?}"
 if [[ "$provided" -eq 0 ]]; then
-  CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder "${electron_args[@]}" --publish never \
-    --config.forceCodeSigning=false --config.mac.identity=- \
-    --config.mac.hardenedRuntime=false --config.mac.notarize=false
+  (
+    # Even an empty CSC_LINK is a certificate path to electron-builder. The
+    # credential-free mode must not import any ambient signing material.
+    unset CSC_LINK CSC_KEY_PASSWORD CSC_KEYCHAIN CSC_INSTALLER_LINK CSC_INSTALLER_KEY_PASSWORD
+    CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder "${electron_args[@]}" --publish never \
+      --config.forceCodeSigning=false --config.mac.identity=- \
+      --config.mac.hardenedRuntime=false --config.mac.notarize=false
+  )
   bash .github/scripts/verify-macos.sh ad-hoc
   mode=ad-hoc
 else
