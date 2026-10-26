@@ -53,3 +53,19 @@ jobs:
 
       - name: Check package contents
         run: npm pack --dry-run
+
+      - name: Verify macOS release packaging without credentials
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CLI_ASSET: ya-macos-arm64
+          ELECTRON_ARGS: --mac zip --arm64
+          MAC_CSC_LINK: ""
+          MAC_CSC_KEY_PASSWORD: ""
+          APPLE_ID: ""
+          APPLE_APP_SPECIFIC_PASSWORD: ""
+          APPLE_TEAM_ID: ""
+        run: |
+          npx pkg --compress GZip --targets node22-macos-arm64 --output "release-cli/$CLI_ASSET" dist/typescript/cli.js
+          bash .github/scripts/package-macos.sh
+          "./release-cli/$CLI_ASSET" --help

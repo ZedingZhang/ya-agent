@@ -81,7 +81,21 @@ jobs:
           CLI_ASSET: ${{ matrix.cli_asset }}
         run: npx pkg --compress GZip --targets "$PKG_TARGET" --output "release-cli/$CLI_ASSET" dist/typescript/cli.js
 
+      - name: Build and verify macOS release assets
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          ELECTRON_ARGS: ${{ matrix.electron_args }}
+          CLI_ASSET: ${{ matrix.cli_asset }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash .github/scripts/package-macos.sh
+
       - name: Build desktop application without publisher signing
+        if: runner.os != 'macOS'
         shell: bash
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -117,6 +131,7 @@ jobs:
           cp "release-cli/$CLI_ASSET" "release-assets/$CLI_ASSET"
           if [ "$GUI_KIND" = "mac" ]; then
             cp release/electron/*.zip "release-assets/$GUI_ASSET"
+            cp "release-cli/$CLI_ASSET.signing-mode" release-assets/
           elif [ "$GUI_KIND" = "win" ]; then
             cp release/electron/*.exe "release-assets/$GUI_ASSET"
           else
@@ -165,6 +180,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          bash .github/scripts/release-notes.sh release "$RUNNER_TEMP/ya-release-notes.md"
           gh release create "$RELEASE_TAG" release/* \
             --title "Ya $RELEASE_TAG" \
-            --notes-file .github/release-notes.md
+            --notes-file "$RUNNER_TEMP/ya-release-notes.md"
