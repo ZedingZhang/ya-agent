@@ -311,12 +311,14 @@ export class LocalWorkspace {
     const expanded = expandHome(value);
     const candidate = resolve(isAbsolute(expanded) ? expanded : join(this.root, expanded));
     let ancestor = candidate;
-    while (!existsSync(ancestor)) {
+    // lstat sees dangling links; realpath below must reject them rather than
+    // treating the link itself as a new file inside the workspace.
+    while (!lstatSync(ancestor, { throwIfNoEntry: false })) {
       const parent = dirname(ancestor);
       if (parent === ancestor) break;
       ancestor = parent;
     }
-    const physicalAncestor = existsSync(ancestor) ? realpathSync(ancestor) : ancestor;
+    const physicalAncestor = realpathSync(ancestor);
     const physical = resolve(physicalAncestor, relative(ancestor, candidate));
     const fromRoot = relative(this.root, physical);
     if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
@@ -524,7 +526,7 @@ export class LocalWorkspace {
         || (existsSync(path) ? this.readText(path) : undefined) !== previous) {
         throw new Error("File changed during approval. Read again before writing.");
       }
-      writeFileSync(path, content, "utf8");
+      writeFileSync(path, content, { encoding: "utf8", flag: previous === undefined ? "wx" : "w" });
       this.fileChanged(path, previous, content, "write");
       this.audit("write", [path], "success");
       this.activity("write", [path], "success");

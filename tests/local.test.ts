@@ -32,7 +32,7 @@ import { tempHome, type TempHome } from "./helpers";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, readdirSync: vi.fn(actual.readdirSync), readFileSync: vi.fn(actual.readFileSync) };
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync), readFileSync: vi.fn(actual.readFileSync), writeFileSync: vi.fn(actual.writeFileSync) };
 });
 
 describe("local workspace", () => {
@@ -224,6 +224,33 @@ describe("local workspace", () => {
     const audit = readFileSync(join(home.path, "actions.jsonl"), "utf8");
     expect(audit).toContain('"status":"denied"');
     expect(audit).not.toContain("nope");
+  });
+
+  it.skipIf(process.platform === "win32").each(["inside", "outside"])("rejects a dangling symlink to a missing %s target before approval", async (location) => {
+    const target = join(location === "inside" ? root : home.path, "missing.txt");
+    symlinkSync(target, join(root, "notes.txt"));
+    await expect(workspace.write({ path: "notes.txt", content: "unapproved" })).rejects.toThrow();
+    expect(existsSync(target)).toBe(false);
+    expect(actions).toEqual([]);
+  });
+
+  it.skipIf(process.platform === "win32")("displays the real target for an existing symlink inside the workspace", async () => {
+    writeFileSync(join(root, "actual.txt"), "old");
+    symlinkSync(join(root, "actual.txt"), join(root, "notes.txt"));
+    await workspace.write({ path: "notes.txt", content: "approved" });
+    expect(actions[0]?.paths).toEqual([join(workspace.root, "actual.txt")]);
+    expect(readFileSync(join(root, "actual.txt"), "utf8")).toBe("approved");
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a symlink planted immediately before new-file creation", async () => {
+    const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const target = join(home.path, "outside.txt");
+    vi.mocked(writeFileSync).mockImplementationOnce((path, content, options) => {
+      symlinkSync(target, String(path));
+      actual.writeFileSync(path, content, options);
+    });
+    await expect(workspace.write({ path: "notes.txt", content: "unapproved" })).rejects.toThrow(/EEXIST/u);
+    expect(existsSync(target)).toBe(false);
   });
 
   it.each([".env", ".env.local", "credentials.json", "id_rsa", "client.key", ".git/config", ".git-credentials", ".NETRC", ".NpmRc"])(
