@@ -226,6 +226,21 @@ describe("GUI controller", () => {
     await expect(controller.run({ task: "test", local: true })).rejects.toThrow(/Choose an existing/u);
   });
 
+  it("uses only the active workspace even if a task supplies an arbitrary path", async () => {
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
+    const controller = new GuiController(runner);
+    controller.setSessionApiKey("key");
+    const selected = join(home.path, "selected");
+    const outside = join(home.path, "outside");
+    mkdirSync(selected); mkdirSync(outside);
+    const options = { task: "Read notes", local: true, workspace: outside };
+    await expect(controller.run(options)).rejects.toThrow(/Choose an existing/u);
+    expect(runner).not.toHaveBeenCalled();
+    controller.setWorkspace(selected);
+    await controller.run(options);
+    expect(runner.mock.calls[0]?.[3]?.localWorkspace?.root).toBe(realpathSync(selected));
+  });
+
   it("lists navigation metadata without returning file contents", () => {
     const workspace = join(home.path, "workspace");
     mkdirSync(workspace);

@@ -47,7 +47,6 @@ export interface GuiTaskOptions {
   stream?: boolean;
   local?: boolean;
   exec?: boolean;
-  workspace?: string;
   images?: UserImageContentPart[];
 }
 
@@ -212,7 +211,7 @@ export class GuiController {
     if (options.exec && !options.local) throw new Error("Command execution requires local workspace mode.");
     let localWorkspace: LocalWorkspace | undefined;
     if (options.local) {
-      const workspace = options.workspace ?? this.validWorkspace();
+      const workspace = this.validWorkspace();
       if (!workspace) throw new Error("Choose an existing local workspace before running this task.");
       localWorkspace = new LocalWorkspace(
         workspace,

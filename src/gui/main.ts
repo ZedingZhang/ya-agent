@@ -176,7 +176,6 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     exec: value.exec === true,
     imageIds,
     imageDetail,
-    ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}),
   };
 }
 

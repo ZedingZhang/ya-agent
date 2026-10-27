@@ -874,7 +874,6 @@ async function runTask(): Promise<void> {
       stream: state.stream,
       local,
       exec: local && element<HTMLInputElement>("commands-enabled").checked,
-      workspace: state.validWorkspace,
       imageIds: taskImages.map((image) => image.id),
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
     });
