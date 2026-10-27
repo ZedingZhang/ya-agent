@@ -91,6 +91,12 @@ describe("GUI pending action lifecycle", () => {
 
   afterEach(() => { vi.useRealTimers(); });
 
+  it("drops renderer-supplied workspace paths at the task IPC boundary", async () => {
+    mocks.run.mockResolvedValueOnce("done");
+    await mocks.handlers.get("task:run")!(event, { ...options, workspace: "/unselected/outside" });
+    expect(mocks.run.mock.calls[0]?.[0]).not.toHaveProperty("workspace");
+  });
+
   it.each(["low", "high", "max"])("accepts %s reasoning effort through the workspace IPC boundary", async (reasoningEffort) => {
     const state = await mocks.handlers.get("workspace:model-selection")!(event, { model: "deepseek-flash", reasoningEffort });
     expect(mocks.saveWorkspaceModelSelection).toHaveBeenCalledExactlyOnceWith("deepseek-flash", reasoningEffort);

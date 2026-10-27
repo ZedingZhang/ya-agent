@@ -56,7 +56,6 @@ export interface RendererTaskOptions {
   stream: boolean;
   local: boolean;
   exec?: boolean;
-  workspace?: string;
   imageIds: string[];
   imageDetail: ImageDetail;
 }
