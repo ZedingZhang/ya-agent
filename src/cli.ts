@@ -310,6 +310,10 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
   const interrupt = (): void => cancellation.abort(new Error("Task cancelled by the user."));
   process.once("SIGINT", interrupt);
   try {
+    if (options.toa && !(await toaConfirm(options, config, io, cancellation.signal))) {
+      write(io.stdout, "ToA cancelled; nothing was sent.\n");
+      return;
+    }
     const workspace = options.local
       ? new LocalWorkspace(
         resolve(options.workspace ? expandHome(options.workspace) : process.cwd()),
@@ -336,7 +340,7 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
     const client = runtime.createClient(apiKey, cancellation.signal);
     const webSearch = (arguments_: Parameters<typeof search>[0]): Promise<string> => search(arguments_, undefined, undefined, cancellation.signal);
     let result: RunResult;
-    if (options.toa && await toaConfirm(options, config, io, cancellation.signal)) {
+    if (options.toa) {
       result = await toaAgent(client, task, config, Number(options.toaWorkers), webSearch, images);
     } else {
       result = await singleAgent(client, task, config, options.web, emit, workspace, webSearch, images);

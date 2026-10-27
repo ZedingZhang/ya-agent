@@ -192,6 +192,8 @@ ya ask --toa --yes "Evaluate this strategic decision"
 
 `--local` and `--toa` cannot be combined.
 
+Declining the ToA preflight cancels the task, sends no API or web-search requests, and exits with code `0` (a normal user cancellation).
+
 ### Local workspace tools
 
 Local mode gives Ya a deliberately limited filesystem capability for one workspace:

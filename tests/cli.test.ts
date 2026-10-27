@@ -275,6 +275,32 @@ describe("CLI", () => {
     expect(capture.stderr.output).toContain("interactive confirmation or --yes");
   });
 
+  it.each(["n", "", "no"])("cancels a declined ToA preflight (%j) without creating a client or sending a request", async (answer) => {
+    const capture = fakeIo(true, [answer]);
+    const createClient = vi.fn(() => fakeClient());
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected network request"));
+    try {
+      expect(await main(["ask", "Research this decision", "--toa", "--web", "on", "--image", "file-api-PREFLIGHT"], {
+        io: capture.io, runtime: { loadApiKey: () => "key", createClient },
+      })).toBe(0);
+      expect(createClient).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(capture.stdout.output).toContain("ToA cancelled; nothing was sent.");
+      expect(capture.stdout.output).not.toContain("result]");
+      expect(capture.prompts).toEqual(["Start ToA for this task? [y/N] "]);
+    } finally { fetch.mockRestore(); }
+  });
+
+  it("runs ToA after accepting its preflight", async () => {
+    const capture = fakeIo(true, ["yes"]);
+    const client = fakeClient("Confirmed ToA answer");
+    const run = vi.spyOn(client, "runWithTools");
+    expect(await main(["ask", "Evaluate this decision", "--toa", "--no-feedback"], context(capture.io, client))).toBe(0);
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(capture.stdout.output).toContain("[Ya toa result]");
+    expect(capture.stdout.output).toContain("Confirmed ToA answer");
+  });
+
   it("rejects a third ToA worker at parse time", async () => {
     const capture = fakeIo();
     expect(await main(["ask", "test", "--toa-workers", "3"], context(capture.io))).not.toBe(0);
