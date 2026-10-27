@@ -226,7 +226,7 @@ describe("local workspace", () => {
     expect(audit).not.toContain("nope");
   });
 
-  it.each([".env", ".env.local", "credentials.json", "id_rsa", "client.key", ".git/config"])(
+  it.each([".env", ".env.local", "credentials.json", "id_rsa", "client.key", ".git/config", ".git-credentials", ".NETRC", ".NpmRc"])(
     "blocks creating or replacing sensitive file %s before approval", async (path) => {
       mkdirSync(dirname(join(root, path)), { recursive: true });
       await expect(workspace.write({ path, content: "synthetic-new-value" })).rejects.toThrow(/sensitive/u);
@@ -241,6 +241,38 @@ describe("local workspace", () => {
       expect(audit).not.toContain("synthetic-new-value");
     },
   );
+
+  it.each([".GIT", ".Git", ".gIt"])("blocks every local file operation inside %s", async (directory) => {
+    mkdirSync(join(root, directory));
+    writeFileSync(join(root, directory, "config"), "synthetic-credential");
+    writeFileSync(join(root, "ordinary.txt"), "ordinary");
+    expect(() => workspace.read({ path: `${directory}/config` })).toThrow(/sensitive/u);
+    expect(() => workspace.list({ path: directory })).toThrow(/sensitive/u);
+    expect(() => workspace.search({ path: directory, query: "synthetic" })).toThrow(/sensitive/u);
+    expect(JSON.parse(workspace.search({ query: "synthetic" })).results).toEqual([]);
+    await expect(workspace.write({ path: `${directory}/config`, content: "changed" })).rejects.toThrow(/sensitive/u);
+    await expect(workspace.edit({ path: `${directory}/config`, expected_revision: "0".repeat(64), edits: [] })).rejects.toThrow(/sensitive/u);
+    await expect(workspace.mkdir({ path: `${directory}/hooks` })).rejects.toThrow(/sensitive/u);
+    await expect(workspace.move({ source: directory, destination: "metadata" })).rejects.toThrow(/sensitive/u);
+    await expect(workspace.move({ source: "ordinary.txt", destination: `${directory}/hook` })).rejects.toThrow(/sensitive/u);
+    expect(actions).toEqual([]);
+    expect(readFileSync(join(root, directory, "config"), "utf8")).toBe("synthetic-credential");
+  });
+
+  it("blocks alternate casing of an on-disk .git directory on a case-insensitive filesystem", async (context) => {
+    mkdirSync(join(root, ".git"));
+    if (!existsSync(join(root, ".GIT"))) { context.skip(); return; }
+    writeFileSync(join(root, ".git", "config"), "synthetic-credential");
+    for (const directory of [".GIT", ".Git", ".gIt"]) {
+      expect(() => workspace.read({ path: `${directory}/config` })).toThrow(/sensitive/u);
+      expect(() => workspace.search({ path: directory, query: "synthetic" })).toThrow(/sensitive/u);
+      await expect(workspace.write({ path: `${directory}/config`, content: "changed" })).rejects.toThrow(/sensitive/u);
+      await expect(workspace.edit({ path: `${directory}/config`, expected_revision: "0".repeat(64), edits: [] })).rejects.toThrow(/sensitive/u);
+      await expect(workspace.mkdir({ path: `${directory}/hooks` })).rejects.toThrow(/sensitive/u);
+      await expect(workspace.move({ source: directory, destination: "metadata" })).rejects.toThrow(/sensitive/u);
+    }
+    expect(actions).toEqual([]);
+  });
 
   it("blocks writes through an alias into a sensitive directory", async () => {
     mkdirSync(join(root, ".git"));
