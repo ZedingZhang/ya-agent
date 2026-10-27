@@ -62,7 +62,7 @@ export interface ToolDefinition {
 }
 
 export type ToolArguments = Record<string, unknown>;
-export type ToolHandler = (arguments_: ToolArguments) => string | Promise<string>;
+export type ToolHandler = (arguments_: ToolArguments, signal?: AbortSignal) => string | Promise<string>;
 
 export interface TokenUsage {
   [key: string]: unknown;
