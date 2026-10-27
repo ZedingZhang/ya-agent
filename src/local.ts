@@ -332,9 +332,9 @@ export class LocalWorkspace {
   private isSensitive(path: string): boolean {
     const lowered = basename(path).toLocaleLowerCase("und");
     const extension = lowered.includes(".") ? lowered.slice(lowered.lastIndexOf(".")) : "";
-    if (path.split(sep).some((part) => part === ".git")) return true;
+    if (path.split(sep).some((part) => part.toLocaleLowerCase("und") === ".git")) return true;
     if (lowered === ".env" || lowered.startsWith(".env.")) return true;
-    if (["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json"].includes(lowered)) return true;
+    if (["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json", ".git-credentials", ".netrc", ".npmrc"].includes(lowered)) return true;
     return [".pem", ".key", ".p12", ".pfx", ".kdbx", ".der", ".token"].includes(extension) || lowered.includes("secret");
   }
 
@@ -416,6 +416,7 @@ export class LocalWorkspace {
 
   list(arguments_: ToolArguments): string {
     const path = this.resolveInput(arguments_.path ?? ".");
+    if (this.isSensitive(path)) throw new Error("Listing sensitive directories is blocked in local mode.");
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
     const allEntries = readdirSync(path, { withFileTypes: true }).sort((left, right) =>
       left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
@@ -440,6 +441,7 @@ export class LocalWorkspace {
     const query = arguments_.query;
     if (typeof query !== "string" || !query.trim()) throw new Error("A non-empty search query is required.");
     const root = this.resolveInput(arguments_.path ?? ".");
+    if (this.isSensitive(root)) throw new Error("Searching sensitive directories is blocked in local mode.");
     if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`);
     const needle = query.toLocaleLowerCase("und");
     const results: Array<Record<string, unknown>> = [];
@@ -485,6 +487,7 @@ export class LocalWorkspace {
     const path = this.resolveInput(arguments_.path);
     const action: LocalAction = { operation: "mkdir", paths: [path], summary: `Create directory: ${path}` };
     try {
+      if (this.isSensitive(path)) throw new Error("Creating sensitive directories is blocked in local mode.");
       if (existsSync(path)) throw new Error(`Path already exists: ${path}`);
       if (!existsSync(dirname(path)) || !statSync(dirname(path)).isDirectory()) throw new Error("Parent directory does not exist; create it first.");
       if (!(await this.confirmed(action))) {
