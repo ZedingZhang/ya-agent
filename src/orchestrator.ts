@@ -7,6 +7,7 @@ import { relevantContext } from "./memory";
 import type { ChatMessage, ConversationMessage, TokenUsage, ToolDefinition, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search, WEB_SEARCH_TOOL } from "./web";
 import { abortable } from "./cancellation";
+import { CompletionBudget, sumUsage } from "./tokens";
 
 const webSearchWithSignal: ToolHandler = (arguments_, signal) => search(arguments_, undefined, undefined, signal);
 
@@ -72,6 +73,7 @@ export interface AgentClient {
     handlers?: Record<string, ToolHandler>,
     maxRounds?: number,
     signal?: AbortSignal,
+    budget?: CompletionBudget,
   ): Promise<ModelReply>;
 }
 
@@ -113,6 +115,7 @@ async function runAgent(
   images: UserImageContentPart[] = [],
   history: ConversationMessage[] = [],
   signal?: AbortSignal,
+  budget?: CompletionBudget,
 ): Promise<ModelReply> {
   const useWeb = shouldUseWeb(task, webMode);
   let completeInstruction = instruction;
@@ -140,6 +143,7 @@ async function runAgent(
     handlers,
     localWorkspace?.commandsEnabled ? MAX_CODING_TOOL_CALL_ROUNDS : undefined,
     signal,
+    budget,
   );
 }
 
@@ -223,18 +227,23 @@ export async function toaAgent(
   const icmReserve = Math.min(1_024, Math.floor(config.toaTokenBudget / 4));
   const workingBudget = config.toaTokenBudget - icmReserve;
   const allocation = Math.floor(workingBudget / (workers + 1));
+  const workerBudgets = roles.map(() => new CompletionBudget(allocation));
+  const workerUsages: TokenUsage[] = roles.map(() => ({}));
   const failures: string[] = [];
 
-  const packets = await Promise.all(roles.map(async (role) => {
+  const packets = await Promise.all(roles.map(async (role, index) => {
+    const budget = workerBudgets[index]!;
     try {
       const reply = await withTimeout(
-        (workerSignal) => runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images, history, workerSignal),
+        (workerSignal) => runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images, history, workerSignal, budget),
         config.toaTimeout * 1_000,
         signal,
       );
-      return { role, content: reply.content, usage: reply.usage };
+      workerUsages[index] = reply.usage;
+      return { role, content: reply.content };
     } catch (error) {
       signal?.throwIfAborted();
+      workerUsages[index] = budget.usage;
       failures.push(`${role}: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
@@ -245,8 +254,9 @@ Treat a worker's unsupported statement as an open question. Separate evidence, i
 risks, and remaining uncertainty. Include cited URLs from the packets when available.
 Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefined))}`;
   signal?.throwIfAborted();
-  const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch, images, history, signal);
-  const usage: TokenUsage = { ...reply.usage, worker_count: workers };
+  const rootAllocation = workingBudget - allocation * workers;
+  const reply = await runAgent(client, task, config, rootAllocation, synthesis, "on", undefined, webSearch, images, history, signal, new CompletionBudget(rootAllocation));
+  const usage: TokenUsage = { ...sumUsage(...workerUsages, reply.usage), worker_count: workers };
   return applyIcm(
     client,
     task,
@@ -257,6 +267,7 @@ Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefi
     images,
     history,
     signal,
+    new CompletionBudget(icmReserve),
   );
 }
 
@@ -283,16 +294,17 @@ async function applyIcm(
   images: UserImageContentPart[],
   history: ConversationMessage[],
   signal?: AbortSignal,
+  budget?: CompletionBudget,
 ): Promise<RunResult> {
   if (!icmFollowUpNeeded(result.content)) return result;
   const instruction = `The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n${result.content}`;
-  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images, history, signal);
+  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images, history, signal, budget);
   return {
     ...result,
     content: `${result.content.replace(/\[ICM_GAP\]/iu, "")}\n\nEvidence supplement:\n${reply.content}`,
-    usage: { ...result.usage, icm_follow_up: reply.usage },
+    usage: { ...sumUsage(result.usage, reply.usage), icm_follow_up: reply.usage },
   };
 }
 

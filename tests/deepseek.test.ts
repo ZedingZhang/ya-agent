@@ -7,6 +7,7 @@ import {
   type FetchLike,
 } from "../src/deepseek";
 import type { ToolCall } from "../src/types";
+import { CompletionBudget } from "../src/tokens";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -93,6 +94,35 @@ describe("DeepSeek client", () => {
     const result = await new DeepSeekClient("key", fetcher).runWithTools([], new ModelConfig(), 100, [], { check: handler }, 20);
     expect(result.content).toBe("verified");
     expect(handler).toHaveBeenCalledTimes(8);
+  });
+
+  it("sums usage across tool rounds and the forced final answer", async () => {
+    let request = 0;
+    const fetcher: FetchLike = async () => Response.json({
+      usage: { prompt_tokens: 1, completion_tokens: ++request + 1, total_tokens: request + 2 },
+      choices: [{ message: request < 3
+        ? { tool_calls: [{ id: String(request), function: { name: "check", arguments: "{}" } }] }
+        : { content: "final answer" } }],
+    });
+    const result = await new DeepSeekClient("key", fetcher).runWithTools([], new ModelConfig(), 100, [], { check: () => "ok" }, 1);
+    expect(request).toBe(3);
+    expect(result.usage).toEqual({ prompt_tokens: 3, completion_tokens: 9, total_tokens: 12 });
+  });
+
+  it("conservatively caps a tool loop when the provider omits usage", async () => {
+    const limits: number[] = [];
+    const fetcher: FetchLike = async (_url, init) => {
+      const payload = JSON.parse(String(init?.body));
+      limits.push(payload.max_tokens);
+      return Response.json({ choices: [{ message: payload.tools?.length
+        ? { tool_calls: [{ id: "a", function: { name: "check", arguments: "{}" } }] }
+        : { content: "final answer" } }] });
+    };
+    const tools = [{ type: "function" as const, function: { name: "check", description: "check", parameters: {} } }];
+    const result = await new DeepSeekClient("key", fetcher).runWithTools([], new ModelConfig(), 100, tools, { check: () => "ok" }, undefined, undefined, new CompletionBudget(100));
+    expect(limits).toEqual([75, 25]);
+    expect(result.content).toBe("final answer");
+    expect(result.usage).toEqual({});
   });
 
   for (const streaming of [false, true]) {

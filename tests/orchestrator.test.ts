@@ -101,7 +101,7 @@ describe("agent orchestration", () => {
       expect(output.join("")).toBe(result.content);
       expect(client.calls).toHaveLength(1);
       expect(client.calls[0]!.tools?.map((tool) => tool.function.name)).toContain("web_search");
-      expect(result.usage).toMatchObject({ output_tokens: 5, icm_follow_up: { output_tokens: 3 } });
+      expect(result.usage).toMatchObject({ output_tokens: 8, icm_follow_up: { output_tokens: 3 } });
     },
   );
 
@@ -278,8 +278,8 @@ describe("agent orchestration", () => {
         return new Promise<ModelReply>((resolve) => { finish[role] = resolve; });
       }
       expect(evidencePackets(messages)).toEqual([
-        { role: "evidence", content: "evidence packet", usage: {} },
-        { role: "risk", content: "risk packet", usage: {} },
+        { role: "evidence", content: "evidence packet" },
+        { role: "risk", content: "risk packet" },
       ]);
       return reply("synthesis");
     };
@@ -296,7 +296,7 @@ describe("agent orchestration", () => {
     const client = new FakeClient();
     client.runWithTools = async (messages) => {
       if (String(messages[0]?.content).includes("strongest available evidence")) return reply("evidence packet");
-      expect(evidencePackets(messages)).toEqual([{ role: "evidence", content: "evidence packet", usage: {} }]);
+      expect(evidencePackets(messages)).toEqual([{ role: "evidence", content: "evidence packet" }]);
       return reply("synthesis");
     };
     expect(await toaAgent(client, "Compare options", new ModelConfig(), 1))
@@ -328,7 +328,7 @@ describe("agent orchestration", () => {
       if (role === failed) throw new Error("worker failed");
       if (role) return reply(`${role} packet`);
       const remaining = failed === "evidence" ? "risk" : "evidence";
-      expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet`, usage: {} }]);
+      expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet` }]);
       return reply("partial synthesis");
     };
     const result = await toaAgent(client, "Compare options", new ModelConfig(), 2);
@@ -347,7 +347,7 @@ describe("agent orchestration", () => {
         if (role === timedOut) return new Promise<ModelReply>(() => undefined);
         if (role) return reply(`${role} packet`);
         const remaining = timedOut === "evidence" ? "risk" : "evidence";
-        expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet`, usage: {} }]);
+        expect(evidencePackets(messages)).toEqual([{ role: remaining, content: `${remaining} packet` }]);
         return reply("partial synthesis");
       };
       const running = toaAgent(client, "Compare options", new ModelConfig({ toaTimeout: 30 }), 2);
@@ -375,11 +375,11 @@ describe("agent orchestration", () => {
           if (pending === "fetch") return new Promise<Response>((_resolve, reject) => {
             signal.addEventListener("abort", () => reject(signal.reason), { once: true });
           });
-          return Response.json({ choices: [{ message: { content: "", tool_calls: [
+          return Response.json({ usage: { completion_tokens: 7 }, choices: [{ message: { content: "", tool_calls: [
             { id: "search", type: "function", function: { name: "web_search", arguments: '{"query":"evidence"}' } },
           ] } }] });
         }
-        return Response.json({ choices: [{ message: { content: "partial synthesis" } }] });
+        return Response.json({ usage: { completion_tokens: 11 }, choices: [{ message: { content: "partial synthesis" } }] });
       });
       const searchFetcher = vi.fn<FetchLike>(async (_url, init) => new Promise<Response>((_resolve, reject) => {
         const signal = init!.signal!;
@@ -392,7 +392,8 @@ describe("agent orchestration", () => {
       expect(workerSignals).toHaveLength(1);
       if (pending === "search") expect(searchSignals).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(30_000);
-      expect(await running).toMatchObject({ content: "partial synthesis", partial: true });
+      expect(await running).toMatchObject({ content: "partial synthesis", partial: true,
+        usage: { completion_tokens: pending === "search" ? 18 : 11 } });
       expect(workerSignals[0]?.aborted).toBe(true);
       if (pending === "search") expect(searchSignals[0]?.aborted).toBe(true);
       expect(fetcher).toHaveBeenCalledTimes(2);
@@ -418,5 +419,49 @@ describe("agent orchestration", () => {
     await rejected;
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { workers: 1, budget: 1_000, account: false },
+    { workers: 2, budget: 1_000, account: true },
+    { workers: 2, budget: 8_000, account: false },
+    { workers: 1, budget: 8_000, account: true },
+    { workers: 1, budget: 16_000, account: false },
+    { workers: 2, budget: 16_000, account: true },
+  ])("bounds every ToA round and totals provider usage: %j", async ({ workers, budget, account }) => {
+    const requests: Array<{ role: string; tokens: number; limit: number }> = [];
+    const fetcher: FetchLike = async (_url, init) => {
+      const payload = JSON.parse(String(init?.body));
+      const system = account ? payload.system.map((part: { text: string }) => part.text).join("\n") : payload.messages[0].content;
+      const role = system.includes("prior draft identifies") ? "icm" : system.includes("root coordinator") ? "root"
+        : system.includes("skeptical reviewer") ? "risk" : "evidence";
+      if (role === "root") {
+        const packets = JSON.parse(/Evidence packets:\n([^\n]+)/u.exec(system)![1]!);
+        expect(packets).toHaveLength(workers);
+        expect(packets.every((packet: object) => !Object.hasOwn(packet, "usage"))).toBe(true);
+      }
+      const tokens = Math.min(80, payload.max_tokens);
+      requests.push({ role, tokens, limit: payload.max_tokens });
+      const content = role === "root" ? "Root [ICM_GAP]" : `${role} answer`;
+      const usage = account ? { input_tokens: 7, output_tokens: tokens, cache_creation_input_tokens: 2 }
+        : { prompt_tokens: 7, completion_tokens: tokens, total_tokens: tokens + 7, completion_tokens_details: { reasoning_tokens: 3 } };
+      if (account) return Response.json({ usage, content: payload.tools?.length
+        ? [{ type: "tool_use", id: String(requests.length), name: "web_search", input: { query: "evidence" } }]
+        : [{ type: "text", text: content }] });
+      return Response.json({ usage, choices: [{ message: payload.tools?.length
+        ? { content: "", tool_calls: [{ id: String(requests.length), function: { name: "web_search", arguments: '{"query":"evidence"}' } }] }
+        : { content } }] });
+    };
+    const credential = account ? { kind: "account" as const, token: "grant" } : "key";
+    const result = await toaAgent(new DeepSeekClient(credential, fetcher), "Compare options", new ModelConfig({ toaTokenBudget: budget }), workers, () => "[]");
+    const total = requests.reduce((sum, request) => sum + request.tokens, 0);
+    expect(total).toBeLessThanOrEqual(budget);
+    expect(requests.every((request) => request.limit >= 1 && request.tokens <= request.limit)).toBe(true);
+    expect(requests.filter((request) => request.role === "icm").length).toBeGreaterThan(1);
+    expect(result.content).toContain("icm answer");
+    expect(result.usage[account ? "output_tokens" : "completion_tokens"]).toBe(total);
+    expect(result.usage[account ? "input_tokens" : "prompt_tokens"]).toBe(requests.length * 7);
+    expect(result.usage.worker_count).toBe(workers);
+    if (!account) expect(result.usage.completion_tokens_details).toEqual({ reasoning_tokens: requests.length * 3 });
   });
 });
