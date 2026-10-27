@@ -25,7 +25,7 @@ body { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr)
 button, input, select, textarea { font: inherit; }
 button { color: inherit; border: 0; }
 [hidden] { display: none !important; }
-button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, summary:focus-visible, .composer-select select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:disabled { cursor: not-allowed; opacity: .42; }
 svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
