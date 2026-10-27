@@ -194,6 +194,8 @@ ya ask --toa --yes "Evaluate this strategic decision"
 
 Declining the ToA preflight cancels the task, sends no API or web-search requests, and exits with code `0` (a normal user cancellation).
 
+The completion-token budget covers every tool round across the workers, root synthesis, and optional ICM follow-up. Each allocation reserves tokens for a final answer and caps subsequent requests at its remaining allowance. When a response omits usage, Ya conservatively charges its requested allowance. Reported usage totals all provider-reported rounds, including completed rounds of a worker that later times out.
+
 ### Local workspace tools
 
 Local mode gives Ya a deliberately limited filesystem capability for one workspace:

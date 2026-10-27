@@ -11,6 +11,7 @@ import { assertImageCount } from "./images";
 import { abortable, delay as waitDelay } from "./cancellation";
 import { clearAccountCredential, type DeepSeekCredential } from "./credentials";
 import { ACCOUNT_API_URL, messagesPayload, messagesReply } from "./messages";
+import { CompletionBudget, sumUsage } from "./tokens";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
 export const MAX_TOOL_CALL_ROUNDS = 6;
@@ -351,16 +352,27 @@ export class DeepSeekClient {
     toolHandlers: Record<string, ToolHandler> = {},
     maxRounds = MAX_TOOL_CALL_ROUNDS,
     signal?: AbortSignal,
+    budget?: CompletionBudget,
   ): Promise<ModelReply> {
     if (signal) {
       const combined = this.signal ? AbortSignal.any([this.signal, signal]) : signal;
       return new DeepSeekClient(this.apiKey, this.fetcher, this.sleep, combined)
-        .runWithTools(messages, config, maxTokens, tools, toolHandlers, maxRounds);
+        .runWithTools(messages, config, maxTokens, tools, toolHandlers, maxRounds, undefined, budget);
     }
     if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 40) throw new Error("Tool rounds must be an integer from 1 to 40.");
     const transientMessages = [...messages];
+    let usage: TokenUsage = {};
+    const record = (reply: ModelReply, requested: number): ModelReply => {
+      budget?.record(reply.usage, requested);
+      usage = sumUsage(usage, reply.usage);
+      return { ...reply, usage };
+    };
+    const finalReserve = budget ? Math.max(1, Math.min(512, Math.floor(budget.limit / 4))) : 0;
     for (let round = 0; round <= maxRounds; round += 1) {
-      const reply = await this.complete(transientMessages, config, maxTokens, tools);
+      if (budget && tools?.length && budget.remaining <= finalReserve) break;
+      const allowance = budget ? Math.min(maxTokens, budget.remaining - (tools?.length ? finalReserve : 0)) : maxTokens;
+      if (allowance < 1) throw new DeepSeekError("Completion token budget exhausted before a final answer.");
+      const reply = record(await this.complete(transientMessages, config, allowance, tools), allowance);
       if (reply.toolCalls.length === 0) return reply;
       if (round === maxRounds) break;
       transientMessages.push(reply.assistantMessage);
@@ -392,7 +404,9 @@ export class DeepSeekClient {
       role: "user",
       content: "The tool-call budget is exhausted. Return the best final answer to the original request now without using any tools. Be concise and state uncertainty when needed.",
     });
-    const reply = await this.complete(transientMessages, config, maxTokens);
+    const allowance = budget ? Math.min(maxTokens, budget.remaining) : maxTokens;
+    if (allowance < 1) throw new DeepSeekError("Completion token budget exhausted before a final answer.");
+    const reply = record(await this.complete(transientMessages, config, allowance), allowance);
     if (reply.toolCalls.length === 0) return reply;
     throw new DeepSeekError(`Tool-call limit (${maxRounds} rounds) reached before a final answer.`);
   }
