@@ -4,7 +4,7 @@
 
 Ya（丫丫）是一个专门适配 DeepSeek 的 Coding Agent，同时提供命令行与原生桌面应用。项目内核采用 TypeScript，桌面端采用 Electron，并与 CLI 共享同一套带类型的服务层。
 
-Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。命令执行需要为每次任务显式开启，并单独批准。
+Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash-1017`，可切换到 `DeepSeek-V4-Pro-0813`），在本地保存长期记忆，并且只有在用户明确确认后才会启动受限的 Tree of Agents（ToA）。命令执行需要为每次任务显式开启，并单独批准。
 
 ## 桌面界面
 
@@ -144,6 +144,7 @@ ya ask --help
 ya ask "解释递归"
 ya ask --web on "比较两种方案的最新证据"
 ya ask --thinking on --reasoning-effort max "分析这个决策"
+ya ask --thinking on --reasoning-effort low "概括这个函数"
 ya ask --image ./chart.png "解释这张图表"
 ```
 
@@ -251,15 +252,24 @@ Windows 使用 `cmd.exe /d /s /c`，macOS/Linux 使用 `/bin/sh -c`，沿用已�
 
 ### 配置
 
+桌面端模型菜单展示模型版本，CLI 别名与 API ID 遵循[官方模型列表](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)：
+
+| CLI 别名 | API 模型 ID | 当前模型版本 | 图片输入 |
+| --- | --- | --- | --- |
+| `flash`（默认） | `deepseek-flash` | DeepSeek-V4.1-Flash-1017 | 支持 |
+| `pro` | `deepseek-v4-pro` | DeepSeek-V4-Pro-0813 | 不支持 |
+
 ```sh
 ya config set model pro
 ya config set thinking on
 ya config set reasoning-effort max
 ```
 
+CLI、桌面端和配置文件均支持 `low`、`high`、`max` 三档思考强度。Ya 默认关闭思考，开启时默认使用 `high`。单次请求可使用 `ya ask --thinking on --reasoning-effort low "你的任务"`，或通过 `ya config set reasoning-effort low` 保存强度。API Key 请求发送 `reasoning_effort`，账号请求发送 `output_config.effort`，遵循[官方思考模式指南](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode/)。
+
 每次 API 请求最多等待 90 秒取得初始响应；非流式请求每次尝试的总时限为 90 秒。流式响应开始后，90 秒空闲超时会随数据或心跳到达而重置，因此持续输出的回答可以超过 90 秒。这些限制同时适用于 API Key 和平台账号，独立于 ToA 工作 Agent 的超时预算。停止按钮或 Ctrl+C 仍可取消请求；流式请求已经交付可见文本后，失败不会触发自动重试。
 
-配置继续兼容旧 Python 版本，存储在 `~/.ya/config.json`。可设置 `YA_HOME` 选择其他状态目录。已不再提供服务的模型 ID（`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`vision` 别名，以及本项目在 API 拒绝前短暂使用过的 `deepseek-v4.1-flash` 与 `deepseek-v4-pro-0813`）会在加载配置时自动迁移。
+配置继续兼容旧 Python 版本，存储在 `~/.ya/config.json`。可设置 `YA_HOME` 选择其他状态目录。旧模型名称（`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`vision` 别名，以及本项目短暂使用过的 `deepseek-v4.1-flash` 与 `deepseek-v4-pro-0813`）会在加载配置时自动规范为当前 API ID。DeepSeek 也仍接受前两个旧 Flash API ID，并将请求转交 DeepSeek-V4.1-Flash-1017。
 
 ### 长期记忆
 

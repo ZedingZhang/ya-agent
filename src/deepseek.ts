@@ -6,7 +6,7 @@ import type {
   ToolDefinition,
   ToolHandler,
 } from "./types";
-import { assertImageInputSupported, ModelConfig } from "./config";
+import { assertImageInputSupported, ModelConfig, type ReasoningEffort } from "./config";
 import { assertImageCount } from "./images";
 import { abortable, delay as waitDelay } from "./cancellation";
 import { clearAccountCredential, type DeepSeekCredential } from "./credentials";
@@ -71,7 +71,7 @@ export interface DeepSeekPayload {
   thinking: { type: "enabled" | "disabled" };
   stream: boolean;
   max_tokens: number;
-  reasoning_effort?: string;
+  reasoning_effort?: ReasoningEffort;
   tools?: ToolDefinition[];
   stream_options?: { include_usage: true };
 }

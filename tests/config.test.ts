@@ -26,15 +26,15 @@ describe("configuration", () => {
     expect(config.toaTimeout).toBe(90);
   });
 
-  it("round-trips through the Python-compatible storage schema", () => {
-    const config = new ModelConfig({ model: modelId("pro"), reasoningEffort: "max" });
+  it.each(["low", "high", "max"] as const)("round-trips %s effort through the Python-compatible storage schema", (reasoningEffort) => {
+    const config = new ModelConfig({ model: modelId("pro"), reasoningEffort });
     saveConfig(config);
     expect(loadConfig()).toEqual(config);
     const stored = JSON.parse(readFileSync(configPath(), "utf8")) as Record<string, unknown>;
     expect(stored).toMatchObject({
       model: "deepseek-v4-pro",
       thinking_enabled: false,
-      reasoning_effort: "max",
+      reasoning_effort: reasoningEffort,
       toa_token_budget: 8_000,
       toa_timeout: 90,
     });
@@ -75,6 +75,15 @@ describe("configuration", () => {
     }));
   });
 
+  it("loads low effort from the camel-case storage schema", () => {
+    writeFileSync(configPath(), JSON.stringify({ thinkingEnabled: true, reasoningEffort: "low" }));
+    expect(loadConfig()).toEqual(new ModelConfig({ thinkingEnabled: true, reasoningEffort: "low" }));
+  });
+
+  it.each(["none", "medium", "ultra", "", 1, {}])("rejects invalid reasoning effort %j", (reasoningEffort) => {
+    expect(() => new ModelConfig({ reasoningEffort: reasoningEffort as never }).validate()).toThrow(/reasoning effort/u);
+  });
+
   it("migrates every model id that is no longer served", () => {
     for (const retired of ["deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "vision", "deepseek-v4.1-flash"]) {
       writeFileSync(configPath(), JSON.stringify({
@@ -84,7 +93,12 @@ describe("configuration", () => {
         toa_token_budget: 8_000,
         toa_timeout: 90,
       }));
-      expect(loadConfig().model).toBe("deepseek-flash");
+      const config = loadConfig();
+      expect(config.model).toBe("deepseek-flash");
+      expect(modelId(retired)).toBe("deepseek-flash");
+      expect(isVisionModel(config.model)).toBe(true);
+      saveConfig(config);
+      expect(JSON.parse(readFileSync(configPath(), "utf8")).model).toBe("deepseek-flash");
     }
   });
 
@@ -112,7 +126,7 @@ describe("configuration", () => {
     expect(loadConfig).toThrow(/Only deepseek/u);
   });
 
-  it("treats V4.1-Flash as the vision model and keeps pro text-only", () => {
+  it("treats V4.1-Flash-1017 as the vision model and keeps pro text-only", () => {
     const flash = "deepseek-flash";
     expect(modelId("flash")).toBe(flash);
     expect(modelId("vision")).toBe(flash);

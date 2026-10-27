@@ -34,7 +34,7 @@ interface AppState {
   config: {
     model: "deepseek-flash" | "deepseek-v4-pro";
     thinkingEnabled: boolean;
-    reasoningEffort: "high" | "max";
+    reasoningEffort: "low" | "high" | "max";
     toaTokenBudget: number;
     toaTimeout: number;
   };
@@ -151,7 +151,7 @@ const TEXT = {
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
     attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
     lowApiKeyOnly: "low (API key only)",
-    visionOnly: "Image input requires the DeepSeek-V4.1-Flash model.", noImages: "No images attached.",
+    visionOnly: "Image input requires the DeepSeek-V4.1-Flash-1017 model.", noImages: "No images attached.",
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
@@ -192,7 +192,7 @@ const TEXT = {
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
     lowApiKeyOnly: "low（仅 API Key）",
-    visionOnly: "图片输入需要选择 DeepSeek-V4.1-Flash 模型。", noImages: "尚未添加图片",
+    visionOnly: "图片输入需要选择 DeepSeek-V4.1-Flash-1017 模型。", noImages: "尚未添加图片",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
   },
 } as const;

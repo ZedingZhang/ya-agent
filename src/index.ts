@@ -1,13 +1,16 @@
 export { VERSION } from "./version";
 export {
   ModelConfig,
+  REASONING_EFFORTS,
   VALID_MODELS,
   assertImageInputSupported,
+  isReasoningEffort,
   isVisionModel,
   loadConfig,
   modelId,
   saveConfig,
 } from "./config";
+export type { ReasoningEffort } from "./config";
 export { DeepSeekClient, DeepSeekError } from "./deepseek";
 export { loginDeepSeek, logoutDeepSeek } from "./account";
 export type { AccountLoginOptions } from "./account";

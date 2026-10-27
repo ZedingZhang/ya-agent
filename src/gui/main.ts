@@ -15,7 +15,7 @@ import {
   shell,
   type IpcMainInvokeEvent,
 } from "electron";
-import { isVisionModel, ModelConfig, VALID_MODELS, type ReasoningEffort } from "../config";
+import { isReasoningEffort, isVisionModel, ModelConfig, VALID_MODELS } from "../config";
 import { DeepSeekClient, type FetchLike } from "../deepseek";
 import {
   imageContentPartsFromFiles,
@@ -197,10 +197,10 @@ function validateSettings(value: unknown): SettingsUpdate {
 function validateWorkspaceModelSelection(value: unknown): WorkspaceModelSelection {
   if (!isRecord(value)) throw new Error("Invalid workspace model selection.");
   if (!Object.values(VALID_MODELS).includes(value.model as never)) throw new Error("Invalid model.");
-  if (value.reasoningEffort !== "high" && value.reasoningEffort !== "max") throw new Error("Invalid reasoning effort.");
+  if (!isReasoningEffort(value.reasoningEffort)) throw new Error("Invalid reasoning effort.");
   return {
     model: value.model as (typeof VALID_MODELS)[keyof typeof VALID_MODELS],
-    reasoningEffort: value.reasoningEffort as ReasoningEffort,
+    reasoningEffort: value.reasoningEffort,
   };
 }
 
@@ -530,10 +530,11 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
     const model = document.querySelector('#task-model');
     const reasoning = document.querySelector('#task-reasoning');
-    const visionOption = document.querySelector('#task-model option[value="deepseek-flash"]') !== null;
+    const visionOption = document.querySelector('#task-model option[value="deepseek-flash"]')?.textContent === 'DeepSeek-V4.1-Flash-1017';
     const imagePicker = document.querySelector('#choose-images') !== null;
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
-      && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== '';
+      && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== ''
+      && Array.from(reasoning.options, (option) => option.value).join(',') === 'low,high,max';
     const commands = document.querySelector('#commands-enabled');
     const stop = document.querySelector('#stop-button');
     const commandControls = commands instanceof HTMLInputElement && !commands.checked
