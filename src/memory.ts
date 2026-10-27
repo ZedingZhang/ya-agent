@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { dataHome } from "./config";
+import { withMemoryLock } from "./memory-lock";
 
 export const MAX_MEMORY_CARDS = 100;
 export const MAX_RELEVANT_MEMORY_CARDS = 3;
@@ -94,11 +95,24 @@ export function loadMemoryCards(): MemoryCard[] {
 }
 
 export function saveMemoryCards(cards: readonly MemoryCard[]): void {
+  withMemoryLock(`${memoryPath()}.lock`, () => writeMemoryCards(cards));
+}
+
+function writeMemoryCards(cards: readonly MemoryCard[]): void {
   const path = memoryPath();
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(cards.map(toStored), null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const descriptor = openSync(temporary, "wx", 0o600);
+  try {
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(cards.map(toStored), null, 2)}\n`, "utf8");
+      fsyncSync(descriptor);
+    } finally { closeSync(descriptor); }
+    renameSync(temporary, path);
+  } finally {
+    try { unlinkSync(temporary); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
 }
 
 export function normalizeMemoryText(text: string): string {
@@ -109,27 +123,29 @@ export function createCandidate(text: string, evidence: string, kind: MemoryKind
   if (!(["preference", "procedure", "knowledge"] as const).includes(kind)) {
     throw new Error("memory kind must be preference, procedure, or knowledge.");
   }
-  const cards = loadMemoryCards();
-  const normalizedText = normalizeMemoryText(text);
-  const duplicate = cards.find(
-    (card) => card.kind === kind && ACTIVE_STATUSES.has(card.status) && normalizeMemoryText(card.text) === normalizedText,
-  );
-  if (duplicate) throw new DuplicateMemoryError(duplicate);
-  if (cards.length >= MAX_MEMORY_CARDS) {
-    throw new MemoryLimitError(`Memory card limit (${MAX_MEMORY_CARDS}) reached. Run: ya memory prune`);
-  }
-  const card: MemoryCard = {
-    id: randomUUID().replaceAll("-", "").slice(0, 8),
-    kind,
-    text: text.trim(),
-    evidence: evidence.trim(),
-    status: "candidate",
-    createdAt: new Date().toISOString(),
-    version: 1,
-  };
-  cards.push(card);
-  saveMemoryCards(cards);
-  return card;
+  return withMemoryLock(`${memoryPath()}.lock`, () => {
+    const cards = loadMemoryCards();
+    const normalizedText = normalizeMemoryText(text);
+    const duplicate = cards.find(
+      (card) => card.kind === kind && ACTIVE_STATUSES.has(card.status) && normalizeMemoryText(card.text) === normalizedText,
+    );
+    if (duplicate) throw new DuplicateMemoryError(duplicate);
+    if (cards.length >= MAX_MEMORY_CARDS) {
+      throw new MemoryLimitError(`Memory card limit (${MAX_MEMORY_CARDS}) reached. Run: ya memory prune`);
+    }
+    const card: MemoryCard = {
+      id: randomUUID().replaceAll("-", "").slice(0, 8),
+      kind,
+      text: text.trim(),
+      evidence: evidence.trim(),
+      status: "candidate",
+      createdAt: new Date().toISOString(),
+      version: 1,
+    };
+    cards.push(card);
+    writeMemoryCards(cards);
+    return card;
+  });
 }
 
 export function listCards(status?: MemoryStatus): MemoryCard[] {
@@ -139,13 +155,15 @@ export function listCards(status?: MemoryStatus): MemoryCard[] {
 
 export function setStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): MemoryCard {
   if (!(["approved", "rejected", "revoked"] as const).includes(status)) throw new Error("invalid memory status");
-  const cards = loadMemoryCards();
-  const card = cards.find((candidate) => candidate.id === cardId);
-  if (!card) throw new Error("memory card not found");
-  card.status = status;
-  card.version += 1;
-  saveMemoryCards(cards);
-  return card;
+  return withMemoryLock(`${memoryPath()}.lock`, () => {
+    const cards = loadMemoryCards();
+    const card = cards.find((candidate) => candidate.id === cardId);
+    if (!card) throw new Error("memory card not found");
+    card.status = status;
+    card.version += 1;
+    writeMemoryCards(cards);
+    return card;
+  });
 }
 
 export function cardsToPrune(includeCandidates = false): MemoryCard[] {
@@ -154,16 +172,19 @@ export function cardsToPrune(includeCandidates = false): MemoryCard[] {
   );
 }
 
-export function pruneCards(includeCandidates = false): MemoryCard[] {
-  const cards = loadMemoryCards();
-  const removed = cards.filter(
-    (card) => DEFAULT_PRUNE_STATUSES.has(card.status) || (includeCandidates && card.status === "candidate"),
-  );
-  if (removed.length > 0) {
-    const removedIds = new Set(removed.map((card) => card.id));
-    saveMemoryCards(cards.filter((card) => !removedIds.has(card.id)));
-  }
-  return removed;
+export function pruneCards(confirmedIds: readonly string[], includeCandidates = false): MemoryCard[] {
+  const confirmed = new Set(confirmedIds);
+  return withMemoryLock(`${memoryPath()}.lock`, () => {
+    const cards = loadMemoryCards();
+    const removed = cards.filter(
+      (card) => confirmed.has(card.id) && (DEFAULT_PRUNE_STATUSES.has(card.status) || (includeCandidates && card.status === "candidate")),
+    );
+    if (removed.length > 0) {
+      const removedIds = new Set(removed.map((card) => card.id));
+      writeMemoryCards(cards.filter((card) => !removedIds.has(card.id)));
+    }
+    return removed;
+  });
 }
 
 function englishWords(text: string): Set<string> {

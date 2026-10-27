@@ -266,6 +266,16 @@ describe("GUI controller", () => {
     expect(controller.auditLogTotalBytes()).toBeGreaterThan(0);
     expect(controller.clearAuditLogs().map((path) => basename(path))).toEqual(["actions.jsonl"]);
   });
+
+  it("binds GUI pruning to the preview instead of newly prunable cards", () => {
+    const controller = new GuiController();
+    const shown = controller.createMemory("shown", "evidence", "procedure");
+    expect(controller.prunePreview(true).map((card) => card.id)).toEqual([shown.id]);
+    const unseen = controller.createMemory("unseen", "evidence", "procedure");
+    expect(controller.prune(true).map((card) => card.id)).toEqual([shown.id]);
+    expect(controller.cards().map((card) => card.id)).toEqual([unseen.id]);
+    expect(() => controller.prune(true)).toThrow(/Preview/u);
+  });
 });
 
 describe("GUI presentation helpers", () => {

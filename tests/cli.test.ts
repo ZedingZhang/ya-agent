@@ -507,6 +507,20 @@ describe("CLI", () => {
     expect(listCards()).toEqual([]);
   });
 
+  it("does not prune a candidate created while CLI confirmation is pending", async () => {
+    const shown = createCandidate("shown candidate", "evidence");
+    let unseen = "";
+    const capture = fakeIo(true);
+    capture.io.prompt = async () => {
+      unseen = createCandidate("created during confirmation", "evidence").id;
+      return "yes";
+    };
+    expect(await main(["memory", "prune", "--include-candidates"], { io: capture.io })).toBe(0);
+    expect(capture.stdout.output).toContain(shown.id);
+    expect(capture.stdout.output).not.toContain(unseen);
+    expect(listCards().map((card) => card.id)).toEqual([unseen]);
+  });
+
   it("can decline interactive pruning", async () => {
     const card = setStatus(createCandidate("discard me", "evidence").id, "rejected");
     const capture = fakeIo(true, ["n"]);

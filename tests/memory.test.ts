@@ -4,6 +4,7 @@ import {
   DuplicateMemoryError,
   MemoryLimitError,
   createCandidate,
+  cardsToPrune,
   listCards,
   pruneCards,
   relevantContext,
@@ -60,7 +61,7 @@ describe("long-term memory", () => {
       version: 1,
     })));
     expect(() => createCandidate("new card", "evidence")).toThrow(MemoryLimitError);
-    expect(pruneCards()).toHaveLength(MAX_MEMORY_CARDS + 1);
+    expect(pruneCards(cardsToPrune().map((card) => card.id))).toHaveLength(MAX_MEMORY_CARDS + 1);
     expect(listCards()).toEqual([]);
   });
 
@@ -69,7 +70,7 @@ describe("long-term memory", () => {
     const rejected = setStatus(createCandidate("rejected", "evidence").id, "rejected");
     const revoked = setStatus(createCandidate("revoked", "evidence").id, "revoked");
     const approved = setStatus(createCandidate("approved", "evidence").id, "approved");
-    expect(new Set(pruneCards().map((card) => card.id))).toEqual(new Set([rejected.id, revoked.id]));
+    expect(new Set(pruneCards(cardsToPrune().map((card) => card.id)).map((card) => card.id))).toEqual(new Set([rejected.id, revoked.id]));
     expect(new Set(listCards().map((card) => card.id))).toEqual(new Set([candidate.id, approved.id]));
   });
 
@@ -77,8 +78,18 @@ describe("long-term memory", () => {
     const candidate = createCandidate("candidate", "evidence");
     const rejected = setStatus(createCandidate("rejected", "evidence").id, "rejected");
     const approved = setStatus(createCandidate("approved", "evidence").id, "approved");
-    expect(new Set(pruneCards(true).map((card) => card.id))).toEqual(new Set([candidate.id, rejected.id]));
+    expect(new Set(pruneCards(cardsToPrune(true).map((card) => card.id), true).map((card) => card.id))).toEqual(new Set([candidate.id, rejected.id]));
     expect(listCards().map((card) => card.id)).toEqual([approved.id]);
+  });
+
+  it("prunes only confirmed IDs that are still prunable", () => {
+    const shown = createCandidate("shown candidate", "evidence");
+    const changed = createCandidate("approved after preview", "evidence");
+    const confirmed = cardsToPrune(true).map((card) => card.id);
+    setStatus(changed.id, "approved");
+    const unseen = createCandidate("created after preview", "evidence");
+    expect(pruneCards(confirmed, true).map((card) => card.id)).toEqual([shown.id]);
+    expect(listCards().map((card) => card.id)).toEqual([changed.id, unseen.id]);
   });
 
   it("ranks exact phrases above a single keyword", () => {
