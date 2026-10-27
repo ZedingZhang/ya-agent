@@ -244,7 +244,7 @@ describe("DeepSeek client", () => {
     expect(output).not.toHaveBeenCalled();
   });
 
-  it("sends explicit thinking settings and reasoning effort", async () => {
+  it.each(["low", "high", "max"] as const)("sends explicit thinking settings with %s effort", async (reasoningEffort) => {
     let seen: Record<string, unknown> = {};
     const fetcher: FetchLike = async (_url, init) => {
       seen = payloadFrom(init);
@@ -252,28 +252,45 @@ describe("DeepSeek client", () => {
     };
     const reply = await new DeepSeekClient("test-key", fetcher).complete(
       [{ role: "user", content: "hello" }],
-      new ModelConfig({ thinkingEnabled: true }),
+      new ModelConfig({ thinkingEnabled: true, reasoningEffort }),
       100,
     );
     expect(reply.content).toBe("ok");
     expect(seen).toMatchObject({
       model: "deepseek-flash",
       thinking: { type: "enabled" },
-      reasoning_effort: "high",
+      reasoning_effort: reasoningEffort,
       max_tokens: 100,
       stream: false,
     });
   });
 
-  it("omits reasoning effort when thinking is disabled", async () => {
+  it.each(["low", "high", "max"] as const)("omits %s effort when thinking is disabled", async (reasoningEffort) => {
     let seen: Record<string, unknown> = {};
     const fetcher: FetchLike = async (_url, init) => {
       seen = payloadFrom(init);
       return jsonResponse({ choices: [{ message: { content: "ok" } }] });
     };
-    await new DeepSeekClient("test-key", fetcher).complete([], new ModelConfig(), 100);
+    await new DeepSeekClient("test-key", fetcher).complete([], new ModelConfig({ reasoningEffort }), 100);
     expect(seen.thinking).toEqual({ type: "disabled" });
     expect(seen).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("streams Flash-1017 with low thinking effort", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => streamResponse([
+      'data: {"choices":[{"delta":{"reasoning_content":"Thought","content":"Answer"}}]}\n\n',
+      'data: [DONE]\n\n',
+    ]));
+    const onContent = vi.fn();
+    const reply = await new DeepSeekClient("test-key", fetcher).completeStream(
+      [{ role: "user", content: "hello" }],
+      new ModelConfig({ thinkingEnabled: true, reasoningEffort: "low" }), 100, onContent,
+    );
+    expect(reply).toMatchObject({ content: "Answer", reasoningContent: "Thought" });
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Answer");
+    expect(payloadFrom(fetcher.mock.calls[0]?.[1])).toMatchObject({
+      model: "deepseek-flash", thinking: { type: "enabled" }, reasoning_effort: "low", stream: true,
+    });
   });
 
   it("preserves vision content blocks in an OpenAI-compatible request", async () => {

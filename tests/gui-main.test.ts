@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   logout: vi.fn(),
   accountCredential: vi.fn(),
+  saveWorkspaceModelSelection: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -44,7 +45,11 @@ vi.mock("../src/credentials", async (importOriginal) => ({
 vi.mock("../src/gui/controller", () => ({
   LANGUAGES: ["en"],
   GuiController: class {
-    config = { model: "deepseek-v4-pro" };
+    config = { model: "deepseek-v4-pro", reasoningEffort: "high" };
+    saveWorkspaceModelSelection(model: string, reasoningEffort: string) {
+      mocks.saveWorkspaceModelSelection(model, reasoningEffort);
+      this.config = { model, reasoningEffort };
+    }
     workspaces = [];
     auditLogs() { return []; }
     auditLogTotalBytes() { return 0; }
@@ -74,6 +79,7 @@ describe("GUI pending action lifecycle", () => {
     mocks.login.mockReset().mockResolvedValue(undefined);
     mocks.logout.mockReset().mockResolvedValue(true);
     mocks.accountCredential.mockReset().mockReturnValue(undefined);
+    mocks.saveWorkspaceModelSelection.mockReset();
     mocks.run.mockReset().mockImplementation(async (_options, callbacks) => {
       await callbacks.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });
       return "done";
@@ -84,6 +90,18 @@ describe("GUI pending action lifecycle", () => {
   });
 
   afterEach(() => { vi.useRealTimers(); });
+
+  it.each(["low", "high", "max"])("accepts %s reasoning effort through the workspace IPC boundary", async (reasoningEffort) => {
+    const state = await mocks.handlers.get("workspace:model-selection")!(event, { model: "deepseek-flash", reasoningEffort });
+    expect(mocks.saveWorkspaceModelSelection).toHaveBeenCalledExactlyOnceWith("deepseek-flash", reasoningEffort);
+    expect(state).toMatchObject({ config: { model: "deepseek-flash", reasoningEffort } });
+  });
+
+  it.each(["none", "medium", "ultra", "", null, 1, {}])("rejects invalid reasoning effort %j at the IPC boundary", (reasoningEffort) => {
+    expect(() => mocks.handlers.get("workspace:model-selection")!(event, { model: "deepseek-flash", reasoningEffort }))
+      .toThrow("Invalid reasoning effort.");
+    expect(mocks.saveWorkspaceModelSelection).not.toHaveBeenCalled();
+  });
 
   it("keeps startup state available when the saved account credential cannot be read", async () => {
     mocks.accountCredential.mockImplementation(() => { throw new Error("private-credential-record"); });

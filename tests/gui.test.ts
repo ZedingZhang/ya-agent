@@ -108,13 +108,13 @@ describe("GUI controller", () => {
     expect(controller.apiKey()).toBe("session-key");
   });
 
-  it("persists workspace model controls without changing settings-owned values", () => {
+  it.each(["low", "high", "max"] as const)("persists %s workspace reasoning effort without changing settings-owned values", (reasoningEffort) => {
     const controller = new GuiController();
     controller.saveModelConfig(new ModelConfig({ thinkingEnabled: true, toaTokenBudget: 6_000, toaTimeout: 120 }));
-    controller.saveWorkspaceModelSelection("deepseek-v4-pro", "max");
+    controller.saveWorkspaceModelSelection("deepseek-v4-pro", reasoningEffort);
     expect(loadConfig()).toEqual(new ModelConfig({
       model: "deepseek-v4-pro",
-      reasoningEffort: "max",
+      reasoningEffort,
       thinkingEnabled: true,
       toaTokenBudget: 6_000,
       toaTimeout: 120,

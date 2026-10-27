@@ -4,7 +4,7 @@
 
 Ya (丫丫) is a coding agent built specifically for DeepSeek, with a command-line interface and a native desktop application. The shared core is written in TypeScript; the desktop application uses Electron and shares the same typed service layer as the CLI.
 
-Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. Command execution is opt-in for each task and requires separate approval.
+Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash-1017` by default, with the option to switch to `DeepSeek-V4-Pro-0813`), stores long-term memory locally, and starts its bounded Tree of Agents (ToA) mode only after explicit confirmation. Command execution is opt-in for each task and requires separate approval.
 
 ## Desktop preview
 
@@ -144,6 +144,7 @@ ya ask --help
 ya ask "Explain recursion"
 ya ask --web on "Compare the latest evidence for two approaches"
 ya ask --thinking on --reasoning-effort max "Analyze this decision"
+ya ask --thinking on --reasoning-effort low "Summarize this function"
 ya ask --image ./chart.png "Explain this chart"
 ```
 
@@ -251,15 +252,24 @@ Approving `npm install` or `npm ci` can also run [dependency lifecycle scripts](
 
 ### Configuration
 
+The desktop model menu shows the model versions. CLI aliases and API IDs follow the [official model list](https://api-docs.deepseek.com/quick_start/pricing/):
+
+| CLI alias | API model ID | Current model version | Image input |
+| --- | --- | --- | --- |
+| `flash` (default) | `deepseek-flash` | DeepSeek-V4.1-Flash-1017 | Yes |
+| `pro` | `deepseek-v4-pro` | DeepSeek-V4-Pro-0813 | No |
+
 ```sh
 ya config set model pro
 ya config set thinking on
 ya config set reasoning-effort max
 ```
 
+Thinking supports `low`, `high`, and `max` in the CLI, desktop, and saved configuration. Ya defaults to thinking off, with `high` selected for when it is enabled. Use `ya ask --thinking on --reasoning-effort low "Your task"` for one request, or `ya config set reasoning-effort low` to save the effort. API-key requests send `reasoning_effort`; account requests send `output_config.effort`, following the [official thinking-mode guide](https://api-docs.deepseek.com/guides/thinking_mode/).
+
 API attempts allow up to 90 seconds for the initial response. Non-streaming attempts have a 90-second total deadline. After a streaming response starts, its 90-second idle timeout resets as data or heartbeats arrive, so an active answer can continue beyond 90 seconds. These limits apply to both API keys and platform accounts and are independent of the ToA worker timeout. Stop or Ctrl+C still cancels the request; a failed stream is not retried after visible text has been delivered.
 
-Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory. Model ids that are no longer served—`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, the `vision` alias, and the `deepseek-v4.1-flash` and `deepseek-v4-pro-0813` names this project briefly shipped before the API rejected them—are migrated when the file is loaded.
+Configuration remains compatible with earlier Python releases and is stored at `~/.ya/config.json`. Set `YA_HOME` to choose another state directory. Older model names (`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, the `vision` alias, and the `deepseek-v4.1-flash` and `deepseek-v4-pro-0813` names this project briefly shipped) are normalized to the current API IDs when the file is loaded. DeepSeek also continues to accept the two older Flash API IDs and routes them to DeepSeek-V4.1-Flash-1017.
 
 ### Long-term memory
 

@@ -26,11 +26,11 @@ describe("DeepSeek account inference", () => {
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
-  it("sends account tokens only as a dedicated header to the official Messages endpoint", async () => {
+  it.each(["low", "high", "max"] as const)("sends account tokens only as a dedicated header with %s effort", async (reasoningEffort) => {
     const fetcher = vi.fn<FetchLike>(async () => Response.json({ content: [{ type: "text", text: "Account reply" }], usage: { output_tokens: 3 } }));
     const reply = await new DeepSeekClient(credential, fetcher).complete([
       { role: "system", content: "Be concise" }, { role: "user", content: "Hello" },
-    ], new ModelConfig({ thinkingEnabled: true, reasoningEffort: "max" }), 500, [tool]);
+    ], new ModelConfig({ thinkingEnabled: true, reasoningEffort }), 500, [tool]);
     expect(reply.content).toBe("Account reply");
     expect(reply.usage).toEqual({ output_tokens: 3 });
     const [url, init] = fetcher.mock.calls[0]!;
@@ -40,10 +40,19 @@ describe("DeepSeek account inference", () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({
       model: "deepseek-flash", system: [{ type: "text", text: "Be concise" }],
       messages: [{ role: "user", content: [{ type: "text", text: "Hello" }] }], max_tokens: 500,
-      thinking: { type: "enabled" }, output_config: { effort: "max" },
+      thinking: { type: "enabled" }, output_config: { effort: reasoningEffort },
       tools: [{ name: "lookup", input_schema: tool.function.parameters }],
     });
     expect(String(init?.body)).not.toContain(credential.token);
+  });
+
+  it("omits saved low effort from account requests when thinking is disabled", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => Response.json({ content: [{ type: "text", text: "Answer" }] }));
+    await new DeepSeekClient(credential, fetcher).complete([], new ModelConfig({ reasoningEffort: "low" }), 500);
+    const payload = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
+    expect(payload.thinking).toEqual({ type: "disabled" });
+    expect(payload).not.toHaveProperty("output_config");
+    expect(payload).not.toHaveProperty("reasoning_effort");
   });
 
   it("preserves thinking signatures and tool-call history through the shared tool loop", async () => {
@@ -123,7 +132,7 @@ describe("DeepSeek account inference", () => {
   });
 
   it("streams account text and reasoning while retaining usage and replay signatures", async () => {
-    const fetcher: FetchLike = async () => stream([
+    const fetcher = vi.fn<FetchLike>(async () => stream([
       { type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 0 } } },
       { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } },
       { type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Thought" } },
@@ -132,14 +141,17 @@ describe("DeepSeek account inference", () => {
       { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "Hello " } },
       { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "world" } },
       { type: "message_delta", usage: { output_tokens: 5 } }, { type: "message_stop" },
-    ]);
+    ]));
     const onContent = vi.fn();
-    const reply = await new DeepSeekClient(credential, fetcher).completeStream([], new ModelConfig(), 500, onContent);
+    const reply = await new DeepSeekClient(credential, fetcher).completeStream([], new ModelConfig({ thinkingEnabled: true, reasoningEffort: "low" }), 500, onContent);
     expect(reply).toMatchObject({ content: "Hello world", reasoningContent: "Thought", usage: { input_tokens: 7, output_tokens: 5 } });
     expect(reply.assistantMessage.account_content).toEqual([
       { type: "thinking", thinking: "Thought", signature: "signature" }, { type: "text", text: "Hello world" },
     ]);
     expect(onContent.mock.calls).toEqual([["Hello "], ["world"]]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      model: "deepseek-flash", thinking: { type: "enabled" }, output_config: { effort: "low" }, stream: true,
+    });
   });
 
   it("rejects truncated streams without replaying text already delivered", async () => {

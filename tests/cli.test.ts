@@ -197,6 +197,7 @@ describe("CLI", () => {
     expect(capture.stdout.output).not.toContain("vision");
     expect(capture.stdout.output).toContain("--image <source>");
     expect(capture.stdout.output).toContain("--image-detail <detail>");
+    expect(capture.stdout.output).toContain('"low", "high", "max"');
   });
 
   it("sets validated configuration values", async () => {
@@ -205,6 +206,24 @@ describe("CLI", () => {
     expect(capture.stdout.output).toContain("deepseek-v4-pro");
     expect(await main(["config", "set", "unknown", "max"], { io: capture.io })).toBe(2);
     expect(capture.stderr.output).toContain("config key");
+  });
+
+  it.each(["low", "high", "max"] as const)("saves %s reasoning effort through config set", async (reasoningEffort) => {
+    const capture = fakeIo();
+    expect(await main(["config", "set", "reasoning-effort", reasoningEffort], context(capture.io))).toBe(0);
+    expect(loadConfig().reasoningEffort).toBe(reasoningEffort);
+  });
+
+  it("uses low thinking effort for one request without changing saved defaults", async () => {
+    const capture = fakeIo();
+    const client = fakeClient();
+    const runWithTools = vi.spyOn(client, "runWithTools");
+    expect(await main(["ask", "Summarize this function", "--thinking", "on", "--reasoning-effort", "low",
+      "--stream", "off", "--web", "off", "--no-feedback"], context(capture.io, client))).toBe(0);
+    expect(runWithTools.mock.calls[0]?.[1]).toMatchObject({
+      model: "deepseek-flash", thinkingEnabled: true, reasoningEffort: "low",
+    });
+    expect(loadConfig()).toMatchObject({ thinkingEnabled: false, reasoningEffort: "high" });
   });
 
   it.each([["ask", "test"], ["config", "set", "model", "pro"]])(
@@ -226,9 +245,9 @@ describe("CLI", () => {
     },
   );
 
-  it("requires thinking when a one-off reasoning effort is supplied", async () => {
+  it.each(["low", "high", "max"])("requires thinking when one-off %s effort is supplied", async (reasoningEffort) => {
     const capture = fakeIo();
-    expect(await main(["ask", "test", "--thinking", "off", "--reasoning-effort", "max"], context(capture.io))).toBe(2);
+    expect(await main(["ask", "test", "--thinking", "off", "--reasoning-effort", reasoningEffort], context(capture.io))).toBe(2);
     expect(capture.stderr.output).toContain("requires --thinking on");
   });
 

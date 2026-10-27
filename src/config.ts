@@ -9,9 +9,14 @@ export const VALID_MODELS = {
 
 export type ModelAlias = keyof typeof VALID_MODELS;
 export type ModelId = (typeof VALID_MODELS)[ModelAlias];
-export type ReasoningEffort = "high" | "max";
+export const REASONING_EFFORTS = ["low", "high", "max"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
-/** V4.1-Flash has native vision support; the pro model is text-only. */
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === "string" && REASONING_EFFORTS.includes(value as ReasoningEffort);
+}
+
+/** V4.1-Flash-1017 is served as deepseek-flash with native vision; pro is text-only. */
 const VISION_MODELS: readonly ModelId[] = [VALID_MODELS.flash];
 
 /** Names retired by the V4.1 line-up, still resolved so existing configuration keeps loading. */
@@ -64,8 +69,8 @@ export class ModelConfig implements ModelConfigValues {
     if (!Object.values(VALID_MODELS).includes(this.model)) {
       throw new Error(`Only ${Object.values(VALID_MODELS).join(", ")} are supported.`);
     }
-    if (this.reasoningEffort !== "high" && this.reasoningEffort !== "max") {
-      throw new Error("reasoning effort must be 'high' or 'max'.");
+    if (!isReasoningEffort(this.reasoningEffort)) {
+      throw new Error("reasoning effort must be 'low', 'high', or 'max'.");
     }
     if (!Number.isInteger(this.toaTokenBudget) || this.toaTokenBudget < 1_000 || this.toaTokenBudget > 16_000) {
       throw new Error("ToA token budget must be between 1000 and 16000.");

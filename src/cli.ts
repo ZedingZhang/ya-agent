@@ -4,7 +4,7 @@ import { Command, CommanderError, Option } from "commander";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { assertImageInputSupported, ModelConfig, loadConfig, modelId, saveConfig } from "./config";
+import { assertImageInputSupported, isReasoningEffort, ModelConfig, REASONING_EFFORTS, loadConfig, modelId, saveConfig, type ReasoningEffort } from "./config";
 import { DeepSeekClient, DeepSeekError } from "./deepseek";
 import { imageContentPartsFromSources } from "./images";
 import { loadApiKey, saveApiKey } from "./keychain";
@@ -73,7 +73,7 @@ export interface CliContext {
 interface AskOptions {
   model?: string;
   thinking?: "on" | "off";
-  reasoningEffort?: "high" | "max";
+  reasoningEffort?: ReasoningEffort;
   toa: boolean;
   yes: boolean;
   toaWorkers: string;
@@ -372,7 +372,7 @@ function configSet(key: string, value: string, io: CliIo): void {
     if (value !== "on" && value !== "off") throw new Error("thinking must be 'on' or 'off'.");
     config.thinkingEnabled = value === "on";
   } else {
-    if (value !== "high" && value !== "max") throw new Error("reasoning-effort must be 'high' or 'max'.");
+    if (!isReasoningEffort(value)) throw new Error("reasoning-effort must be 'low', 'high', or 'max'.");
     config.reasoningEffort = value;
   }
   config.validate();
@@ -438,7 +438,7 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .argument("<task>")
     .addOption(new Option("--model <model>").choices(["flash", "pro"]))
     .addOption(new Option("--thinking <state>").choices(["on", "off"]))
-    .addOption(new Option("--reasoning-effort <effort>").choices(["high", "max"]))
+    .addOption(new Option("--reasoning-effort <effort>").choices([...REASONING_EFFORTS]))
     .option("--toa", "Use the bounded Tree of Agents", false)
     .option("--yes", "Authorize this ToA run in a non-interactive shell", false)
     .addOption(new Option("--toa-workers <count>").choices(["1", "2"]).default("2"))
