@@ -6,6 +6,9 @@ import { assertImageCount } from "./images";
 import { relevantContext } from "./memory";
 import type { ChatMessage, ConversationMessage, TokenUsage, ToolDefinition, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search, WEB_SEARCH_TOOL } from "./web";
+import { abortable } from "./cancellation";
+
+const webSearchWithSignal: ToolHandler = (arguments_, signal) => search(arguments_, undefined, undefined, signal);
 
 const ICM_MARKER = "[ICM_GAP]";
 const MAX_ICM_PENDING_CHARS = 32;
@@ -68,6 +71,7 @@ export interface AgentClient {
     tools?: ToolDefinition[],
     handlers?: Record<string, ToolHandler>,
     maxRounds?: number,
+    signal?: AbortSignal,
   ): Promise<ModelReply>;
 }
 
@@ -105,9 +109,10 @@ async function runAgent(
   instruction = "",
   webMode: WebMode = "auto",
   localWorkspace?: LocalWorkspace,
-  webSearch: ToolHandler = search,
+  webSearch: ToolHandler = webSearchWithSignal,
   images: UserImageContentPart[] = [],
   history: ConversationMessage[] = [],
+  signal?: AbortSignal,
 ): Promise<ModelReply> {
   const useWeb = shouldUseWeb(task, webMode);
   let completeInstruction = instruction;
@@ -134,6 +139,7 @@ async function runAgent(
     tools.length > 0 ? tools : undefined,
     handlers,
     localWorkspace?.commandsEnabled ? MAX_CODING_TOOL_CALL_ROUNDS : undefined,
+    signal,
   );
 }
 
@@ -144,7 +150,7 @@ export async function singleAgent(
   webMode: WebMode = "auto",
   onContent?: (content: string) => void,
   localWorkspace?: LocalWorkspace,
-  webSearch: ToolHandler = search,
+  webSearch: ToolHandler = webSearchWithSignal,
   images: UserImageContentPart[] = [],
   history: ConversationMessage[] = [],
 ): Promise<RunResult> {
@@ -204,10 +210,12 @@ export async function toaAgent(
   task: string,
   config: ModelConfig,
   workers: number,
-  webSearch: ToolHandler = search,
+  webSearch: ToolHandler = webSearchWithSignal,
   images: UserImageContentPart[] = [],
   history: ConversationMessage[] = [],
+  signal?: AbortSignal,
 ): Promise<RunResult> {
+  signal?.throwIfAborted();
   if (workers !== 1 && workers !== 2) throw new Error("ToA workers must be 1 or 2.");
   assertImageCount(images.length);
   assertImageInputSupported(config.model, images.length);
@@ -220,11 +228,13 @@ export async function toaAgent(
   const packets = await Promise.all(roles.map(async (role) => {
     try {
       const reply = await withTimeout(
-        runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images, history),
+        (workerSignal) => runAgent(client, task, config, allocation, WORKER_PROMPTS[role], "on", undefined, webSearch, images, history, workerSignal),
         config.toaTimeout * 1_000,
+        signal,
       );
       return { role, content: reply.content, usage: reply.usage };
     } catch (error) {
+      signal?.throwIfAborted();
       failures.push(`${role}: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
@@ -234,7 +244,8 @@ export async function toaAgent(
 Treat a worker's unsupported statement as an open question. Separate evidence, inference,
 risks, and remaining uncertainty. Include cited URLs from the packets when available.
 Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefined))}`;
-  const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch, images, history);
+  signal?.throwIfAborted();
+  const reply = await runAgent(client, task, config, workingBudget - allocation * workers, synthesis, "on", undefined, webSearch, images, history, signal);
   const usage: TokenUsage = { ...reply.usage, worker_count: workers };
   return applyIcm(
     client,
@@ -245,6 +256,7 @@ Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefi
     webSearch,
     images,
     history,
+    signal,
   );
 }
 
@@ -270,12 +282,13 @@ async function applyIcm(
   webSearch: ToolHandler,
   images: UserImageContentPart[],
   history: ConversationMessage[],
+  signal?: AbortSignal,
 ): Promise<RunResult> {
   if (!icmFollowUpNeeded(result.content)) return result;
   const instruction = `The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n${result.content}`;
-  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images, history);
+  const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images, history, signal);
   return {
     ...result,
     content: `${result.content.replace(/\[ICM_GAP\]/iu, "")}\n\nEvidence supplement:\n${reply.content}`,
@@ -283,18 +296,14 @@ Prior draft:\n${result.content}`;
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out")), milliseconds);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
+async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, milliseconds: number, parent?: AbortSignal): Promise<T> {
+  const controller = new AbortController();
+  const signal = parent ? AbortSignal.any([controller.signal, parent]) : controller.signal;
+  const timer = setTimeout(() => controller.abort(new Error("timed out")), milliseconds);
+  try {
+    signal.throwIfAborted();
+    return await abortable(run(signal), signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }

@@ -28,11 +28,11 @@ export async function runTask(
   options.signal?.throwIfAborted();
   if (options.toa && options.localWorkspace) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
   const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
-  const webSearch = options.webSearch ?? ((arguments_) => search(arguments_, undefined, undefined, options.signal));
+  const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
   const localWorkspace = options.localWorkspace?.withSignal(options.signal);
   const images = options.images ?? [];
   const history = options.history ?? [];
-  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, webSearch, images, history);
+  if (options.toa) return toaAgent(client, task, config, options.toaWorkers ?? 2, webSearch, images, history, options.signal);
   return singleAgent(
     client,
     task,

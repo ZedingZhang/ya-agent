@@ -11,7 +11,8 @@ import {
   toaAgent,
   type AgentClient,
 } from "../src/orchestrator";
-import type { ModelReply } from "../src/deepseek";
+import { DeepSeekClient, type FetchLike, type ModelReply } from "../src/deepseek";
+import { search } from "../src/web";
 import type { ChatMessage, ToolDefinition, ToolHandler, UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
@@ -359,5 +360,63 @@ describe("agent orchestration", () => {
 
   it("rejects more than two ToA workers", async () => {
     await expect(toaAgent(new FakeClient(), "task", new ModelConfig(), 3)).rejects.toThrow(/1 or 2/u);
+  });
+
+  it.each(["fetch", "search"])("aborts an in-flight worker %s on timeout and issues no later requests", async (pending) => {
+    vi.useFakeTimers();
+    try {
+      const workerSignals: AbortSignal[] = [];
+      const searchSignals: AbortSignal[] = [];
+      const fetcher = vi.fn<FetchLike>(async (_url, init) => {
+        const system = String(JSON.parse(String(init?.body)).messages[0]?.content);
+        if (system.includes("strongest available evidence")) {
+          const signal = init!.signal!;
+          workerSignals.push(signal);
+          if (pending === "fetch") return new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+          return Response.json({ choices: [{ message: { content: "", tool_calls: [
+            { id: "search", type: "function", function: { name: "web_search", arguments: '{"query":"evidence"}' } },
+          ] } }] });
+        }
+        return Response.json({ choices: [{ message: { content: "partial synthesis" } }] });
+      });
+      const searchFetcher = vi.fn<FetchLike>(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        const signal = init!.signal!;
+        searchSignals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }));
+      const webSearch: ToolHandler = (args, signal) => search(args, searchFetcher, undefined, signal);
+      const running = toaAgent(new DeepSeekClient("key", fetcher), "Compare options", new ModelConfig({ toaTimeout: 30 }), 1, webSearch);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(workerSignals).toHaveLength(1);
+      if (pending === "search") expect(searchSignals).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await running).toMatchObject({ content: "partial synthesis", partial: true });
+      expect(workerSignals[0]?.aborted).toBe(true);
+      if (pending === "search") expect(searchSignals[0]?.aborted).toBe(true);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(searchFetcher).toHaveBeenCalledTimes(pending === "search" ? 1 : 0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels all ToA workers with the task without starting synthesis", async () => {
+    const cancellation = new AbortController();
+    const signals: AbortSignal[] = [];
+    const fetcher = vi.fn<FetchLike>(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init!.signal!;
+      signals.push(signal);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+    const client = new DeepSeekClient("key", fetcher, undefined, cancellation.signal);
+    const running = toaAgent(client, "Compare options", new ModelConfig(), 2, undefined, [], [], cancellation.signal);
+    const rejected = expect(running).rejects.toThrow("Stop task");
+    expect(signals).toHaveLength(2);
+    cancellation.abort(new Error("Stop task"));
+    await rejected;
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

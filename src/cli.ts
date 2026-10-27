@@ -338,10 +338,10 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
     if (renderer) write(io.stdout, "\n[Ya single result]\n\n");
 
     const client = runtime.createClient(apiKey, cancellation.signal);
-    const webSearch = (arguments_: Parameters<typeof search>[0]): Promise<string> => search(arguments_, undefined, undefined, cancellation.signal);
+    const webSearch = (arguments_: Parameters<typeof search>[0], signal?: AbortSignal): Promise<string> => search(arguments_, undefined, undefined, signal ?? cancellation.signal);
     let result: RunResult;
     if (options.toa) {
-      result = await toaAgent(client, task, config, Number(options.toaWorkers), webSearch, images);
+      result = await toaAgent(client, task, config, Number(options.toaWorkers), webSearch, images, [], cancellation.signal);
     } else {
       result = await singleAgent(client, task, config, options.web, emit, workspace, webSearch, images);
     }

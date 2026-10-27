@@ -350,7 +350,13 @@ export class DeepSeekClient {
     tools?: ToolDefinition[],
     toolHandlers: Record<string, ToolHandler> = {},
     maxRounds = MAX_TOOL_CALL_ROUNDS,
+    signal?: AbortSignal,
   ): Promise<ModelReply> {
+    if (signal) {
+      const combined = this.signal ? AbortSignal.any([this.signal, signal]) : signal;
+      return new DeepSeekClient(this.apiKey, this.fetcher, this.sleep, combined)
+        .runWithTools(messages, config, maxTokens, tools, toolHandlers, maxRounds);
+    }
     if (!Number.isInteger(maxRounds) || maxRounds < 1 || maxRounds > 40) throw new Error("Tool rounds must be an integer from 1 to 40.");
     const transientMessages = [...messages];
     for (let round = 0; round <= maxRounds; round += 1) {
@@ -370,7 +376,9 @@ export class DeepSeekClient {
             if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
               throw new Error("Tool arguments must be a JSON object.");
             }
-            result = await handler(parsed as ToolArguments);
+            result = await (this.signal
+              ? handler(parsed as ToolArguments, this.signal)
+              : handler(parsed as ToolArguments));
             this.signal?.throwIfAborted();
           } catch (error) {
             this.signal?.throwIfAborted();
