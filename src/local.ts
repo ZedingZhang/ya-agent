@@ -35,7 +35,7 @@ import { dataHome } from "./config";
 import { abortable } from "./cancellation";
 import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
 import { createFileChange, type FileChange } from "./file-diff";
-import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
+import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_LINES, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
 export const MAX_TEXT_BYTES = 1024 * 1024;
@@ -78,7 +78,7 @@ export const LOCAL_RUN_TOOL: ToolDefinition = {
     parameters: {
       type: "object",
       properties: {
-        command: { type: "string", minLength: 1, maxLength: 8_192 },
+        command: { type: "string", minLength: 1, maxLength: 8_192, description: `At most ${MAX_COMMAND_LINES} lines. Consecutive blank or whitespace-only lines are refused.` },
         cwd: { type: "string", description: "Working directory relative to the workspace (default: .)." },
         timeout_seconds: { type: "integer", minimum: 1, maximum: MAX_COMMAND_TIMEOUT_SECONDS, description: "Timeout in seconds (default: 120, max: 600)." },
       },
@@ -389,9 +389,10 @@ export class LocalWorkspace {
     const cwd = this.resolveInput(cwdInput);
     try {
       if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error(`Not a directory: ${cwd}`);
+      const lineCount = command.split("\n").length;
       const action: LocalAction = {
         operation: "run", paths: [cwd],
-        summary: `Run command:\n${command}\nDirectory: ${cwd}\nTimeout: ${timeout}s\nRuns with your account permissions and can modify files or access the network.`,
+        summary: `Run command (${lineCount} ${lineCount === 1 ? "line" : "lines"}):\n${command}\nDirectory: ${cwd}\nTimeout: ${timeout}s\nRuns with your account permissions and can modify files or access the network.`,
       };
       if (!(await this.confirmed(action))) {
         return JSON.stringify({ status: "denied", command, cwd: this.relativePath(cwd), reason: "User declined this command. It was not executed." });

@@ -7,6 +7,7 @@ import { stripTerminalControls } from "./terminal";
 export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 600;
 export const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
+export const MAX_COMMAND_LINES = 50;
 
 // Inherit locations and display settings needed by common project tools, not
 // arbitrary application configuration, credentials or authentication helpers.
@@ -28,6 +29,13 @@ export function validateCommand(command: unknown): asserts command is string {
   // LF and tab are visible shell whitespace; other controls can disguise approval text.
   if (/[\x00-\x08\x0B-\x1F\x7F-\x9F]/u.test(command)) {
     throw new Error("Command contains unsafe control characters. Use printable text, LF and tab only.");
+  }
+  const lines = command.split("\n");
+  if (lines.length > MAX_COMMAND_LINES) throw new Error(`Command must contain at most ${MAX_COMMAND_LINES} lines.`);
+  let blankLines = 0;
+  for (const line of lines) {
+    blankLines = line.trim() ? 0 : blankLines + 1;
+    if (blankLines > 1) throw new Error("Consecutive blank or whitespace-only command lines are not allowed.");
   }
 }
 

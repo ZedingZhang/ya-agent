@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, localConfirm, type CliIo } from "../src/cli";
 import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
-import { appendAuditRecord, auditLogFiles, type LocalAction } from "../src/local";
+import { appendAuditRecord, auditLogFiles, LocalWorkspace, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
 import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
@@ -467,6 +467,18 @@ describe("CLI", () => {
     expect(await localConfirm(action, true, capture.io)).toBe(false);
     expect(capture.prompts).toEqual(["Run this command? [y/N] "]);
     expect(capture.stdout.output).toContain("npm test");
+  });
+
+  it("shows the full bounded command and line count next to CLI approval", async () => {
+    const capture = fakeIo(true, ["n"]);
+    const workspace = new LocalWorkspace(home.path, (action) => localConfirm(action, false, capture.io), undefined, { commandsEnabled: true });
+    const command = "echo first\n\n\techo last";
+    await workspace.run({ command });
+    expect(capture.stdout.output).toContain(`Run command (3 lines):\n${command}`);
+    expect(capture.prompts).toEqual(["Run this command? [y/N] "]);
+    const output = capture.stdout.output;
+    await expect(workspace.run({ command: `echo hidden;${"\n".repeat(8_000)}npm test` })).rejects.toThrow(/lines/u);
+    expect(capture.stdout.output).toBe(output);
   });
 
   it("renders controls visibly in approval summaries and diffs", async () => {

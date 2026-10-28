@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_COMMAND_OUTPUT_BYTES, runCommand, type CommandEvent, type CommandResult } from "../src/commands";
+import { MAX_COMMAND_LINES, MAX_COMMAND_OUTPUT_BYTES, runCommand, validateCommand, type CommandEvent, type CommandResult } from "../src/commands";
 import { ModelConfig } from "../src/config";
 import { DeepSeekClient, type FetchLike } from "../src/deepseek";
 import { auditLogPath, LocalWorkspace, type LocalAction } from "../src/local";
@@ -38,6 +38,25 @@ describe("command execution and verification", () => {
     const onEvent = vi.fn();
     expect(() => execute("echo visible & rem \x1b[2K\recho visible", { onEvent })).toThrow("unsafe control");
     expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(["\n".repeat(8_000), "\n \n\t\n", "\n\u00a0\n \n"])("rejects blank-line padding before approval or direct execution", async (padding) => {
+    const command = `echo hidden;${padding}npm test`;
+    const confirm = vi.fn(() => true);
+    const workspace = new LocalWorkspace(root, confirm, undefined, { commandsEnabled: true });
+    await expect(workspace.run({ command })).rejects.toThrow(/lines/u);
+    expect(() => execute(command)).toThrow(/lines/u);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("allows bounded multiline commands without changing their text", async () => {
+    const command = "echo first\n\n\techo last";
+    const confirm = vi.fn(() => false);
+    const workspace = new LocalWorkspace(root, confirm, undefined, { commandsEnabled: true });
+    await workspace.run({ command });
+    expect(confirm.mock.calls[0]?.[0].summary).toContain(`Run command (3 lines):\n${command}\nDirectory:`);
+    expect(() => validateCommand(Array.from({ length: MAX_COMMAND_LINES }, () => "echo ok").join("\n"))).not.toThrow();
+    expect(() => validateCommand(Array.from({ length: MAX_COMMAND_LINES + 1 }, () => "echo ok").join("\n"))).toThrow(/at most 50/u);
   });
 
   it("passes runTask cancellation to commands without a separate workspace signal", async () => {
