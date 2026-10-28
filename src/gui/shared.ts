@@ -72,7 +72,9 @@ export type TaskEvent =
   | { type: "activity"; activity: LocalActivity }
   | { type: "command"; event: CommandEvent }
   | { type: "file-change"; change: FileChange }
-  | { type: "local-action"; id: string; action: LocalAction };
+  | { type: "local-action"; id: string; action: LocalAction }
+  | { type: "local-action-expired"; id: string }
+  | { type: "local-action-resolved"; id: string };
 
 /** Private transport marker; never forwarded to the renderer's task event listener. */
 export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };

@@ -64,7 +64,9 @@ type TaskEvent =
   | { type: "activity"; activity: LocalActivity }
   | { type: "command"; event: ShellCommandEvent }
   | { type: "file-change"; change: FileChange }
-  | { type: "local-action"; id: string; action: LocalAction };
+  | { type: "local-action"; id: string; action: LocalAction }
+  | { type: "local-action-expired"; id: string }
+  | { type: "local-action-resolved"; id: string };
 
 type ShellCommandEvent =
   | { type: "start"; id: string; command: string; cwd: string }
@@ -146,6 +148,7 @@ const TEXT = {
     accountActive: "DeepSeek account available", accountLoggingOut: "Signing out…",
     accountRevokeFailed: "Signed out locally. The platform session could not be revoked.",
     accountInvalid: "Saved sign-in is invalid. Sign in again or clear it.", accountClear: "Clear saved sign-in",
+    approvalExpired: "Approval expired; the action was not approved.",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
@@ -187,6 +190,7 @@ const TEXT = {
     accountActive: "DeepSeek 账号可用", accountLoggingOut: "正在退出登录…",
     accountRevokeFailed: "已在本机退出，未能撤销平台会话。",
     accountInvalid: "保存的登录信息无效，请重新登录或清除。", accountClear: "清除登录信息",
+    approvalExpired: "批准已过期，此操作未获批准。",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
@@ -202,7 +206,8 @@ let state: AppState;
 let currentDirectory = ".";
 let activeAnswer: HTMLElement | undefined;
 let activeAnswerText = "";
-let pendingAction: { id: string; action: LocalAction } | undefined;
+let pendingAction: { id: string; action: LocalAction; responding?: boolean } | undefined;
+let actionExpired = false;
 let activities: LocalActivity[] = [];
 let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
@@ -852,6 +857,7 @@ async function runTask(): Promise<void> {
   activeAnswer = appendTask(task, taskImages);
   activeAnswerText = "";
   lastAnswer = "";
+  actionExpired = false;
   activities = [];
   currentSession.activities = activities;
   commandLogs.clear();
@@ -1210,10 +1216,12 @@ function renderActivities(): void {
 function renderPendingAction(): void {
   const empty = element<HTMLParagraphElement>("action-empty");
   const content = element<HTMLDivElement>("action-content");
+  element<HTMLButtonElement>("action-approve").disabled = Boolean(pendingAction?.responding);
+  element<HTMLButtonElement>("action-deny").disabled = Boolean(pendingAction?.responding);
   element<HTMLButtonElement>("toggle-activity").classList.toggle("has-pending", Boolean(pendingAction));
   if (!pendingAction) {
     empty.hidden = false;
-    empty.textContent = t("noAction");
+    empty.textContent = t(actionExpired ? "approvalExpired" : "noAction");
     content.hidden = true;
     return;
   }
@@ -1226,11 +1234,15 @@ function renderPendingAction(): void {
 }
 
 function decideLocalAction(approved: boolean): void {
-  if (!pendingAction) return;
-  bridge.respondLocalAction(pendingAction.id, approved);
-  pendingAction = undefined;
+  if (!pendingAction || pendingAction.responding) return;
+  pendingAction.responding = true;
   renderPendingAction();
-  setStatus(t("working"), "busy");
+  try { bridge.respondLocalAction(pendingAction.id, approved); }
+  catch (error) {
+    pendingAction.responding = false;
+    renderPendingAction();
+    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+  }
 }
 
 function renderMemory(): void {
@@ -1690,11 +1702,22 @@ function registerEvents(): void {
       persistSessions();
       void renderFiles();
     } else if (event.type === "local-action") {
+      actionExpired = false;
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();
       switchPage("workspace");
       setDrawer("activity");
       setStatus(t("waiting"), "busy");
+    } else if (event.type === "local-action-expired" && pendingAction?.id === event.id) {
+      pendingAction = undefined;
+      actionExpired = true;
+      renderPendingAction();
+      setStatus(t("approvalExpired"), "error");
+    } else if (event.type === "local-action-resolved" && pendingAction?.id === event.id) {
+      pendingAction = undefined;
+      actionExpired = false;
+      renderPendingAction();
+      if (document.body.classList.contains("task-running")) setStatus(t("working"), "busy");
     }
   });
 }

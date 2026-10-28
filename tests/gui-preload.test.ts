@@ -88,4 +88,15 @@ describe("GUI task event delivery", () => {
     await expect(bridge.runTask(options)).rejects.toThrow("Renderer disconnected");
     expect(mocks.listeners.size).toBe(0);
   });
+
+  it("forwards approval expiration and acceptance events to the renderer", () => {
+    const listener = vi.fn();
+    const unsubscribe = bridge.onTaskEvent(listener);
+    emit({ type: "local-action-expired", id: "expired" });
+    emit({ type: "local-action-resolved", id: "accepted" });
+    expect(listener.mock.calls.map(([event]) => event)).toEqual([
+      { type: "local-action-expired", id: "expired" }, { type: "local-action-resolved", id: "accepted" },
+    ]);
+    unsubscribe();
+  });
 });
