@@ -10,7 +10,10 @@ const credentials = {
   APPLE_ID: "synthetic@example.invalid", APPLE_APP_SPECIFIC_PASSWORD: "synthetic-apple-password", APPLE_TEAM_ID: "SYNTHETIC1",
 };
 
-describe("macOS release packaging", () => {
+// These integration tests launch many Node and shell processes through Git Bash
+// on Windows. Bound subprocesses first, with time left to assert and clean up.
+const subprocessTimeout = process.platform === "win32" ? 30_000 : 20_000;
+describe("macOS release packaging", { timeout: subprocessTimeout + 10_000 }, () => {
   let home: TempHome;
   let environment: NodeJS.ProcessEnv;
   beforeEach(() => {
@@ -66,7 +69,7 @@ describe("macOS release packaging", () => {
     ? readFileSync(environment.TOOL_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { tool: string; args: string[]; csc?: string; auto?: string; cscInputs: string[] })
     : [];
   const run = (extra: NodeJS.ProcessEnv = {}, script = "package-macos.sh", args: string[] = []) => spawnSync(bash,
-    [`.github/scripts/${script}`, ...args], { cwd: home.path, env: { ...environment, ...extra }, encoding: "utf8", timeout: 20_000 });
+    [`.github/scripts/${script}`, ...args], { cwd: home.path, env: { ...environment, ...extra }, encoding: "utf8", timeout: subprocessTimeout });
   const modeFile = () => join(home.path, "release-cli", "ya-macos-arm64.signing-mode");
 
   it("builds and verifies an ad-hoc GUI with no credentials", () => {
@@ -94,7 +97,7 @@ describe("macOS release packaging", () => {
     expect(calls.some((call) => call.tool === "xcrun" && call.args[0] === "stapler" && call.args[1] === "validate")).toBe(true);
     expect(calls.some((call) => call.tool === "spctl")).toBe(true);
     expect(calls.some((call) => call.tool === "security" && call.args[0] === "delete-keychain")).toBe(true);
-  }, 15_000);
+  });
 
   it.each(["", "synthetic-ambient-input"])("removes all ambient certificate inputs from the ad-hoc builder (%j)", (value) => {
     const inputs = Object.fromEntries(["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_KEYCHAIN", "CSC_INSTALLER_LINK", "CSC_INSTALLER_KEY_PASSWORD"]
@@ -116,7 +119,7 @@ describe("macOS release packaging", () => {
     const command = runLine[1] === ">-"
       ? [...step.slice(runLine.index + runLine[0].length).matchAll(/\n {10}(.+)/gu)].map((match) => match[1]).join(" ")
       : runLine[1]!;
-    const result = spawnSync(bash, ["-c", command], { cwd: home.path, env: { ...environment, ...credentials }, encoding: "utf8", timeout: 20_000 });
+    const result = spawnSync(bash, ["-c", command], { cwd: home.path, env: { ...environment, ...credentials }, encoding: "utf8", timeout: subprocessTimeout });
     expect(result.status, result.stderr).toBe(0);
     const builder = commands().find((call) => call.tool === "npx")!;
     expect(builder.args.some((arg) => arg.endsWith("=false") || arg === "--config.mac.identity=-")).toBe(false);
