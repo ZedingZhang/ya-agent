@@ -182,18 +182,24 @@ describe("GUI pending action lifecycle", () => {
   it.each([true, false])("clears the timer on approval response %s", async (approved) => {
     const task = start();
     expect(vi.getTimerCount()).toBe(1);
+    const id = sender.send.mock.calls.at(-1)[1].id;
     respond(approved);
+    expect(sender.send).toHaveBeenLastCalledWith("task:event", { type: "local-action-resolved", id });
     await expect(task).resolves.toBe("done");
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it("times out a lost response and accepts the next task", async () => {
     const task = start();
+    const id = sender.send.mock.calls.at(-1)[1].id;
     const rejection = expect(task).rejects.toThrow("timed out");
     await vi.advanceTimersByTimeAsync(120_000);
     await rejection;
     expect(vi.getTimerCount()).toBe(0);
+    expect(sender.send).toHaveBeenCalledWith("task:event", { type: "local-action-expired", id });
+    const events = sender.send.mock.calls.length;
     respond(true); // A late response must be ignored.
+    expect(sender.send.mock.calls.length).toBe(events);
     const nextTask = start();
     respond(true);
     await expect(nextTask).resolves.toBe("done");

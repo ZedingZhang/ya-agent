@@ -359,6 +359,8 @@ function registerIpc(): void {
           const id = randomUUID();
           const timer = setTimeout(() => {
             pendingActions.delete(id);
+            try { send({ type: "local-action-expired", id }); }
+            catch { /* A disconnected renderer cannot keep the approval alive. */ }
             reject(new Error("Local action approval timed out after 120 seconds."));
           }, LOCAL_ACTION_TIMEOUT_MS);
           pendingActions.set(id, { resolve: resolvePromise, reject, timer });
@@ -400,6 +402,8 @@ function registerIpc(): void {
     if (!pending) return;
     pendingActions.delete(raw.id);
     clearTimeout(pending.timer);
+    try { sendTaskEvent({ type: "local-action-resolved", id: raw.id }); }
+    catch { /* Approval was accepted; renderer lifecycle handling owns disconnection. */ }
     pending.resolve(Boolean(raw.approved));
   });
 
@@ -955,6 +959,53 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function verifyApprovalLifecycle(window: BrowserWindow): Promise<void> {
+  const language = await window.webContents.executeJavaScript("state.language") as Language;
+  try {
+    for (const locale of LANGUAGES) {
+      const expiredId = `smoke-expired-${locale}`;
+      const acceptedId = `smoke-accepted-${locale}`;
+      await window.webContents.executeJavaScript(`
+        state.language = ${JSON.stringify(locale)}; applyLanguage();
+        pendingAction = { id: ${JSON.stringify(expiredId)}, action: { operation: 'write', paths: ['expired.txt'], summary: 'Expired action' } };
+        actionExpired = false; setRunning(true); renderPendingAction(); setDrawer('activity'); setStatus(t('waiting'), 'busy');
+      `);
+      sendTaskEvent({ type: "local-action-expired", id: expiredId });
+      const expired = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        const hidden = !pendingAction && document.querySelector('#action-content').hidden;
+        const notice = document.querySelector('#action-empty').textContent === t('approvalExpired');
+        const status = document.querySelector('#app-status').textContent;
+        document.querySelector('#action-approve').click();
+        bridge.respondLocalAction(${JSON.stringify(expiredId)}, true);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const lateIgnored = document.querySelector('#app-status').textContent === status && status === t('approvalExpired');
+        pendingAction = { id: ${JSON.stringify(acceptedId)}, action: { operation: 'write', paths: ['accepted.txt'], summary: 'Await acknowledgement' } };
+        actionExpired = false; renderPendingAction(); setStatus(t('waiting'), 'busy');
+        decideLocalAction(true);
+        const awaitsAck = pendingAction?.id === ${JSON.stringify(acceptedId)} && pendingAction.responding
+          && document.querySelector('#action-approve').disabled && document.querySelector('#app-status').textContent === t('waiting');
+        return hidden && notice && lateIgnored && awaitsAck;
+      })()`) as boolean;
+      if (!expired) throw new Error(`Approval expiration or late-click feedback failed (${locale}).`);
+      // An older event must not clear a newer pending action.
+      sendTaskEvent({ type: "local-action-expired", id: expiredId });
+      sendTaskEvent({ type: "local-action-resolved", id: acceptedId });
+      const accepted = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        return !pendingAction && document.querySelector('#action-content').hidden
+          && document.querySelector('#app-status').textContent === t('working');
+      })()`) as boolean;
+      if (!accepted) throw new Error(`Accepted approval acknowledgement was not displayed (${locale}).`);
+    }
+  } finally {
+    await window.webContents.executeJavaScript(`pendingAction = undefined; actionExpired = false; setRunning(false);
+      state.language = ${JSON.stringify(language)}; applyLanguage(); renderPendingAction(); setStatus(t('done'));`);
+  }
+}
+
 async function verifyConversationContext(window: BrowserWindow): Promise<void> {
   const originalController = controller;
   const requests: ChatMessage[][] = [];
@@ -1337,6 +1388,7 @@ app.whenReady().then(async () => {
     await verifySessionNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);
+    await verifyApprovalLifecycle(window);
     await verifyConversationContext(window);
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
