@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { stripTerminalControls } from "./terminal";
+import { TerminalControlFilter } from "./terminal";
 
 export const DEFAULT_COMMAND_TIMEOUT_SECONDS = 120;
 export const MAX_COMMAND_TIMEOUT_SECONDS = 600;
@@ -82,7 +82,7 @@ class OutputTail {
     // A byte-limited tail can start inside a multi-byte codepoint.
     let start = 0;
     while (start < this.tail.length && (this.tail[start]! & 0xc0) === 0x80) start += 1;
-    return stripTerminalControls(this.tail.subarray(start).toString("utf8"));
+    return this.tail.subarray(start).toString("utf8");
   }
 }
 
@@ -110,6 +110,7 @@ export function runCommand(options: CommandOptions): Promise<CommandResult> {
     const stdout = new OutputTail();
     const stderr = new OutputTail();
     const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
+    const controls = { stdout: new TerminalControlFilter(), stderr: new TerminalControlFilter() };
     const pending = { stdout: new OutputTail(), stderr: new OutputTail() };
     let outputTimer: ReturnType<typeof setTimeout> | undefined;
     const flushOutput = (): void => {
@@ -175,6 +176,7 @@ export function runCommand(options: CommandOptions): Promise<CommandResult> {
 
     const output = (stream: "stdout" | "stderr", text: string): void => {
       if (finished) return;
+      text = controls[stream].write(text);
       const tail = stream === "stdout" ? stdout : stderr;
       tail.append(text);
       pending[stream].append(text);

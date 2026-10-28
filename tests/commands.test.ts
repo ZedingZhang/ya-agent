@@ -254,6 +254,17 @@ describe("command execution and verification", () => {
     expect(denied.commandResults).toEqual([]);
   });
 
+  it("filters command controls across output flushes without leaking their payloads", async () => {
+    writeFileSync(join(root, "controls.cjs"), `process.stdout.write('safe\\x1b]0;hidden'); process.stderr.write('separate');
+      setTimeout(() => process.stdout.write(' payload\\x07end'), 250);`);
+    const events: CommandEvent[] = [];
+    const result = await execute(nodeCommand("controls.cjs"), { onEvent: (event) => events.push(event) });
+    expect(result.stdout).toBe("safeend");
+    expect(result.stderr).toBe("separate");
+    const streamed = events.filter((event) => event.type === "output" && event.stream === "stdout");
+    expect(streamed.map((event) => event.type === "output" ? event.text : "").join("")).toBe("safeend");
+  });
+
   it.each([
     { command: "" }, { command: "a\0b" }, { command: "x".repeat(8_193) },
     { command: "echo safe & rem \x1b[2K\recho safe" }, { command: "echo a\bb" },

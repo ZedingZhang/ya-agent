@@ -1,7 +1,7 @@
 import type { OutputFormat } from "./types";
 
-export const ANSI_ESCAPE = /\x1B(?:[@-_][0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/gu;
-export const CONTROL_CHARACTERS = /[\x00-\x08\x0B-\x1F\x7F]/gu;
+export const ANSI_ESCAPE = /(?:\x1B[\]PX^_]|[\x90\x98\x9D-\x9F])[\s\S]*?(?:\x07|\x1B\\|\x9C|$)|(?:\x1B\[|\x9B)[0-?]*[ -/]*(?:[@-~]|$)|\x1B[ -/]*[0-~]/gu;
+export const CONTROL_CHARACTERS = /[\x00-\x08\x0B-\x1F\x7F-\x9F]/gu;
 export const HEADING = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u;
 export const HORIZONTAL_RULE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/u;
 export const UNORDERED_LIST = /^(\s*)[-+*]\s+(.+)$/u;
@@ -14,7 +14,49 @@ export const BOLD = /(?:\*\*|__)(.+?)(?:\*\*|__)/gu;
 export const ITALIC = /(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/gu;
 
 export function stripTerminalControls(text: string): string {
-  return text.replace(ANSI_ESCAPE, "").replace(CONTROL_CHARACTERS, "");
+  return new TerminalControlFilter().write(text);
+}
+
+/** Carry escape state across chunks without retaining control-string payloads. */
+export class TerminalControlFilter {
+  private state: "text" | "escape" | "intermediate" | "csi" | "string" | "string-escape" = "text";
+
+  write(text: string): string {
+    const output: string[] = [];
+    for (const character of text) {
+      const code = character.charCodeAt(0);
+      if (this.state === "text") this.plain(character, code, output);
+      else if (this.state === "string" || this.state === "string-escape") {
+        if (code === 0x07 || code === 0x9c || (this.state === "string-escape" && character === "\\")) this.state = "text";
+        else if (code === 0x1b) this.state = "string-escape";
+        else this.state = "string";
+      } else if (code === 0x1b) this.state = "escape";
+      else if (code < 0x20 || code === 0x7f) continue;
+      else if (this.state === "escape") {
+        if ("]PX^_".includes(character)) this.state = "string";
+        else if (character === "[") this.state = "csi";
+        else if (code >= 0x20 && code <= 0x2f) this.state = "intermediate";
+        else {
+          this.state = "text";
+          if (code < 0x30 || code > 0x7e) this.plain(character, code, output);
+        }
+      } else if (this.state === "csi") {
+        if (code >= 0x40 && code <= 0x7e) this.state = "text";
+        else if (code < 0x20 || code > 0x3f) { this.state = "text"; this.plain(character, code, output); }
+      } else if (this.state === "intermediate") {
+        if (code >= 0x30 && code <= 0x7e) this.state = "text";
+        else if (code < 0x20 || code > 0x2f) { this.state = "text"; this.plain(character, code, output); }
+      }
+    }
+    return output.join("");
+  }
+
+  private plain(character: string, code: number, output: string[]): void {
+    if (code === 0x1b) this.state = "escape";
+    else if (code === 0x9b) this.state = "csi";
+    else if ([0x90, 0x98, 0x9d, 0x9e, 0x9f].includes(code)) this.state = "string";
+    else if (code === 0x09 || code === 0x0a || (code >= 0x20 && (code < 0x7f || code > 0x9f))) output.push(character);
+  }
 }
 
 /** Show untrusted approval text without allowing it to move or erase the cursor. */
@@ -115,6 +157,7 @@ export function formatOutput(text: string, outputFormat: OutputFormat, isTty: bo
 }
 
 export class StreamingMarkdownRenderer {
+  private readonly controls = new TerminalControlFilter();
   private pending = "";
   private previous?: string;
   private code = false;
@@ -125,7 +168,7 @@ export class StreamingMarkdownRenderer {
   }
 
   write(chunk: string): string {
-    this.pending += stripTerminalControls(chunk);
+    this.pending += this.controls.write(chunk);
     const output: string[] = [];
     while (this.pending.includes("\n")) {
       const newline = this.pending.indexOf("\n");
