@@ -28,7 +28,7 @@ function securityInteractiveLine(argv: readonly string[]): string {
     throw new Error(INTERACTIVE_LINE_BREAK);
   }
   const line = argv.map(quoteSecurityArgument).join(" ");
-  if (line.length > MAX_SECURITY_INTERACTIVE_LINE) {
+  if (Buffer.byteLength(line, "utf8") > MAX_SECURITY_INTERACTIVE_LINE) {
     throw new Error(INTERACTIVE_LINE_TOO_LONG);
   }
   return line;
