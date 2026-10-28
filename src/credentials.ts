@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataHome } from "./config";
+import { runSecurityInteractive } from "./keychain";
 
 export const DEEPSEEK_PLATFORM = "https://platform.deepseek.com";
 const ACCOUNT_KEYCHAIN_SERVICE = "Ya DeepSeek Platform Account";
@@ -53,14 +54,18 @@ function accountKeychain(operation: "find" | "add" | "delete", token?: string): 
   if (operation === "find") args.push("-w");
   if (operation === "add") args.push("-U", "-w", token!);
   try {
-    const value = execFileSync("/usr/bin/security", args, {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000,
-    });
+    // The grant is written on stdin. find and delete do not carry it, so they
+    // stay direct argv invocations and still surface status 44 for a missing item.
+    const value = operation === "add"
+      ? runSecurityInteractive(args, "/usr/bin/security", { timeout: 15_000 })
+      : execFileSync("/usr/bin/security", args, {
+          encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 15_000,
+        });
     return operation === "find" ? value.replace(/\r?\n$/u, "") : undefined;
   } catch (error) {
     // security returns the low byte of errSecItemNotFound (-25300), or 44.
     if (operation !== "add" && (error as { status?: number }).status === 44) return undefined;
-    // Child-process errors can contain the full argv and therefore the grant.
+    // Never surface the child-process error. It repeats the command invocation.
     throw new Error("Could not access the DeepSeek account in macOS Keychain. Unlock Keychain and try again; any existing credential file is retained.");
   }
 }
