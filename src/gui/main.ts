@@ -1058,6 +1058,22 @@ async function verifyApprovalAccessibility(window: BrowserWindow): Promise<void>
         return document.activeElement?.id === 'toggle-files' && document.querySelector('#toggle-activity').getAttribute('aria-label') === t('activity');
       })()`) as boolean;
       if (!restored) throw new Error(`Approval did not restore prior focus and accessible name (${language}).`);
+      await window.webContents.executeJavaScript(`setRunning(false); document.querySelector('#task-input').focus(); setRunning(true);
+        // Hidden smoke windows may retain a disabled input as activeElement until explicitly blurred.
+        document.activeElement?.blur();
+        if (document.activeElement !== document.body) throw new Error('Expected document focus before approval.');`);
+      sendTaskEvent({ type: "local-action", id: `${id}-disabled-input`, action: { operation: "write", paths: [], summary } });
+      await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (!pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      })()`);
+      sendTaskEvent({ type: "local-action-resolved", id: `${id}-disabled-input` });
+      const fallback = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        return document.activeElement?.id === 'toggle-activity';
+      })()`) as boolean;
+      if (!fallback) throw new Error(`Approval did not restore usable focus after the composer was disabled (${language}).`);
       sendTaskEvent({ type: "local-action", id: `${id}-expired`, action: { operation: "write", paths: [], summary } });
       await window.webContents.executeJavaScript(`(async () => {
         const deadline = Date.now() + 3000;

@@ -1251,8 +1251,11 @@ function clearPendingAction(expired = actionExpired): void {
   actionExpired = expired;
   renderPendingAction();
   if (restore) {
-    if (target?.isConnected && !target.matches(":disabled") && target.getClientRects().length > 0) target.focus({ preventScroll: true });
-    else element<HTMLButtonElement>("toggle-activity").focus({ preventScroll: true });
+    if (target && target !== document.body && target.isConnected && !target.matches(":disabled") && target.getClientRects().length > 0) {
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target) return;
+    }
+    element<HTMLButtonElement>("toggle-activity").focus({ preventScroll: true });
   }
 }
 
