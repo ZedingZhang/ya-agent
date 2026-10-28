@@ -248,6 +248,34 @@ describe("agent orchestration", () => {
     expect(client.calls).toHaveLength(2);
   });
 
+  it.each(["buffered", "web", "toa", "local", "command", "stream"])("removes every ICM marker from %s results without extra follow-ups", async (mode) => {
+    const client = new FakeClient();
+    const draft = "Draft [ICM_GAP] and [icm_gap] and [IcM_GaP].";
+    const supplement = "Evidence [icm_gap] and [ICM_GAP].";
+    client.runWithTools = async (messages) => {
+      client.calls.push({ messages });
+      const system = String(messages[0]?.content);
+      if (system.includes("strongest available evidence")) return reply("worker packet");
+      return reply(system.includes("prior draft identifies") ? supplement : draft);
+    };
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+      for (const part of [draft.slice(0, 10), draft.slice(10, 22), draft.slice(22)]) onContent(part);
+      return reply(draft);
+    };
+    const workspace = mode === "local" || mode === "command"
+      ? new LocalWorkspace(home.path, () => true, undefined, { commandsEnabled: mode === "command" }) : undefined;
+    const chunks: string[] = [];
+    const result = mode === "toa" ? await toaAgent(client, "Explain this", new ModelConfig(), 1, () => "[]")
+      : await singleAgent(client, "Explain this", new ModelConfig(), mode === "web" ? "on" : "off",
+        mode === "stream" ? (chunk) => chunks.push(chunk) : undefined, workspace, () => "[]");
+    expect(result.content).not.toMatch(/\[icm_gap\]/iu);
+    expect(result.content).toContain("Draft  and  and .");
+    expect(client.calls).toHaveLength(mode === "toa" ? 3 : mode === "command" || mode === "stream" ? 1 : 2);
+    if (mode === "command") expect(result.content).not.toContain("Evidence supplement:");
+    else expect(result.content).toContain("Evidence supplement:\nEvidence  and .");
+    if (mode === "stream") expect(chunks.join("")).toBe(result.content);
+  });
+
   it("runs bounded evidence and risk workers before synthesis", async () => {
     const client = new FakeClient();
     client.runWithTools = async (messages) => {

@@ -1006,6 +1006,52 @@ async function verifyApprovalLifecycle(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function verifyIcmHistory(window: BrowserWindow): Promise<void> {
+  const originalController = controller;
+  let requests = 0;
+  const fetcher: FetchLike = async (_input, init) => {
+    requests += 1;
+    const payload = JSON.parse(String(init?.body)) as { messages: ChatMessage[]; stream: boolean };
+    const supplement = String(payload.messages[0]?.content).includes("prior draft identifies");
+    const content = supplement ? "Evidence [icm_gap] and [ICM_GAP]." : "Draft [ICM_GAP] and [icm_gap].";
+    return new Response(payload.stream
+      ? `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\ndata: [DONE]\n\n`
+      : JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
+  };
+  controller = new GuiController((apiKey, task, config, options = {}) => runTask(apiKey, task, config, {
+    ...options, clientFactory: (key, signal) => new DeepSeekClient(key, fetcher, undefined, signal),
+  }));
+  controller.setSessionApiKey("smoke-only-key");
+  let fixture: { id: string; originalId: string; clean: boolean } | undefined;
+  try {
+    fixture = await window.webContents.executeJavaScript(`(async () => {
+      const originalId = currentSession.id;
+      state = await bridge.state();
+      const session = createSession(); await selectSession(session);
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#toa-enabled').checked = false;
+      document.querySelector('#web-mode').value = 'off'; syncWorkspaceControls();
+      document.querySelector('#task-input').value = 'Check answer cleanup'; await runTask();
+      const answer = currentSession.turns.at(-1).answer;
+      return { id: session.id, originalId, clean: answer.includes('Evidence supplement:') && !answer.toLowerCase().includes('[icm_gap]') };
+    })()`) as typeof fixture;
+    if (!fixture?.clean || requests !== 2) throw new Error("ICM result cleanup or single follow-up failed in the GUI.");
+    await window.loadFile(rendererFile);
+    await verifyRenderer(window);
+    const restored = await window.webContents.executeJavaScript(`currentSession.id === ${JSON.stringify(fixture.id)}
+      && !JSON.stringify(currentSession.turns).toLowerCase().includes('[icm_gap]')
+      && !document.querySelector('#timeline').textContent.toLowerCase().includes('[icm_gap]')`) as boolean;
+    if (!restored) throw new Error("ICM markers leaked into saved GUI history.");
+  } finally {
+    controller = originalController;
+    if (fixture) await window.webContents.executeJavaScript(`(async () => {
+      sessions = sessions.filter((session) => session.id !== ${JSON.stringify(fixture.id)});
+      state = await bridge.state();
+      await selectSession(sessions.find((session) => session.id === ${JSON.stringify(fixture.originalId)}));
+    })()`);
+  }
+}
+
 async function verifyConversationContext(window: BrowserWindow): Promise<void> {
   const originalController = controller;
   const requests: ChatMessage[][] = [];
@@ -1390,6 +1436,7 @@ app.whenReady().then(async () => {
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);
     await verifyConversationContext(window);
+    await verifyIcmHistory(window);
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
     await verifyAccountLogin(window);

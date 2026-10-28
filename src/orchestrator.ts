@@ -204,7 +204,7 @@ export async function singleAgent(
   const result: RunResult = { content: reply.content, mode: "single", usage: reply.usage };
   if (localWorkspace?.commandsEnabled) {
     result.commands = [...localWorkspace.commandResults];
-    return result;
+    return { ...result, content: stripIcmMarkers(result.content) };
   }
   return applyIcm(client, task, config, result, reserve, webSearch, images, history);
 }
@@ -296,14 +296,14 @@ async function applyIcm(
   signal?: AbortSignal,
   budget?: CompletionBudget,
 ): Promise<RunResult> {
-  if (!icmFollowUpNeeded(result.content)) return result;
+  if (!icmFollowUpNeeded(result.content)) return { ...result, content: stripIcmMarkers(result.content) };
   const instruction = `The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n${result.content}`;
   const reply = await runAgent(client, task, config, reserve, instruction, "on", undefined, webSearch, images, history, signal, budget);
   return {
     ...result,
-    content: `${result.content.replace(/\[ICM_GAP\]/iu, "")}\n\nEvidence supplement:\n${reply.content}`,
+    content: `${stripIcmMarkers(result.content)}\n\nEvidence supplement:\n${stripIcmMarkers(reply.content)}`,
     usage: { ...sumUsage(result.usage, reply.usage), icm_follow_up: reply.usage },
   };
 }
