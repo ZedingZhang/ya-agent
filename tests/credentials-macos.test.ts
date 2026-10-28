@@ -1,14 +1,16 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logoutDeepSeek } from "../src/account";
-import { ModelConfig } from "../src/config";
+import { dataHome, ModelConfig } from "../src/config";
 import { accountCredentialPath, clearAccountCredential, DEEPSEEK_PLATFORM, loadAccountCredential, saveAccountCredential } from "../src/credentials";
 import { DeepSeekClient } from "../src/deepseek";
 import { KEYCHAIN_SERVICE } from "../src/keychain";
 import { tempHome, type TempHome } from "./helpers";
+import { securityInvocation } from "./keychain-fixture";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -62,9 +64,11 @@ describe("macOS account Keychain storage", () => {
     expect(loadAccountCredential()).toEqual({ kind: "account", token: "synthetic-new-token" });
     expect(existsSync(accountCredentialPath())).toBe(false);
     expect(security).toHaveBeenCalled();
-    for (const [file, args] of passwordCalls()) {
-      expect(file).toBe("/usr/bin/security");
-      expect(args?.[args.indexOf("-s") + 1]).not.toBe(KEYCHAIN_SERVICE);
+    for (const call of passwordCalls()) {
+      expect(call[0]).toBe("/usr/bin/security");
+      const args = securityInvocation(call[1], call[2]);
+      expect(args[args.indexOf("-s") + 1]).not.toBe(KEYCHAIN_SERVICE);
+      expect((call[1] ?? []).join("\0")).not.toContain("synthetic-new-token");
     }
   });
 
@@ -83,7 +87,7 @@ describe("macOS account Keychain storage", () => {
     legacy();
     expect(loadAccountCredential()).toEqual({ kind: "account", token: "legacy-synthetic-token" });
     expect(existsSync(accountCredentialPath())).toBe(false);
-    expect(passwordCalls().map(([, args]) => args?.[0])).toEqual([
+    expect(passwordCalls().map((call) => securityInvocation(call[1], call[2])[0])).toEqual([
       "find-generic-password", "add-generic-password", "find-generic-password",
     ]);
     expect(loadAccountCredential()?.token).toBe("legacy-synthetic-token");
@@ -125,6 +129,24 @@ describe("macOS account Keychain storage", () => {
     expect(() => loadAccountCredential()).toThrow(/Keychain/u);
     expect(readFileSync(accountCredentialPath(), "utf8")).toBe(record);
     expect(passwordCalls()).toHaveLength(1);
+  });
+
+  it("passes the grant to security on stdin, including quotes and backslashes", () => {
+    const token = 'a"b\\c';
+    saveAccountCredential({ kind: "account", token });
+    expect(loadAccountCredential()?.token).toBe(token);
+    const account = createHash("sha256").update(dataHome()).digest("hex");
+    const adds = passwordCalls().filter(([, args]) => args?.[0] === "-i");
+    expect(adds).toHaveLength(1);
+    expect(adds[0]?.[1]).toEqual(["-i", "-q"]);
+    expect((adds[0]?.[2] as { input?: string } | undefined)?.input).toBe(
+      `"add-generic-password" "-s" "Ya DeepSeek Platform Account" "-a" "${account}" "-U" "-w" "a\\"b\\\\c"\n`,
+    );
+    clearAccountCredential();
+    expect(loadAccountCredential()).toBeUndefined();
+    for (const [, args] of passwordCalls()) {
+      expect((args ?? []).join("\0")).not.toContain(token);
+    }
   });
 
   it("does not write plaintext if a new Keychain save fails", () => {
@@ -239,15 +261,16 @@ describe("macOS account Keychain storage", () => {
     expect(existsSync(accountCredentialPath())).toBe(false);
   });
 
-  it.runIf(nativePlatform === "darwin")("round-trips only a synthetic, isolated account through the real macOS Keychain", async () => {
+  it.runIf(nativePlatform === "darwin")("round-trips only a synthetic, isolated account with quotes and a backslash through the real macOS Keychain", async () => {
     const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
     security.mockImplementation(actual.execFileSync);
+    const token = 'synthetic"native\\keychain-token';
     try {
-      saveAccountCredential({ kind: "account", token: "synthetic-native-keychain-token" });
-      expect(loadAccountCredential()?.token).toBe("synthetic-native-keychain-token");
+      saveAccountCredential({ kind: "account", token });
+      expect(loadAccountCredential()?.token).toBe(token);
       expect(existsSync(accountCredentialPath())).toBe(false);
       clearAccountCredential("stale-token");
-      expect(loadAccountCredential()?.token).toBe("synthetic-native-keychain-token");
+      expect(loadAccountCredential()?.token).toBe(token);
       clearAccountCredential();
       expect(loadAccountCredential()).toBeUndefined();
     } finally {
