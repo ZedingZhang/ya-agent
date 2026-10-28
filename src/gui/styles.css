@@ -98,7 +98,7 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .composer-area { min-width: 0; width: min(808px, 100%); margin: 0 auto; padding: 0 24px 16px; }
 .composer { position: relative; padding: 6px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--text) 30%, var(--border)); }
-.composer:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer:has(#task-input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 textarea, input, select { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; outline: none; }
 textarea:focus, input:focus, select:focus { border-color: color-mix(in srgb, var(--text) 40%, var(--border)); }
 textarea { width: 100%; padding: 10px 11px; resize: vertical; line-height: 1.6; }
