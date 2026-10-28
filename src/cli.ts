@@ -400,7 +400,7 @@ async function memoryPrune(includeCandidates: boolean, yes: boolean, io: CliIo):
       return;
     }
   }
-  const removed = pruneCards(includeCandidates);
+  const removed = pruneCards(cards.map((card) => card.id), includeCandidates);
   write(io.stdout, `Deleted ${removed.length} memory card(s).\n`);
 }
 

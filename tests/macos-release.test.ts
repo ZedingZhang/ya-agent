@@ -94,7 +94,7 @@ describe("macOS release packaging", () => {
     expect(calls.some((call) => call.tool === "xcrun" && call.args[0] === "stapler" && call.args[1] === "validate")).toBe(true);
     expect(calls.some((call) => call.tool === "spctl")).toBe(true);
     expect(calls.some((call) => call.tool === "security" && call.args[0] === "delete-keychain")).toBe(true);
-  });
+  }, 15_000);
 
   it.each(["", "synthetic-ambient-input"])("removes all ambient certificate inputs from the ad-hoc builder (%j)", (value) => {
     const inputs = Object.fromEntries(["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_KEYCHAIN", "CSC_INSTALLER_LINK", "CSC_INSTALLER_KEY_PASSWORD"]

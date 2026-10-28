@@ -102,6 +102,7 @@ export function savePreferences(language: Language, workspace?: string, stream =
 }
 
 export class GuiController {
+  private pendingPrune?: { ids: string[]; includeCandidates: boolean };
   config: ModelConfig;
   language: Language;
   workspace?: string;
@@ -258,11 +259,16 @@ export class GuiController {
   }
 
   prunePreview(includeCandidates = false): MemoryCard[] {
-    return cardsToPrune(includeCandidates);
+    const cards = cardsToPrune(includeCandidates);
+    this.pendingPrune = { ids: cards.map((card) => card.id), includeCandidates };
+    return cards;
   }
 
   prune(includeCandidates = false): MemoryCard[] {
-    return pruneCards(includeCandidates);
+    const preview = this.pendingPrune;
+    this.pendingPrune = undefined;
+    if (!preview || preview.includeCandidates !== includeCandidates) throw new Error("Preview memory cards before confirming prune.");
+    return pruneCards(preview.ids, includeCandidates);
   }
 
   auditLogs(): string[] {
