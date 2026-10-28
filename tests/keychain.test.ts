@@ -141,6 +141,7 @@ describe("API key storage", () => {
     ["line break", "a\nb", "Keychain values cannot contain line breaks or null bytes."],
     ["NUL", "a\0b", "Keychain values cannot contain line breaks or null bytes."],
     ["oversized value", "k".repeat(5000), "Keychain value is too long to store with macOS security."],
+    ["oversized UTF-8 value", "中".repeat(1400), "Keychain value is too long to store with macOS security."],
   ] as const)("does not spawn security for an API key with a %s", (_label, secret, expected) => {
     let message = "";
     try {
@@ -174,6 +175,30 @@ describe("API key storage", () => {
     expect(security).not.toHaveBeenCalled();
     expect(() => runSecurityInteractive(["w", "a\nb"])).toThrow("Keychain values cannot contain line breaks or null bytes.");
     expect(() => runSecurityInteractive(["w", "a\0b"])).toThrow("Keychain values cannot contain line breaks or null bytes.");
+    expect(security).not.toHaveBeenCalled();
+  });
+
+  it.each(["é", "中", "🔐"])("enforces the byte limit for escaped values containing %s", (character) => {
+    const argumentsFor = (value: string): string[] => [
+      "add-generic-password", "-s", "utf8-length-probe", "-a", "probe", "-w", value,
+    ];
+    const prefix = 'a"b\\c';
+    runSecurityInteractive(argumentsFor(prefix));
+    const baseline = (security.mock.calls[0]?.[2] as { input: string }).input;
+    const room = 4094 - (Buffer.byteLength(baseline, "utf8") - 1);
+    const width = Buffer.byteLength(character, "utf8");
+    const full = prefix + character.repeat(Math.floor(room / width)) + "k".repeat(room % width);
+
+    security.mockClear();
+    runSecurityInteractive(argumentsFor(full));
+    const input = (security.mock.calls[0]?.[2] as { input: string }).input;
+    expect(input.endsWith("\n")).toBe(true);
+    expect(Buffer.byteLength(input.slice(0, -1), "utf8")).toBe(4094);
+    expect(splitSecurityLine(input.slice(0, -1))).toEqual(argumentsFor(full));
+    expect(security.mock.calls[0]?.[1]).toEqual(["-i", "-q"]);
+
+    security.mockClear();
+    expect(() => runSecurityInteractive(argumentsFor(`${full}k`))).toThrow("Keychain value is too long to store with macOS security.");
     expect(security).not.toHaveBeenCalled();
   });
 });
