@@ -169,6 +169,22 @@ describe("GUI controller", () => {
     await expect(controller.run({ task: "Test", local: true, exec: true }, { signal: cancellation.signal })).rejects.toThrow("Stop");
   });
 
+  it("provides the GUI the full command and line count and refuses padding before approval", async () => {
+    let command = "echo first\n\n\techo last";
+    const controller = new GuiController(async (_key, _task, _config, options) => {
+      await options!.localWorkspace!.run({ command });
+      return { content: "denied", mode: "single", usage: {} };
+    });
+    controller.setSessionApiKey("key"); controller.setWorkspace(home.path);
+    const onLocalAction = vi.fn(() => false);
+    await controller.run({ task: "check", local: true, exec: true }, { onLocalAction });
+    expect(onLocalAction.mock.calls[0]?.[0].summary).toContain(`Run command (3 lines):\n${command}`);
+    onLocalAction.mockClear();
+    command = `echo hidden;${"\n".repeat(8_000)}npm test`;
+    await expect(controller.run({ task: "check", local: true, exec: true }, { onLocalAction })).rejects.toThrow(/lines/u);
+    expect(onLocalAction).not.toHaveBeenCalled();
+  });
+
   it("passes a stream callback only for simple tasks", async () => {
     const calls: Parameters<TaskRunner>[] = [];
     const runner: TaskRunner = async (...arguments_) => {
