@@ -44,7 +44,12 @@ describe("long-term memory", () => {
   });
 
   it("enforces the card limit after checking duplicates", () => {
-    for (let index = 0; index < MAX_MEMORY_CARDS; index += 1) createCandidate(`card ${index}`, "evidence");
+    const first = createCandidate("card 0", "evidence");
+    // Test validation order at the boundary without 100 durable disk commits.
+    // Concurrent creation and enforcement of the cap have process-level coverage.
+    saveMemoryCards(Array.from({ length: MAX_MEMORY_CARDS }, (_, index) => ({
+      ...first, id: String(index).padStart(8, "0"), text: `card ${index}`,
+    })));
     expect(() => createCandidate("  CARD 0  ", "new evidence")).toThrow(DuplicateMemoryError);
     expect(() => createCandidate("one more card", "evidence")).toThrow(MemoryLimitError);
     expect(listCards()).toHaveLength(MAX_MEMORY_CARDS);
