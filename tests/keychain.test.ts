@@ -137,19 +137,20 @@ describe("API key storage", () => {
     }
   });
 
-  it("does not spawn security when the API key cannot be carried on one interactive line", () => {
-    for (const secret of ["a\nb", "a\0b", "k".repeat(5000)]) {
-      security.mockClear();
-      let message = "";
-      try {
-        saveApiKey(secret, "darwin", "/usr/bin/security");
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      expect(message).toBe("Could not save the API key to macOS Keychain.");
-      expect(message).not.toContain(secret);
-      expect(security).not.toHaveBeenCalled();
+  it.each([
+    ["line break", "a\nb", "Keychain values cannot contain line breaks or null bytes."],
+    ["NUL", "a\0b", "Keychain values cannot contain line breaks or null bytes."],
+    ["oversized value", "k".repeat(5000), "Keychain value is too long to store with macOS security."],
+  ] as const)("does not spawn security for an API key with a %s", (_label, secret, expected) => {
+    let message = "";
+    try {
+      saveApiKey(secret, "darwin", "/usr/bin/security");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
     }
+    expect(message).toBe(expected);
+    expect(message).not.toContain(secret);
+    expect(security).not.toHaveBeenCalled();
   });
 
   it("fills security's interactive line limit without handing the value a following empty command", () => {

@@ -8,6 +8,8 @@ export const KEYCHAIN_ACCOUNT = "default";
 // A 4095-byte line leaves the terminating newline unread, and that empty
 // command can replace a failing exit status. 4094 leaves room for the newline.
 const MAX_SECURITY_INTERACTIVE_LINE = 4094;
+const INTERACTIVE_LINE_BREAK = "Keychain values cannot contain line breaks or null bytes.";
+const INTERACTIVE_LINE_TOO_LONG = "Keychain value is too long to store with macOS security.";
 
 export function macosKeychainAvailable(
   platform: NodeJS.Platform = process.platform,
@@ -23,11 +25,11 @@ function quoteSecurityArgument(value: string): string {
 function securityInteractiveLine(argv: readonly string[]): string {
   // A newline would start a second command. A NUL would truncate the C string.
   if (argv.some((argument) => /[\0\n]/u.test(argument))) {
-    throw new Error("Keychain values cannot contain line breaks or null bytes.");
+    throw new Error(INTERACTIVE_LINE_BREAK);
   }
   const line = argv.map(quoteSecurityArgument).join(" ");
   if (line.length > MAX_SECURITY_INTERACTIVE_LINE) {
-    throw new Error("Keychain value is too long to store with macOS security.");
+    throw new Error(INTERACTIVE_LINE_TOO_LONG);
   }
   return line;
 }
@@ -64,7 +66,12 @@ export function saveApiKey(
       ["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", value],
       securityPath,
     );
-  } catch {
+  } catch (error) {
+    // Raised before spawn. The text names the limit, not the key.
+    if (error instanceof Error
+      && (error.message === INTERACTIVE_LINE_BREAK || error.message === INTERACTIVE_LINE_TOO_LONG)) {
+      throw error;
+    }
     // Never surface the child-process error. It repeats the command invocation.
     throw new Error("Could not save the API key to macOS Keychain.");
   }
