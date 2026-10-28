@@ -1006,6 +1006,94 @@ async function verifyApprovalLifecycle(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function verifyApprovalAccessibility(window: BrowserWindow): Promise<void> {
+  const originalLanguage = await window.webContents.executeJavaScript("state.language") as Language;
+  try {
+    for (const language of LANGUAGES) {
+      const id = `accessible-approval-${language}`;
+      const summary = "Create text file: synthetic-approval.txt";
+      await window.webContents.executeJavaScript(`state.language = ${JSON.stringify(language)}; applyLanguage();
+        switchPage('workspace'); setRunning(true); document.querySelector('#toggle-files').focus();`);
+      sendTaskEvent({ type: "local-action", id, action: { operation: "write", paths: ["synthetic-approval.txt"], summary } });
+      const names = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction?.id !== ${JSON.stringify(id)} && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        if (document.activeElement?.id !== 'action-deny') throw new Error('Approval did not take focus.');
+        const toggle = document.querySelector('#toggle-activity');
+        if (toggle.getAttribute('aria-label') !== t('activityPending') || toggle.title !== t('activityPending')) throw new Error('Missing pending accessible name.');
+        if (document.querySelector('#approval-announcement').textContent !== t('approvalAnnouncement')) throw new Error('Missing live announcement.');
+        document.querySelector('#task-options').open = true;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        if (document.querySelector('#task-options').open || document.querySelector('#details-drawer').hidden
+          || document.querySelector('#action-content').hidden || drawerPage !== 'activity' || document.activeElement?.id !== 'action-deny') {
+          throw new Error('Escape hid the approval or lost its focus.');
+        }
+        return { heading: t('pendingAction'), deny: t('deny'), announcement: t('approvalAnnouncement') };
+      })()`) as { heading: string; deny: string; announcement: string };
+      const attached = window.webContents.debugger.isAttached();
+      if (!attached) window.webContents.debugger.attach("1.3");
+      try {
+        await window.webContents.debugger.sendCommand("Accessibility.enable");
+        const tree = await window.webContents.debugger.sendCommand("Accessibility.getFullAXTree") as {
+          nodes: Array<{ nodeId: string; ignored: boolean; role?: { value: string }; name?: { value: string };
+            description?: { value: string }; childIds?: string[]; properties?: Array<{ name: string; value: { value: unknown } }> }>;
+        };
+        const nodes = tree.nodes.filter((node) => !node.ignored);
+        const region = nodes.find((node) => node.role?.value === "region" && node.name?.value === names.heading);
+        const deny = nodes.find((node) => node.role?.value === "button" && node.name?.value === names.deny && node.description?.value === summary);
+        const announced = nodes.find((node) => node.role?.value === "StaticText" && node.name?.value === names.announcement);
+        const live = nodes.find((node) => node.role?.value === "status" && node.childIds?.includes(announced?.nodeId ?? "")
+          && node.properties?.some((property) => property.name === "live" && property.value.value === "polite"));
+        if (!region || !deny?.properties?.some((property) => property.name === "focused" && property.value.value === true) || !live) {
+          throw new Error(`Approval landmark, focused description, or live status missing from the accessibility tree (${language}).`);
+        }
+      } finally { if (!attached) window.webContents.debugger.detach(); }
+      await window.webContents.executeJavaScript(`pendingAction.responding = true; renderPendingAction();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        if (document.activeElement?.id !== 'action-summary') throw new Error('Disabled approval lost its keyboard target.');`);
+      sendTaskEvent({ type: "local-action-resolved", id });
+      const restored = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        return document.activeElement?.id === 'toggle-files' && document.querySelector('#toggle-activity').getAttribute('aria-label') === t('activity');
+      })()`) as boolean;
+      if (!restored) throw new Error(`Approval did not restore prior focus and accessible name (${language}).`);
+      await window.webContents.executeJavaScript(`setRunning(false); document.querySelector('#task-input').focus(); setRunning(true);
+        // Hidden smoke windows may retain a disabled input as activeElement until explicitly blurred.
+        document.activeElement?.blur();
+        if (document.activeElement !== document.body) throw new Error('Expected document focus before approval.');`);
+      sendTaskEvent({ type: "local-action", id: `${id}-disabled-input`, action: { operation: "write", paths: [], summary } });
+      await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (!pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      })()`);
+      sendTaskEvent({ type: "local-action-resolved", id: `${id}-disabled-input` });
+      const fallback = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        return document.activeElement?.id === 'toggle-activity';
+      })()`) as boolean;
+      if (!fallback) throw new Error(`Approval did not restore usable focus after the composer was disabled (${language}).`);
+      sendTaskEvent({ type: "local-action", id: `${id}-expired`, action: { operation: "write", paths: [], summary } });
+      await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (!pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        document.querySelector('#toggle-changes').focus();
+      })()`);
+      sendTaskEvent({ type: "local-action-expired", id: `${id}-expired` });
+      const keptFocus = await window.webContents.executeJavaScript(`(async () => {
+        const deadline = Date.now() + 3000;
+        while (pendingAction && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        return document.activeElement?.id === 'toggle-changes';
+      })()`) as boolean;
+      if (!keptFocus) throw new Error("Expiration stole focus after the user moved outside the approval.");
+    }
+  } finally {
+    await window.webContents.executeJavaScript(`clearPendingAction(false); setRunning(false);
+      state.language = ${JSON.stringify(originalLanguage)}; applyLanguage();`);
+  }
+}
+
 async function verifyIcmHistory(window: BrowserWindow): Promise<void> {
   const originalController = controller;
   let requests = 0;
@@ -1435,6 +1523,7 @@ app.whenReady().then(async () => {
     await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);
+    await verifyApprovalAccessibility(window);
     await verifyConversationContext(window);
     await verifyIcmHistory(window);
     await verifyReloadDuringTask(window);
