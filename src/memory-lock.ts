@@ -8,6 +8,10 @@ function code(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException).code;
 }
 
+function transientAccess(error: unknown): boolean {
+  return ["EPERM", "EACCES", "EBUSY"].includes(code(error) ?? "");
+}
+
 function ownerExited(path: string): boolean {
   try {
     const identity = lstatSync(path);
@@ -22,7 +26,9 @@ function ownerExited(path: string): boolean {
     } catch { exited = Date.now() - identity.mtimeMs > 30_000; }
     return exited;
   } catch (error) {
-    if (code(error) !== "ENOENT") throw error;
+    // A Windows delete-pending lock can be statted but briefly cannot be opened.
+    // Do not infer a dead owner; let the bounded acquisition loop try again.
+    if (code(error) !== "ENOENT" && !transientAccess(error)) throw error;
     return false;
   }
 }
@@ -53,7 +59,7 @@ export function withMemoryLock<T>(path: string, operation: () => T): T {
       // publication cannot leave an empty lock with no identifiable owner.
       try { linkSync(staging, path); }
       catch (error) {
-        if (code(error) !== "EEXIST") throw error;
+        if (code(error) !== "EEXIST" && !transientAccess(error)) throw error;
         recoverExitedOwner(path);
         if (Date.now() >= deadline) throw new Error("Memory storage is busy. Retry after the other memory operation finishes.");
         Atomics.wait(pause, 0, 0, 10);
