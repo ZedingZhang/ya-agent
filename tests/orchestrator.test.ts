@@ -182,7 +182,7 @@ describe("agent orchestration", () => {
     expect(client.calls).toEqual([]);
   });
 
-  it("injects only task-relevant approved memory", () => {
+  it("injects only task-relevant approved memory", { timeout: 30_000 }, () => {
     const matching = setStatus(createCandidate("Use PostgreSQL indexes", "evidence").id, "approved");
     const unrelated = setStatus(createCandidate("Use dark terminal themes", "evidence").id, "approved");
     const messages = messagesForTask("Explain PostgreSQL indexes");

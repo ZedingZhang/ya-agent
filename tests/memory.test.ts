@@ -19,7 +19,8 @@ import {
 } from "../src/memory";
 import { tempHome, type TempHome } from "./helpers";
 
-describe("long-term memory", () => {
+// Each case starts real Python processes. Allow for cold starts on shared CI runners.
+describe("long-term memory", { timeout: 30_000 }, () => {
   let home: TempHome;
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());

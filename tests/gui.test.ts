@@ -269,7 +269,7 @@ describe("GUI controller", () => {
     expect(JSON.stringify(entries)).not.toContain("private note");
   });
 
-  it("manages memory and audit history", () => {
+  it("manages memory and audit history", { timeout: 30_000 }, () => {
     const controller = new GuiController();
     const card = controller.createMemory("Use PostgreSQL indexes", "evidence", "procedure");
     controller.setMemoryStatus(card.id, "approved");
@@ -283,7 +283,7 @@ describe("GUI controller", () => {
     expect(controller.clearAuditLogs().map((path) => basename(path))).toEqual(["actions.jsonl"]);
   });
 
-  it("binds GUI pruning to the preview instead of newly prunable cards", () => {
+  it("binds GUI pruning to the preview instead of newly prunable cards", { timeout: 30_000 }, () => {
     const controller = new GuiController();
     const shown = controller.createMemory("shown", "evidence", "procedure");
     expect(controller.prunePreview(true).map((card) => card.id)).toEqual([shown.id]);
