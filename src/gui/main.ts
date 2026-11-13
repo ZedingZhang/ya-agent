@@ -1414,6 +1414,22 @@ async function verifyApplicationMenu(window: BrowserWindow): Promise<void> {
   }
 }
 
+async function verifyMemory(window: BrowserWindow): Promise<void> {
+  const passed = await window.webContents.executeJavaScript(`(async () => {
+    const card = await window.ya.createMemory('PostgreSQL 索引优化关注查询计划', 'GUI smoke evidence', 'knowledge');
+    if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
+    await window.ya.setMemoryStatus(card.id, 'approved');
+    const matches = await window.ya.relevantCards('PostgreSQL 索引');
+    if (matches.length !== 1 || matches[0].card.id !== card.id) return false;
+    await window.ya.setMemoryStatus(card.id, 'revoked');
+    if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
+    const removed = await window.ya.pruneMemory(false);
+    return removed.length === 1 && removed[0].id === card.id
+      && (await window.ya.state()).cards.length === 0;
+  })()`);
+  if (!passed) throw new Error("Octop Memory desktop lifecycle verification failed.");
+}
+
 const smokeTest = process.argv.includes("--smoke-test");
 const smokeRoot = smokeTest ? mkdtempSync(join(tmpdir(), "ya-desktop-smoke-")) : undefined;
 if (smokeRoot) {
@@ -1440,6 +1456,7 @@ app.whenReady().then(async () => {
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
     await verifyAccountLogin(window);
+    await verifyMemory(window);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();

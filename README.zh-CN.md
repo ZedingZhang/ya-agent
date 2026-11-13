@@ -24,7 +24,7 @@ Ya 使用 DeepSeek API（默认 `DeepSeek-V4.1-Flash-1017`，可切换到 `DeepS
 
 ## 平台支持
 
-独立 CLI 和桌面 Release 产物是自包含文件，不要求安装 Node.js。源码开发或安装 npm 包需要 Node.js 22 或更高版本。
+独立 CLI 和桌面 Release 产物自带 JavaScript 运行时。源码开发或安装 npm 包需要 Node.js 22 或更高版本。长期记忆使用 Octop Memory，各平台均需要 Python 3.12+ 和 `octop-memory==1.0.4`。
 
 | 操作系统 | CLI | 桌面 GUI | API 密钥存储 |
 | --- | --- | --- | --- |
@@ -74,6 +74,7 @@ ya --help
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
 npm ci
+python -m pip install octop-memory==1.0.4
 npm run check
 npm link
 ```
@@ -285,9 +286,17 @@ ya memory revoke CARD_ID
 ya memory prune
 ```
 
-Ya 最多保存 100 张本地记忆卡。候选卡片在批准前不会进入模型上下文。每项任务最多选取三张相关的已批准卡片，排序完全在本地确定，依据包括英文短语/关键词与中文字符 n-gram。`--show-memory` 会在回答前显示本次选取结果。
+Ya 使用 Octop Memory 1.0.4，SQLite 数据库位于 `~/.ya/memory.sqlite`（或 `$YA_HOME/memory.sqlite`），命名空间为 `ya`。反馈写入带证据的原生候选记忆，批准后创建 AtomCard，任务上下文通过 `MemoryService.recall()` 完成中英文检索、排序、去重和预算控制。Ya 最多保存 100 张卡片，每项任务最多选取三张已批准卡片。`--show-memory` 会在回答前显示本次选取结果。拒绝或撤销会停用对应事实，清理会删除选中的卡片及其原生证据记录。[Octop Memory 项目](https://github.com/TencentCloud/octop-memory)
 
-现有 `~/.ya/memory.json` 格式保持不变，因此从 Python 实现升级不会丢失记忆。
+请在 Ya 可访问的 Python 3.12+ 环境安装记忆运行时。
+
+```sh
+python -m pip install octop-memory==1.0.4
+```
+
+使用虚拟环境或桌面应用的 PATH 与终端不同时，将 `YA_MEMORY_PYTHON` 设置为该环境中 Python 可执行文件的完整路径。默认在 Windows 依次查找 `python`、`py`，在 macOS/Linux 查找 `python3`、`python`。Python 适配脚本随 npm、独立 CLI 和 Electron 产物发布，Python 与 Octop 包需另外安装。空记忆库的读取返回空结果，已有记忆库的运行时故障会给出错误提示。
+
+首次访问会通过事务导入 `memory.json`，保留卡片 ID、类型、证据、状态、创建时间和版本。数据库迁移标记支持失败后重试，并避免成功后重复导入。原始 JSON 作为备份保留，其中仍包含后来从 SQLite 清理的旧记录。本次接入由显式反馈与批准驱动。
 
 ## 桌面应用
 
@@ -347,7 +356,8 @@ src/
   images.ts              经校验的视觉来源与内容块
   local.ts               受限本地文件工具与审计日志
   commands.ts            已批准的 shell 执行、输出捕获与进程取消
-  memory.ts              候选记忆生命周期与相关性排序
+  memory.ts              带类型的 Octop Memory 进程适配层
+  octop-memory.py         原生记忆生命周期、召回与旧数据迁移
   orchestrator.ts        单 Agent、ToA、网页、本地与 ICM 编排
   service.ts             CLI/GUI 共享任务服务
   terminal.ts            安全终端 Markdown 渲染

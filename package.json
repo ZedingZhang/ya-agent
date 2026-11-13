@@ -36,7 +36,7 @@
     "check": "npm run typecheck && npm test && npm run build",
     "start": "npm run build && node dist/typescript/cli.js",
     "gui": "npm run build && node dist/typescript/scripts/run-gui.js",
-    "package:cli": "npm run build && pkg --compress GZip --output release/ya dist/typescript/cli.js",
+    "package:cli": "npm run build && pkg --config package.json --compress GZip --output release/ya dist/typescript/cli.js",
     "package:gui": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
@@ -53,9 +53,10 @@
   },
   "pkg": {
     "scripts": [
-      "dist/typescript/**/*.js"
+      "dist/typescript/cli.js"
     ],
     "assets": [
+      "dist/typescript/octop-memory.py",
       "dist/typescript/gui/index.html",
       "dist/typescript/gui/styles.css"
     ]

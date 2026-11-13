@@ -24,7 +24,7 @@ Navigate projects and sessions on the left, chat with Ya on the right, and open 
 
 ## Platform support
 
-Standalone CLI and desktop release assets are self-contained and do not require Node.js. Node.js 22 or newer is required for source development or installation of the npm package.
+Standalone CLI and desktop release assets bundle their JavaScript runtime. Node.js 22 or newer is required for source development or installation of the npm package. Long-term memory uses Octop Memory and requires Python 3.12+ with `octop-memory==1.0.4` on all platforms.
 
 | Operating system | CLI | Desktop GUI | API key storage |
 | --- | --- | --- | --- |
@@ -74,6 +74,7 @@ The published `v0.8.0` tarball still uses legacy native bindings: a clean Window
 git clone https://github.com/ZedingZhang/ya-agent.git
 cd ya-agent
 npm ci
+python -m pip install octop-memory==1.0.4
 npm run check
 npm link
 ```
@@ -285,9 +286,17 @@ ya memory revoke CARD_ID
 ya memory prune
 ```
 
-Ya stores at most 100 local memory cards. Candidate cards do not enter model context until approved. For each task, Ya deterministically selects at most three relevant approved cards using English phrases/keywords and Chinese character n-grams. `--show-memory` displays the selection before an answer.
+Ya uses Octop Memory 1.0.4 with SQLite at `~/.ya/memory.sqlite` (or `$YA_HOME/memory.sqlite`), in namespace `ya`. Feedback creates native candidates with evidence. Approval creates canonical atoms, and task context uses `MemoryService.recall()` for multilingual search, ranking, deduplication, and prompt budgeting. Ya keeps at most 100 cards and selects up to three approved cards per task. `--show-memory` displays the selection before an answer. Rejection and revocation retire the corresponding atoms. Pruning removes the selected cards and their native evidence records. [Octop Memory](https://github.com/TencentCloud/octop-memory)
 
-The existing `~/.ya/memory.json` format is preserved, so upgrading from the Python implementation does not discard memory.
+Install the memory runtime into a Python 3.12+ environment accessible to Ya.
+
+```sh
+python -m pip install octop-memory==1.0.4
+```
+
+Set `YA_MEMORY_PYTHON` to the full path of that environment's Python executable when using a virtual environment or launching the desktop app with a different PATH. Ya otherwise tries `python` and `py` on Windows, and `python3` and `python` on macOS/Linux. The Python adapter ships in npm, standalone CLI, and Electron packages. Python and the Octop package are installed separately. Reads of an empty memory store return an empty result. Runtime failures for an existing store include an actionable error.
+
+On first access, Ya imports `memory.json` transactionally, preserving card IDs, kinds, evidence, statuses, creation times, and versions. A database marker makes migration resumable after failure and prevents repeated imports after success. The original JSON remains available as a backup, including records subsequently pruned from SQLite. Manual feedback and approval drive this integration.
 
 ## Desktop application
 
@@ -348,7 +357,8 @@ src/
   images.ts              validated vision sources and content blocks
   local.ts               confined local filesystem tools and audit log
   commands.ts            approved shell execution, output capture and process cancellation
-  memory.ts              candidate lifecycle and relevance ranking
+  memory.ts              typed Octop Memory process adapter
+  octop-memory.py         native memory lifecycle, recall, and legacy migration
   orchestrator.ts        single-agent, ToA, web, local, and ICM logic
   service.ts             shared CLI/GUI task service
   terminal.ts            safe terminal Markdown renderer
