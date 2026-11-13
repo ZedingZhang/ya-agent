@@ -1423,6 +1423,7 @@ async function verifyMemory(window: BrowserWindow): Promise<void> {
     if (matches.length !== 1 || matches[0].card.id !== card.id) return false;
     await window.ya.setMemoryStatus(card.id, 'revoked');
     if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
+    await window.ya.prunePreview(false);
     const removed = await window.ya.pruneMemory(false);
     return removed.length === 1 && removed[0].id === card.id
       && (await window.ya.state()).cards.length === 0;

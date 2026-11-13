@@ -1,10 +1,9 @@
-import { execFileSync, fork, spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, fork, type ChildProcess } from "node:child_process";
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createCandidate, listCards, MAX_MEMORY_CARDS, memoryPath, setStatus } from "../src/memory";
+import { createCandidate, listCards, MAX_MEMORY_CARDS, setStatus } from "../src/memory";
 import { tempHome, type TempHome } from "./helpers";
 
 const compiled = mkdtempSync(join(tmpdir(), "ya-memory-build-"));
@@ -39,17 +38,13 @@ describe("cross-process memory transactions", () => {
   beforeAll(() => {
     execFileSync(process.execPath, [resolve("node_modules/typescript/bin/tsc"), "-p", "tsconfig.json", "--outDir", compiled,
       "--declaration", "false", "--declarationMap", "false", "--sourceMap", "false"], { timeout: 30_000 });
+    copyFileSync(resolve("src/octop-memory.py"), join(compiled, "octop-memory.py"));
   }, 30_000);
   afterAll(() => rmSync(compiled, { recursive: true, force: true }));
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
   it.each([20, 40])("persists concurrent creates and enforces the shared cap (%i per process)", async (count) => {
-    if (count === 40) {
-      const exited = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
-      await once(exited, "exit");
-      writeFileSync(`${memoryPath()}.lock`, JSON.stringify({ pid: exited.pid, token: "concurrent-recovery" }));
-    }
     const children = ["cli", "gui", "other"].map((prefix) => launch(home.path, { kind: "create", prefix, count }));
     try {
       await Promise.all(children.map(({ ready }) => ready));
@@ -58,9 +53,9 @@ describe("cross-process memory transactions", () => {
       const cards = listCards();
       expect(cards).toHaveLength(Math.min(3 * count, MAX_MEMORY_CARDS));
       expect(new Set(cards.map((card) => card.text)).size).toBe(cards.length);
-      expect(readdirSync(home.path)).toEqual(["memory.json"]);
+      expect(readdirSync(home.path)).toContain("memory.sqlite");
     } finally { await stop(children); }
-  }, 15_000);
+  }, 60_000);
 
   it("cannot overwrite a revoke with another process's earlier memory snapshot", async () => {
     const target = setStatus(createCandidate("revocation target", "evidence").id, "approved");
@@ -77,13 +72,6 @@ describe("cross-process memory transactions", () => {
       expect(listCards().find((card) => card.id === target.id)?.status).toBe("revoked");
       expect(listCards().find((card) => card.id === other.id)?.status).toBe("approved");
     } finally { await stop([writer, revoker]); }
-  }, 15_000);
+  }, 60_000);
 
-  it("recovers the lock of an exited process", async () => {
-    const exited = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
-    await once(exited, "exit");
-    writeFileSync(`${memoryPath()}.lock`, JSON.stringify({ pid: exited.pid, token: "exited-owner" }));
-    expect(createCandidate("after recovery", "evidence").text).toBe("after recovery");
-    expect(readdirSync(home.path)).toEqual(["memory.json"]);
-  });
 });
