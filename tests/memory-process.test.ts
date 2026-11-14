@@ -82,17 +82,19 @@ describe("cross-process memory transactions", () => {
     expect(result.status, result.stderr).toBe(0);
   }, 30_000);
 
-  it.skipIf(process.platform !== "win32").each([true, false])("ignores a workspace python.exe (existing store=%s)", (existing) => {
+  it.skipIf(process.platform !== "win32").each(["existing", "new", ".", "state"])("ignores a workspace python.exe (store=%s)", (configuration) => {
     const workspace = join(home.path, "workspace");
-    const store = join(home.path, "store");
+    const localStore = configuration === "." || configuration === "state";
+    const store = localStore ? join(workspace, configuration) : join(home.path, "store");
     mkdirSync(workspace);
     // Node rejects Python's flags, making accidental execution observable without running untrusted code.
     copyFileSync(process.execPath, join(workspace, "python.exe"));
-    if (existing) {
-      mkdirSync(store);
+    if (configuration !== "new") {
+      mkdirSync(store, { recursive: true });
       writeFileSync(join(store, "memory.json"), "[]");
     }
-    const env = { ...process.env, YA_HOME: store };
+    if (configuration === "state") copyFileSync(process.execPath, join(store, "python.exe"));
+    const env = { ...process.env, YA_HOME: localStore ? configuration : store, PATH: `.${delimiter}${process.env.PATH ?? ""}` };
     delete env.YA_MEMORY_PYTHON;
     const result = spawnSync(process.execPath, ["-e", `
       const assert = require('node:assert/strict');

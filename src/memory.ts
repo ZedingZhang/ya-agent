@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, extname, isAbsolute, join } from "node:path";
 import { dataHome } from "./config";
 
 export const MAX_MEMORY_CARDS = 100;
@@ -53,15 +53,20 @@ function callMemory<T>(operation: string, params: Record<string, unknown> = {}):
   const script = readFileSync(join(__dirname, "octop-memory.py"), "utf8");
   const override = process.env.YA_MEMORY_PYTHON;
   const interpreters = override ? [override] : process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
-  const home = dataHome();
-  mkdirSync(home, { recursive: true });
-  const request = JSON.stringify({ operation, home, maxCards: MAX_MEMORY_CARDS, ...params });
+  const request = JSON.stringify({ operation, home: dataHome(), maxCards: MAX_MEMORY_CARDS, ...params });
   for (const interpreter of interpreters) {
+    let executable = interpreter;
+    if (process.platform === "win32" && !isAbsolute(interpreter)) {
+      // Resolve from absolute PATH entries so Windows cannot prefer a workspace executable.
+      const filename = extname(interpreter) ? interpreter : `${interpreter}.exe`;
+      const directories = (process.env.PATH ?? "").split(delimiter).map((directory) => directory.replace(/^"(.*)"$/, "$1"));
+      const directory = directories.find((entry) => isAbsolute(entry) && existsSync(join(entry, filename)));
+      if (!directory) continue;
+      executable = join(directory, filename);
+    }
     // Exclude workspace imports and inherited Python settings, including PYTHONPATH.
     const args = interpreter === "py" ? ["-3", "-E", "-P", "-X", "utf8", "-c", script] : ["-E", "-P", "-X", "utf8", "-c", script];
-    const response = spawnSync(interpreter, args, {
-      // Windows also searches the child working directory for the executable.
-      cwd: home,
+    const response = spawnSync(executable, args, {
       input: request,
       encoding: "utf8",
       windowsHide: true,
