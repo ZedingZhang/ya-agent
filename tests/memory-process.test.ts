@@ -1,10 +1,9 @@
-import { execFileSync, fork, spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, fork, spawnSync, type ChildProcess } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createCandidate, listCards, MAX_MEMORY_CARDS, memoryPath, setStatus } from "../src/memory";
+import { createCandidate, listCards, MAX_MEMORY_CARDS, setStatus } from "../src/memory";
 import { tempHome, type TempHome } from "./helpers";
 
 const compiled = mkdtempSync(join(tmpdir(), "ya-memory-build-"));
@@ -39,17 +38,76 @@ describe("cross-process memory transactions", () => {
   beforeAll(() => {
     execFileSync(process.execPath, [resolve("node_modules/typescript/bin/tsc"), "-p", "tsconfig.json", "--outDir", compiled,
       "--declaration", "false", "--declarationMap", "false", "--sourceMap", "false"], { timeout: 30_000 });
+    copyFileSync(resolve("src/octop-memory.py"), join(compiled, "octop-memory.py"));
   }, 30_000);
   afterAll(() => rmSync(compiled, { recursive: true, force: true }));
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
-  it.each([20, 40])("persists concurrent creates and enforces the shared cap (%i per process)", async (count) => {
-    if (count === 40) {
-      const exited = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
-      await once(exited, "exit");
-      writeFileSync(`${memoryPath()}.lock`, JSON.stringify({ pid: exited.pid, token: "concurrent-recovery" }));
+  it.each([
+    { module: "octop_memory", pythonPath: "unset", override: false },
+    { module: "json", pythonPath: "unset", override: true },
+    { module: "sitecustomize", pythonPath: "relative", override: false },
+    { module: "octop_memory", pythonPath: "absolute-and-empty", override: true },
+  ])("ignores workspace $module imports with $pythonPath PYTHONPATH (override=$override)", ({ module, pythonPath, override }) => {
+    const workspace = join(home.path, "workspace");
+    mkdirSync(workspace);
+    writeFileSync(join(home.path, "memory.json"), "[]");
+    writeFileSync(join(workspace, `${module}.py`),
+      `with open(${JSON.stringify(join(workspace, "shadow-imported"))}, 'w') as marker: marker.write('executed')\nraise RuntimeError('workspace module executed')\n`);
+    const env = { ...process.env, YA_HOME: home.path };
+    delete env.PYTHONPATH;
+    delete env.YA_MEMORY_PYTHON;
+    if (pythonPath === "relative") env.PYTHONPATH = ".";
+    if (pythonPath === "absolute-and-empty") env.PYTHONPATH = `${workspace}${delimiter}`;
+    if (override) {
+      env.YA_MEMORY_PYTHON = execFileSync(process.env.YA_MEMORY_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
+        ["-E", "-P", "-X", "utf8", "-c", "import sys; print(sys.executable)"], { encoding: "utf8", timeout: 10_000 }).trim();
     }
+    const result = spawnSync(process.execPath, ["-e", `
+      const assert = require('node:assert/strict');
+      const memory = require(process.argv[1]);
+      assert.deepEqual(memory.listCards(), []);
+      const card = memory.createCandidate('Use Python for automation', 'evidence');
+      assert.deepEqual(memory.selectRelevantCards('Python automation'), []);
+      memory.setStatus(card.id, 'approved');
+      assert.equal(memory.selectRelevantCards('Python automation')[0].card.id, card.id);
+      memory.setStatus(card.id, 'revoked');
+      assert.deepEqual(memory.selectRelevantCards('Python automation'), []);
+      assert.equal(memory.pruneCards([card.id])[0].id, card.id);
+      assert.deepEqual(memory.listCards(), []);
+    `, join(compiled, "memory.js")], { cwd: workspace, env, encoding: "utf8", timeout: 30_000 });
+    expect(existsSync(join(workspace, "shadow-imported"))).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  }, 30_000);
+
+  it.skipIf(process.platform !== "win32").each(["existing", "new", ".", "state"])("ignores a workspace python.exe (store=%s)", (configuration) => {
+    const workspace = join(home.path, "workspace");
+    const localStore = configuration === "." || configuration === "state";
+    const store = localStore ? join(workspace, configuration) : join(home.path, "store");
+    mkdirSync(workspace);
+    // Node rejects Python's flags, making accidental execution observable without running untrusted code.
+    copyFileSync(process.execPath, join(workspace, "python.exe"));
+    if (configuration !== "new") {
+      mkdirSync(store, { recursive: true });
+      writeFileSync(join(store, "memory.json"), "[]");
+    }
+    if (configuration === "state") copyFileSync(process.execPath, join(store, "python.exe"));
+    const env = { ...process.env, YA_HOME: localStore ? configuration : store, PATH: `.${delimiter}${process.env.PATH ?? ""}` };
+    delete env.YA_MEMORY_PYTHON;
+    const result = spawnSync(process.execPath, ["-e", `
+      const assert = require('node:assert/strict');
+      const memory = require(process.argv[1]);
+      assert.deepEqual(memory.listCards(), []);
+      const card = memory.createCandidate('Use Python for automation', 'evidence');
+      assert.equal(memory.listCards()[0].id, card.id);
+    `, join(compiled, "memory.js")], { cwd: workspace, env, encoding: "utf8", timeout: 30_000 });
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  }, 30_000);
+
+  it.each([20, 40])("persists concurrent creates and enforces the shared cap (%i per process)", async (count) => {
     const children = ["cli", "gui", "other"].map((prefix) => launch(home.path, { kind: "create", prefix, count }));
     try {
       await Promise.all(children.map(({ ready }) => ready));
@@ -58,9 +116,51 @@ describe("cross-process memory transactions", () => {
       const cards = listCards();
       expect(cards).toHaveLength(Math.min(3 * count, MAX_MEMORY_CARDS));
       expect(new Set(cards.map((card) => card.text)).size).toBe(cards.length);
-      expect(readdirSync(home.path)).toEqual(["memory.json"]);
+      expect(readdirSync(home.path)).toContain("memory.sqlite");
     } finally { await stop(children); }
-  }, 15_000);
+  }, 60_000);
+
+  it("serializes native schema initialization across processes", async () => {
+    const adapter = join(compiled, "octop-memory.py");
+    const source = readFileSync(adapter, "utf8");
+    const probe = `
+import os
+import time
+from octop_memory import Memory
+
+probe_home = Path(os.environ["YA_HOME"])
+(probe_home / f"ready-{os.getpid()}").touch()
+deadline = time.monotonic() + 15
+while len(list(probe_home.glob("ready-*"))) < 3:
+    if time.monotonic() > deadline:
+        raise RuntimeError("Initialization peers did not arrive")
+    time.sleep(0.01)
+
+original_init = Memory.__init__
+def checked_init(self, *args, **kwargs):
+    marker = probe_home / "initializing"
+    with marker.open("x"):
+        pass
+    try:
+        time.sleep(0.25)
+        original_init(self, *args, **kwargs)
+    finally:
+        marker.unlink()
+Memory.__init__ = checked_init
+`;
+    writeFileSync(adapter, source.replace('if __name__ == "__main__":', `${probe}\nif __name__ == "__main__":`));
+    const children = ["cli", "gui", "other"].map((prefix) => launch(home.path, { kind: "create", prefix, count: 1 }));
+    try {
+      await Promise.all(children.map(({ ready }) => ready));
+      for (const { child } of children) child.send("go");
+      const results = await Promise.allSettled(children.map(({ done }) => done));
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+      expect(listCards()).toHaveLength(3);
+    } finally {
+      await stop(children);
+      writeFileSync(adapter, source);
+    }
+  }, 60_000);
 
   it("cannot overwrite a revoke with another process's earlier memory snapshot", async () => {
     const target = setStatus(createCandidate("revocation target", "evidence").id, "approved");
@@ -77,13 +177,6 @@ describe("cross-process memory transactions", () => {
       expect(listCards().find((card) => card.id === target.id)?.status).toBe("revoked");
       expect(listCards().find((card) => card.id === other.id)?.status).toBe("approved");
     } finally { await stop([writer, revoker]); }
-  }, 15_000);
+  }, 60_000);
 
-  it("recovers the lock of an exited process", async () => {
-    const exited = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
-    await once(exited, "exit");
-    writeFileSync(`${memoryPath()}.lock`, JSON.stringify({ pid: exited.pid, token: "exited-owner" }));
-    expect(createCandidate("after recovery", "evidence").text).toBe("after recovery");
-    expect(readdirSync(home.path)).toEqual(["memory.json"]);
-  });
 });

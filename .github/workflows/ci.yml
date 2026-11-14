@@ -37,6 +37,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set up Python for Octop Memory
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Octop Memory
+        run: python -m pip install octop-memory==1.0.4
+
       - name: Check types, tests, and production build
         run: npm run check
 
@@ -71,6 +79,6 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ""
           APPLE_TEAM_ID: ""
         run: |
-          npx pkg --compress GZip --targets node22-macos-arm64 --output "release-cli/$CLI_ASSET" dist/typescript/cli.js
+          npx pkg --config package.json --compress GZip --targets node22-macos-arm64 --output "release-cli/$CLI_ASSET" dist/typescript/cli.js
           bash .github/scripts/package-macos.sh
           "./release-cli/$CLI_ASSET" --help

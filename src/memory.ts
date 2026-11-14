@@ -1,12 +1,10 @@
-import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, extname, isAbsolute, join } from "node:path";
 import { dataHome } from "./config";
-import { withMemoryLock } from "./memory-lock";
 
 export const MAX_MEMORY_CARDS = 100;
 export const MAX_RELEVANT_MEMORY_CARDS = 3;
-export const MIN_RELEVANCE_SCORE = 3;
 
 export type MemoryKind = "preference" | "procedure" | "knowledge";
 export type MemoryStatus = "candidate" | "approved" | "rejected" | "revoked";
@@ -21,25 +19,11 @@ export interface MemoryCard {
   version: number;
 }
 
-interface StoredMemoryCard extends Omit<MemoryCard, "createdAt"> {
-  created_at: string;
-}
-
 export interface MemoryMatch {
   card: MemoryCard;
-  score: number;
+  // Octop returns ranked snippets without exposing its internal numeric scores.
+  score: number | null;
 }
-
-const ACTIVE_STATUSES = new Set<MemoryStatus>(["candidate", "approved"]);
-const DEFAULT_PRUNE_STATUSES = new Set<MemoryStatus>(["rejected", "revoked"]);
-const ENGLISH_STOP_WORDS = new Set([
-  "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "is", "it", "of", "on",
-  "or", "the", "this", "that", "to", "what", "when", "where", "with",
-]);
-const CHINESE_STOP_PHRASES = new Set([
-  "什么", "如何", "为什", "什么是", "怎么", "可以", "请问", "一个", "这个", "那个", "我们", "你们", "他们",
-  "关于", "以及", "进行", "一下", "是否", "需要",
-]);
 
 export class DuplicateMemoryError extends Error {
   readonly card: MemoryCard;
@@ -56,186 +40,92 @@ export class MemoryLimitError extends Error {
 }
 
 export function memoryPath(): string {
-  return join(dataHome(), "memory.json");
+  return join(dataHome(), "memory.sqlite");
 }
 
-function fromStored(value: unknown): MemoryCard {
-  if (!isRecord(value)) throw new Error("Invalid memory card data.");
-  return {
-    id: expectString(value.id, "id"),
-    kind: expectString(value.kind, "kind") as MemoryKind,
-    text: expectString(value.text, "text"),
-    evidence: expectString(value.evidence, "evidence"),
-    status: expectString(value.status, "status") as MemoryStatus,
-    createdAt: expectString(value.created_at ?? value.createdAt, "created_at"),
-    version: typeof value.version === "number" ? value.version : 1,
-  };
+interface MemoryResponse<T> {
+  result?: T;
+  error?: { message: string; code?: string; card?: MemoryCard };
 }
 
-function toStored(card: MemoryCard): StoredMemoryCard {
-  const { createdAt, ...rest } = card;
-  return { ...rest, created_at: createdAt };
+function callMemory<T>(operation: string, params: Record<string, unknown> = {}): T {
+  // Reading the bundled script also works inside Electron ASAR and pkg snapshots.
+  const script = readFileSync(join(__dirname, "octop-memory.py"), "utf8");
+  const override = process.env.YA_MEMORY_PYTHON;
+  const interpreters = override ? [override] : process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
+  const request = JSON.stringify({ operation, home: dataHome(), maxCards: MAX_MEMORY_CARDS, ...params });
+  for (const interpreter of interpreters) {
+    let executable = interpreter;
+    if (process.platform === "win32" && !isAbsolute(interpreter)) {
+      // Resolve from absolute PATH entries so Windows cannot prefer a workspace executable.
+      const filename = extname(interpreter) ? interpreter : `${interpreter}.exe`;
+      const directories = (process.env.PATH ?? "").split(delimiter).map((directory) => directory.replace(/^"(.*)"$/, "$1"));
+      const directory = directories.find((entry) => isAbsolute(entry) && existsSync(join(entry, filename)));
+      if (!directory) continue;
+      executable = join(directory, filename);
+    }
+    // Exclude workspace imports and inherited Python settings, including PYTHONPATH.
+    const args = interpreter === "py" ? ["-3", "-E", "-P", "-X", "utf8", "-c", script] : ["-E", "-P", "-X", "utf8", "-c", script];
+    const response = spawnSync(executable, args, {
+      input: request,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 30_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    if (response.error && (response.error as NodeJS.ErrnoException).code === "ENOENT" && !override) continue;
+    if (response.error || response.status !== 0) {
+      throw new Error(`Octop Memory failed: ${response.error?.message ?? response.stderr.trim()}`);
+    }
+    let payload: MemoryResponse<T>;
+    try { payload = JSON.parse(response.stdout) as MemoryResponse<T>; }
+    catch { throw new Error("Octop Memory returned an invalid response."); }
+    if (payload.error?.code === "duplicate" && payload.error.card) throw new DuplicateMemoryError(payload.error.card);
+    if (payload.error?.code === "limit") throw new MemoryLimitError(payload.error.message);
+    if (payload.error) throw new Error(payload.error.message);
+    return payload.result as T;
+  }
+  throw new Error("Octop Memory requires Python 3.12+ and octop-memory==1.0.4. Install with python -m pip install octop-memory==1.0.4, then set YA_MEMORY_PYTHON to that interpreter if needed.");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function expectString(value: unknown, field: string): string {
-  if (typeof value !== "string") throw new Error(`Invalid memory card ${field}.`);
-  return value;
+function hasMemory(): boolean {
+  return existsSync(memoryPath()) || existsSync(join(dataHome(), "memory.json"));
 }
 
 export function loadMemoryCards(): MemoryCard[] {
-  const path = memoryPath();
-  if (!existsSync(path)) return [];
-  const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  if (!Array.isArray(value)) throw new Error("Memory file must contain a JSON array.");
-  return value.map(fromStored);
-}
-
-export function saveMemoryCards(cards: readonly MemoryCard[]): void {
-  withMemoryLock(`${memoryPath()}.lock`, () => writeMemoryCards(cards));
-}
-
-function writeMemoryCards(cards: readonly MemoryCard[]): void {
-  const path = memoryPath();
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const descriptor = openSync(temporary, "wx", 0o600);
-  try {
-    try {
-      writeFileSync(descriptor, `${JSON.stringify(cards.map(toStored), null, 2)}\n`, "utf8");
-      fsyncSync(descriptor);
-    } finally { closeSync(descriptor); }
-    renameSync(temporary, path);
-  } finally {
-    try { unlinkSync(temporary); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  }
-}
-
-export function normalizeMemoryText(text: string): string {
-  return text.normalize("NFKC").toLocaleLowerCase("und").replaceAll("ß", "ss").replace(/\s+/gu, " ").trim();
+  return listCards();
 }
 
 export function createCandidate(text: string, evidence: string, kind: MemoryKind = "procedure"): MemoryCard {
   if (!(["preference", "procedure", "knowledge"] as const).includes(kind)) {
     throw new Error("memory kind must be preference, procedure, or knowledge.");
   }
-  return withMemoryLock(`${memoryPath()}.lock`, () => {
-    const cards = loadMemoryCards();
-    const normalizedText = normalizeMemoryText(text);
-    const duplicate = cards.find(
-      (card) => card.kind === kind && ACTIVE_STATUSES.has(card.status) && normalizeMemoryText(card.text) === normalizedText,
-    );
-    if (duplicate) throw new DuplicateMemoryError(duplicate);
-    if (cards.length >= MAX_MEMORY_CARDS) {
-      throw new MemoryLimitError(`Memory card limit (${MAX_MEMORY_CARDS}) reached. Run: ya memory prune`);
-    }
-    const card: MemoryCard = {
-      id: randomUUID().replaceAll("-", "").slice(0, 8),
-      kind,
-      text: text.trim(),
-      evidence: evidence.trim(),
-      status: "candidate",
-      createdAt: new Date().toISOString(),
-      version: 1,
-    };
-    cards.push(card);
-    writeMemoryCards(cards);
-    return card;
-  });
+  if (!text.trim()) throw new Error("memory text must not be empty.");
+  return callMemory("create", { text: text.trim(), evidence: evidence.trim(), kind });
 }
 
 export function listCards(status?: MemoryStatus): MemoryCard[] {
-  const cards = loadMemoryCards();
-  return status ? cards.filter((card) => card.status === status) : cards;
+  return hasMemory() ? callMemory("list", { status }) : [];
 }
 
 export function setStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): MemoryCard {
   if (!(["approved", "rejected", "revoked"] as const).includes(status)) throw new Error("invalid memory status");
-  return withMemoryLock(`${memoryPath()}.lock`, () => {
-    const cards = loadMemoryCards();
-    const card = cards.find((candidate) => candidate.id === cardId);
-    if (!card) throw new Error("memory card not found");
-    card.status = status;
-    card.version += 1;
-    writeMemoryCards(cards);
-    return card;
-  });
+  return callMemory("status", { cardId, status });
 }
 
 export function cardsToPrune(includeCandidates = false): MemoryCard[] {
-  return loadMemoryCards().filter(
-    (card) => DEFAULT_PRUNE_STATUSES.has(card.status) || (includeCandidates && card.status === "candidate"),
-  );
+  return listCards().filter((card) => card.status === "rejected" || card.status === "revoked"
+    || (includeCandidates && card.status === "candidate"));
 }
 
 export function pruneCards(confirmedIds: readonly string[], includeCandidates = false): MemoryCard[] {
-  const confirmed = new Set(confirmedIds);
-  return withMemoryLock(`${memoryPath()}.lock`, () => {
-    const cards = loadMemoryCards();
-    const removed = cards.filter(
-      (card) => confirmed.has(card.id) && (DEFAULT_PRUNE_STATUSES.has(card.status) || (includeCandidates && card.status === "candidate")),
-    );
-    if (removed.length > 0) {
-      const removedIds = new Set(removed.map((card) => card.id));
-      writeMemoryCards(cards.filter((card) => !removedIds.has(card.id)));
-    }
-    return removed;
-  });
-}
-
-function englishWords(text: string): Set<string> {
-  return new Set((text.match(/[a-z0-9][a-z0-9_-]*/g) ?? []).filter((word) => word.length >= 2 && !ENGLISH_STOP_WORDS.has(word)));
-}
-
-function englishPhrases(text: string): Set<string> {
-  const words = (text.match(/[a-z0-9][a-z0-9_-]*/g) ?? []).filter((word) => !ENGLISH_STOP_WORDS.has(word));
-  return new Set(words.slice(0, -1).map((word, index) => `${word} ${words[index + 1]}`));
-}
-
-function hanNgrams(text: string, width: number): Set<string> {
-  const grams = new Set<string>();
-  for (const run of text.match(/[\u4e00-\u9fff]+/g) ?? []) {
-    for (let index = 0; index <= run.length - width; index += 1) {
-      const gram = run.slice(index, index + width);
-      if (!CHINESE_STOP_PHRASES.has(gram)) grams.add(gram);
-    }
-  }
-  return grams;
-}
-
-function intersectionSize(left: Set<string>, right: Set<string>): number {
-  let count = 0;
-  for (const value of left) if (right.has(value)) count += 1;
-  return count;
-}
-
-export function memoryScore(task: string, card: MemoryCard): number {
-  const taskText = normalizeMemoryText(task);
-  const cardText = normalizeMemoryText(card.text);
-  if (!taskText || !cardText) return 0;
-  const sharedWords = intersectionSize(englishWords(taskText), englishWords(cardText));
-  const sharedBigrams = intersectionSize(hanNgrams(taskText, 2), hanNgrams(cardText, 2));
-  const sharedPhrases = intersectionSize(englishPhrases(taskText), englishPhrases(cardText)) > 0
-    || intersectionSize(hanNgrams(taskText, 3), hanNgrams(cardText, 3)) > 0;
-  const exactContainment = Math.min(taskText.length, cardText.length) >= 4
-    && (taskText.includes(cardText) || cardText.includes(taskText));
-  return (sharedPhrases || exactContainment ? 5 : 0) + 3 * sharedWords + sharedBigrams;
+  return hasMemory() ? callMemory("prune", { confirmedIds, includeCandidates }) : [];
 }
 
 export function selectRelevantCards(task: string, limit = MAX_RELEVANT_MEMORY_CARDS): MemoryMatch[] {
-  return listCards("approved")
-    .map((card) => ({ card, score: memoryScore(task, card) }))
-    .filter((match) => match.score >= MIN_RELEVANCE_SCORE)
-    .sort((left, right) => {
-      if (left.score !== right.score) return right.score - left.score;
-      const dateDifference = (Date.parse(right.card.createdAt) || 0) - (Date.parse(left.card.createdAt) || 0);
-      return dateDifference || left.card.id.localeCompare(right.card.id);
-    })
-    .slice(0, limit);
+  if (!Number.isInteger(limit) || limit < 0) throw new Error("memory recall limit must be a non-negative integer.");
+  if (!task.trim() || limit === 0 || !hasMemory()) return [];
+  return callMemory("recall", { query: task, limit });
 }
 
 export function relevantContext(task: string, limit = MAX_RELEVANT_MEMORY_CARDS): string {

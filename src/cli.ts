@@ -256,11 +256,11 @@ function showMemory(task: string, io: CliIo): void {
   const matches = selectRelevantCards(task);
   write(io.stdout, "\n[Ya memory context]\n");
   if (matches.length === 0) {
-    write(io.stdout, "  No approved memory met the relevance threshold.\n");
+    write(io.stdout, "  No relevant approved memory found.\n");
     return;
   }
   for (const match of matches) {
-    write(io.stdout, `  ${match.card.id}  score ${String(match.score).padEnd(2)} ${match.card.kind.padEnd(10)} ${match.card.text}\n`);
+    write(io.stdout, `  ${match.card.id}  ${match.card.kind.padEnd(10)} ${match.card.text}\n`);
   }
 }
 

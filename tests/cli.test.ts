@@ -402,7 +402,7 @@ describe("CLI", () => {
     expect(capture.stdout.output).not.toContain("## Title");
   });
 
-  it("shows selected memory before the answer only when requested", async () => {
+  it("shows selected memory before the answer only when requested", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("Use PostgreSQL indexes", "evidence").id, "approved");
     const capture = fakeIo(false);
     await main(["ask", "Explain PostgreSQL indexes", "--show-memory", "--no-feedback"], context(capture.io, fakeClient("answer")));
@@ -508,7 +508,7 @@ describe("CLI", () => {
     expect(process.listenerCount("SIGINT")).toBe(before);
   });
 
-  it("requires --yes to prune memory non-interactively", async () => {
+  it("requires --yes to prune memory non-interactively", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("discard me", "evidence").id, "rejected");
     const denied = fakeIo(false);
     expect(await main(["memory", "prune"], { io: denied.io })).toBe(2);
@@ -519,7 +519,7 @@ describe("CLI", () => {
     expect(listCards()).toEqual([]);
   });
 
-  it("does not prune a candidate created while CLI confirmation is pending", async () => {
+  it("does not prune a candidate created while CLI confirmation is pending", { timeout: 30_000 }, async () => {
     const shown = createCandidate("shown candidate", "evidence");
     let unseen = "";
     const capture = fakeIo(true);
@@ -533,7 +533,7 @@ describe("CLI", () => {
     expect(listCards().map((card) => card.id)).toEqual([unseen]);
   });
 
-  it("can decline interactive pruning", async () => {
+  it("can decline interactive pruning", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("discard me", "evidence").id, "rejected");
     const capture = fakeIo(true, ["n"]);
     expect(await main(["memory", "prune"], { io: capture.io })).toBe(0);

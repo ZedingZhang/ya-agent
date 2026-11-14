@@ -101,7 +101,7 @@ interface YaRendererBridge {
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask(options: Record<string, unknown>): Promise<RunResult>;
   cancelTask(): Promise<void>;
-  relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number }>>;
+  relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number | null }>>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;
   prunePreview(includeCandidates: boolean): Promise<MemoryCard[]>;
@@ -133,7 +133,7 @@ const TEXT = {
     ready: "Ready", working: "Ya is working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
     commands: "Allow command execution", stop: "Stop", stopping: "Stopping…", success: "Succeeded", failed: "Failed",
     timed_out: "Timed out", cancelled: "Cancelled", error: "Error", truncated: "Output truncated; showing the tail.",
-    noRelevant: "No approved memory meets the relevance threshold.", activity: "Activity", noActivity: "No local activity for this task.",
+    noRelevant: "No relevant approved memory found.", activity: "Activity", noActivity: "No local activity for this task.",
     pendingAction: "Pending action", noAction: "No action is waiting for approval.", approve: "Approve", deny: "Deny",
     noTasks: "Ask a question to begin.", answer: "Ya", learn: "Learn from this answer", noWorkspace: "Choose a workspace folder",
     status: "Status", kind: "Kind", text: "Text", evidence: "Evidence", actions: "Actions", candidateText: "What should Ya learn?",
@@ -175,7 +175,7 @@ const TEXT = {
     ready: "就绪", working: "Ya 正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
     commands: "允许命令执行", stop: "停止", stopping: "正在停止…", success: "成功", failed: "失败",
     timed_out: "超时", cancelled: "已取消", error: "错误", truncated: "输出已截断，显示末尾内容。",
-    noRelevant: "没有达到相关性阈值的已批准记忆。", activity: "活动", noActivity: "本次任务还没有本地活动。",
+    noRelevant: "没有找到相关的已批准记忆。", activity: "活动", noActivity: "本次任务还没有本地活动。",
     pendingAction: "待确认操作", noAction: "当前没有等待确认的操作。", approve: "批准", deny: "拒绝",
     noTasks: "输入问题即可开始。", answer: "Ya", learn: "从此回答中学习", noWorkspace: "请选择工作区文件夹",
     status: "状态", kind: "类别", text: "内容", evidence: "依据", actions: "操作", candidateText: "Ya 应该学到什么？",
@@ -1002,7 +1002,7 @@ async function renderRelevant(task: string): Promise<void> {
     for (const match of matches) {
       const item = document.createElement("div");
       item.className = "memory-chip";
-      item.textContent = `${match.card.kind} · ${match.score}\n${match.card.text}`;
+      item.textContent = `${match.card.kind}\n${match.card.text}`;
       panel.append(item);
     }
   } catch (error) {
