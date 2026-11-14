@@ -296,6 +296,8 @@ python -m pip install octop-memory==1.0.4
 
 Set `YA_MEMORY_PYTHON` to the full path of that environment's Python executable when using a virtual environment or launching the desktop app with a different PATH. Ya otherwise tries `python` and `py` on Windows, and `python3` and `python` on macOS/Linux. The Python adapter ships in npm, standalone CLI, and Electron packages. Python and the Octop package are installed separately. Reads of an empty memory store return an empty result. Runtime failures for an existing store include an actionable error.
 
+The memory adapter starts Python with `-E -P` to exclude the working directory from its default import path and ignore inherited `PYTHON*` settings, including `PYTHONPATH` and `PYTHONHOME`. Install Octop in the selected interpreter's environment or its standard user site-packages directory.
+
 On first access, Ya imports `memory.json` transactionally, preserving card IDs, kinds, evidence, statuses, creation times, and versions. A database marker makes migration resumable after failure and prevents repeated imports after success. The original JSON remains available as a backup, including records subsequently pruned from SQLite. Manual feedback and approval drive this integration.
 
 ## Desktop application

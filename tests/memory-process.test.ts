@@ -1,7 +1,7 @@
-import { execFileSync, fork, type ChildProcess } from "node:child_process";
-import { copyFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync, fork, spawnSync, type ChildProcess } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createCandidate, listCards, MAX_MEMORY_CARDS, setStatus } from "../src/memory";
 import { tempHome, type TempHome } from "./helpers";
@@ -43,6 +43,44 @@ describe("cross-process memory transactions", () => {
   afterAll(() => rmSync(compiled, { recursive: true, force: true }));
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
+
+  it.each([
+    { module: "octop_memory", pythonPath: "unset", override: false },
+    { module: "json", pythonPath: "unset", override: true },
+    { module: "sitecustomize", pythonPath: "relative", override: false },
+    { module: "octop_memory", pythonPath: "absolute-and-empty", override: true },
+  ])("ignores workspace $module imports with $pythonPath PYTHONPATH (override=$override)", ({ module, pythonPath, override }) => {
+    const workspace = join(home.path, "workspace");
+    mkdirSync(workspace);
+    writeFileSync(join(home.path, "memory.json"), "[]");
+    writeFileSync(join(workspace, `${module}.py`),
+      "with open('shadow-imported', 'w') as marker: marker.write('executed')\nraise RuntimeError('workspace module executed')\n");
+    const env = { ...process.env, YA_HOME: home.path };
+    delete env.PYTHONPATH;
+    delete env.YA_MEMORY_PYTHON;
+    if (pythonPath === "relative") env.PYTHONPATH = ".";
+    if (pythonPath === "absolute-and-empty") env.PYTHONPATH = `${workspace}${delimiter}`;
+    if (override) {
+      env.YA_MEMORY_PYTHON = execFileSync(process.env.YA_MEMORY_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
+        ["-E", "-P", "-X", "utf8", "-c", "import sys; print(sys.executable)"], { encoding: "utf8", timeout: 10_000 }).trim();
+    }
+    const result = spawnSync(process.execPath, ["-e", `
+      const assert = require('node:assert/strict');
+      const memory = require(process.argv[1]);
+      assert.deepEqual(memory.listCards(), []);
+      const card = memory.createCandidate('Use Python for automation', 'evidence');
+      assert.deepEqual(memory.selectRelevantCards('Python automation'), []);
+      memory.setStatus(card.id, 'approved');
+      assert.equal(memory.selectRelevantCards('Python automation')[0].card.id, card.id);
+      memory.setStatus(card.id, 'revoked');
+      assert.deepEqual(memory.selectRelevantCards('Python automation'), []);
+      assert.equal(memory.pruneCards([card.id])[0].id, card.id);
+      assert.deepEqual(memory.listCards(), []);
+    `, join(compiled, "memory.js")], { cwd: workspace, env, encoding: "utf8", timeout: 30_000 });
+    expect(existsSync(join(workspace, "shadow-imported"))).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  }, 30_000);
 
   it.each([20, 40])("persists concurrent creates and enforces the shared cap (%i per process)", async (count) => {
     const children = ["cli", "gui", "other"].map((prefix) => launch(home.path, { kind: "create", prefix, count }));

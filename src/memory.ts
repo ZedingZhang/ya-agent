@@ -55,7 +55,8 @@ function callMemory<T>(operation: string, params: Record<string, unknown> = {}):
   const interpreters = override ? [override] : process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
   const request = JSON.stringify({ operation, home: dataHome(), maxCards: MAX_MEMORY_CARDS, ...params });
   for (const interpreter of interpreters) {
-    const args = interpreter === "py" ? ["-3", "-X", "utf8", "-c", script] : ["-X", "utf8", "-c", script];
+    // Exclude workspace imports and inherited Python settings, including PYTHONPATH.
+    const args = interpreter === "py" ? ["-3", "-E", "-P", "-X", "utf8", "-c", script] : ["-E", "-P", "-X", "utf8", "-c", script];
     const response = spawnSync(interpreter, args, {
       input: request,
       encoding: "utf8",
