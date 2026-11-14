@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataHome } from "./config";
 
@@ -53,11 +53,15 @@ function callMemory<T>(operation: string, params: Record<string, unknown> = {}):
   const script = readFileSync(join(__dirname, "octop-memory.py"), "utf8");
   const override = process.env.YA_MEMORY_PYTHON;
   const interpreters = override ? [override] : process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
-  const request = JSON.stringify({ operation, home: dataHome(), maxCards: MAX_MEMORY_CARDS, ...params });
+  const home = dataHome();
+  mkdirSync(home, { recursive: true });
+  const request = JSON.stringify({ operation, home, maxCards: MAX_MEMORY_CARDS, ...params });
   for (const interpreter of interpreters) {
     // Exclude workspace imports and inherited Python settings, including PYTHONPATH.
     const args = interpreter === "py" ? ["-3", "-E", "-P", "-X", "utf8", "-c", script] : ["-E", "-P", "-X", "utf8", "-c", script];
     const response = spawnSync(interpreter, args, {
+      // Windows also searches the child working directory for the executable.
+      cwd: home,
       input: request,
       encoding: "utf8",
       windowsHide: true,

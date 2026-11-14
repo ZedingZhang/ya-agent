@@ -296,7 +296,7 @@ python -m pip install octop-memory==1.0.4
 
 使用虚拟环境或桌面应用的 PATH 与终端不同时，将 `YA_MEMORY_PYTHON` 设置为该环境中 Python 可执行文件的完整路径。默认在 Windows 依次查找 `python`、`py`，在 macOS/Linux 查找 `python3`、`python`。Python 适配脚本随 npm、独立 CLI 和 Electron 产物发布，Python 与 Octop 包需另外安装。空记忆库的读取返回空结果，已有记忆库的运行时故障会给出错误提示。
 
-记忆适配器通过 `-E -P` 启动 Python，从默认导入路径中排除工作目录，并忽略继承的 `PYTHON*` 设置，包括 `PYTHONPATH` 和 `PYTHONHOME`。请将 Octop 安装到所选解释器的环境或其标准用户 site-packages 目录中。
+记忆适配器以 Ya 状态目录为工作目录，让 Windows 从该目录开始查找可执行文件。适配器通过 `-E -P` 启动 Python，从默认导入路径中排除工作目录，并忽略继承的 `PYTHON*` 设置，包括 `PYTHONPATH` 和 `PYTHONHOME`。请将 Octop 安装到所选解释器的环境或其标准用户 site-packages 目录中。
 
 首次访问会通过事务导入 `memory.json`，保留卡片 ID、类型、证据、状态、创建时间和版本。数据库迁移标记支持失败后重试，并避免成功后重复导入。原始 JSON 作为备份保留，其中仍包含后来从 SQLite 清理的旧记录。本次接入由显式反馈与批准驱动。
 

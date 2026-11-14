@@ -54,7 +54,7 @@ describe("cross-process memory transactions", () => {
     mkdirSync(workspace);
     writeFileSync(join(home.path, "memory.json"), "[]");
     writeFileSync(join(workspace, `${module}.py`),
-      "with open('shadow-imported', 'w') as marker: marker.write('executed')\nraise RuntimeError('workspace module executed')\n");
+      `with open(${JSON.stringify(join(workspace, "shadow-imported"))}, 'w') as marker: marker.write('executed')\nraise RuntimeError('workspace module executed')\n`);
     const env = { ...process.env, YA_HOME: home.path };
     delete env.PYTHONPATH;
     delete env.YA_MEMORY_PYTHON;
@@ -78,6 +78,29 @@ describe("cross-process memory transactions", () => {
       assert.deepEqual(memory.listCards(), []);
     `, join(compiled, "memory.js")], { cwd: workspace, env, encoding: "utf8", timeout: 30_000 });
     expect(existsSync(join(workspace, "shadow-imported"))).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+  }, 30_000);
+
+  it.skipIf(process.platform !== "win32").each([true, false])("ignores a workspace python.exe (existing store=%s)", (existing) => {
+    const workspace = join(home.path, "workspace");
+    const store = join(home.path, "store");
+    mkdirSync(workspace);
+    // Node rejects Python's flags, making accidental execution observable without running untrusted code.
+    copyFileSync(process.execPath, join(workspace, "python.exe"));
+    if (existing) {
+      mkdirSync(store);
+      writeFileSync(join(store, "memory.json"), "[]");
+    }
+    const env = { ...process.env, YA_HOME: store };
+    delete env.YA_MEMORY_PYTHON;
+    const result = spawnSync(process.execPath, ["-e", `
+      const assert = require('node:assert/strict');
+      const memory = require(process.argv[1]);
+      assert.deepEqual(memory.listCards(), []);
+      const card = memory.createCandidate('Use Python for automation', 'evidence');
+      assert.equal(memory.listCards()[0].id, card.id);
+    `, join(compiled, "memory.js")], { cwd: workspace, env, encoding: "utf8", timeout: 30_000 });
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
   }, 30_000);
