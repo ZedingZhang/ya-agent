@@ -300,6 +300,8 @@ On Windows, the memory adapter resolves interpreter names from absolute director
 
 On first access, Ya imports `memory.json` transactionally, preserving card IDs, kinds, evidence, statuses, creation times, and versions. A database marker makes migration resumable after failure and prevents repeated imports after success. The original JSON remains available as a backup, including records subsequently pruned from SQLite. Manual feedback and approval drive this integration.
 
+Concurrent processes serialize Octop schema initialization using `memory.init.lock` beside the database. The operating system releases the lock when the initializer closes the file or exits.
+
 ## Desktop application
 
 The desktop application uses a two-column workspace inspired by the [official DeepSeek Harness desktop and sidebar sources](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop):

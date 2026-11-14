@@ -1,5 +1,5 @@
 import { execFileSync, fork, spawnSync, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -118,6 +118,48 @@ describe("cross-process memory transactions", () => {
       expect(new Set(cards.map((card) => card.text)).size).toBe(cards.length);
       expect(readdirSync(home.path)).toContain("memory.sqlite");
     } finally { await stop(children); }
+  }, 60_000);
+
+  it("serializes native schema initialization across processes", async () => {
+    const adapter = join(compiled, "octop-memory.py");
+    const source = readFileSync(adapter, "utf8");
+    const probe = `
+import os
+import time
+from octop_memory import Memory
+
+probe_home = Path(os.environ["YA_HOME"])
+(probe_home / f"ready-{os.getpid()}").touch()
+deadline = time.monotonic() + 15
+while len(list(probe_home.glob("ready-*"))) < 3:
+    if time.monotonic() > deadline:
+        raise RuntimeError("Initialization peers did not arrive")
+    time.sleep(0.01)
+
+original_init = Memory.__init__
+def checked_init(self, *args, **kwargs):
+    marker = probe_home / "initializing"
+    with marker.open("x"):
+        pass
+    try:
+        time.sleep(0.25)
+        original_init(self, *args, **kwargs)
+    finally:
+        marker.unlink()
+Memory.__init__ = checked_init
+`;
+    writeFileSync(adapter, source.replace('if __name__ == "__main__":', `${probe}\nif __name__ == "__main__":`));
+    const children = ["cli", "gui", "other"].map((prefix) => launch(home.path, { kind: "create", prefix, count: 1 }));
+    try {
+      await Promise.all(children.map(({ ready }) => ready));
+      for (const { child } of children) child.send("go");
+      const results = await Promise.allSettled(children.map(({ done }) => done));
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+      expect(listCards()).toHaveLength(3);
+    } finally {
+      await stop(children);
+      writeFileSync(adapter, source);
+    }
   }, 60_000);
 
   it("cannot overwrite a revoke with another process's earlier memory snapshot", async () => {

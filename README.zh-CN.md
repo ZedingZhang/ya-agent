@@ -300,6 +300,8 @@ python -m pip install octop-memory==1.0.4
 
 首次访问会通过事务导入 `memory.json`，保留卡片 ID、类型、证据、状态、创建时间和版本。数据库迁移标记支持失败后重试，并避免成功后重复导入。原始 JSON 作为备份保留，其中仍包含后来从 SQLite 清理的旧记录。本次接入由显式反馈与批准驱动。
 
+并发进程通过数据库旁的 `memory.init.lock` 文件串行执行 Octop 表结构初始化。初始化进程关闭文件或退出时，操作系统会释放该锁。
+
 ## 桌面应用
 
 桌面端参考 [DeepSeek Harness 官方 Desktop 与侧栏源码](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop)，采用两栏工作区：

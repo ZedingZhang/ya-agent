@@ -200,7 +200,17 @@ def run(request):
 
     home = Path(request["home"])
     home.mkdir(parents=True, exist_ok=True)
-    memory = Memory(namespace="ya", backend_config={"db_path": str(home / "memory.sqlite")})
+    # Octop's schema migrations run before its transaction API is available.
+    # OS locks serialize openers and are released even if a process exits early.
+    with (home / "memory.init.lock").open("a+b") as lock:
+        lock.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        memory = Memory(namespace="ya", backend_config={"db_path": str(home / "memory.sqlite")})
     try:
         with memory.backend.transaction():
             # Acquire SQLite's writer lock before reading host state. Concurrent
