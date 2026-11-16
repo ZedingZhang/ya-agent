@@ -30,7 +30,34 @@ export {
   isImageDetail,
 } from "./images";
 export type { ImageFileInfo, SupportedImageMimeType } from "./images";
-export { runTask } from "./service";
+export {
+  ACTIVE_TASK_STATUSES,
+  StaleTaskRecordError,
+  TASK_STATUSES,
+  TASK_STORE_VERSION,
+  TERMINAL_TASK_STATUSES,
+  TaskStore,
+  TaskTransitionError,
+  getTask,
+  listTasks,
+  openTaskStore,
+  readTask,
+  reconcileInterruptedTasks,
+  redactSecrets,
+  runTask,
+  tasksPath,
+  validateWorkspaceIdentity,
+} from "./service";
+export type {
+  CreateTaskInput,
+  ListTasksOptions,
+  RunTaskOptions,
+  TaskExecutionOptions,
+  TaskRecord,
+  TaskStatus,
+  TaskStoreOptions,
+  TransitionTaskInput,
+} from "./service";
 export { runCommand } from "./commands";
 export type { CommandEvent, CommandOptions, CommandResult } from "./commands";
 export { LocalWorkspace, LOCAL_RUN_TOOL } from "./local";

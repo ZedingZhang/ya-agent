@@ -11,6 +11,8 @@ import {
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
+import { DeepSeekClient } from "../src/deepseek";
+import { TaskStore, runTask } from "../src/service";
 import type { ConversationMessage, UserImageContentPart } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 import { clearAccountCredential, saveAccountCredential } from "../src/credentials";
@@ -291,6 +293,57 @@ describe("GUI controller", () => {
     expect(controller.prune(true).map((card) => card.id)).toEqual([shown.id]);
     expect(controller.cards().map((card) => card.id)).toEqual([unseen.id]);
     expect(() => controller.prune(true)).toThrow(/Preview/u);
+  });
+
+  it("classifies previously active tasks as interrupted on controller startup and persists session-linked runs", async () => {
+    const workspace = join(home.path, "workspace");
+    mkdirSync(workspace);
+    const previousProcessStore = new TaskStore();
+    const orphaned = previousProcessStore.create({
+      objective: "Previous process task",
+      sessionId: "session-previous",
+      workspace,
+      options: { local: true, commandsEnabled: true, webMode: "off" },
+    });
+
+    const controller = new GuiController((apiKey, task, config, options = {}) => runTask(apiKey, task, config, {
+      ...options,
+      clientFactory: (key) => new DeepSeekClient(key, async () =>
+        Response.json({ choices: [{ message: { role: "assistant", content: "Completed GUI task" } }] })),
+    }));
+    expect(controller.task(orphaned.id)).toMatchObject({
+      id: orphaned.id,
+      objective: "Previous process task",
+      sessionId: "session-previous",
+      workspace: realpathSync(workspace),
+      status: "interrupted",
+      revision: 2,
+    });
+
+    controller.setSessionApiKey("gui-session-secret");
+    controller.setWorkspace(workspace);
+    const result = await controller.run({
+      sessionId: "session-current",
+      task: "Run current GUI task",
+      local: true,
+      exec: true,
+      webMode: "off",
+    });
+    expect(result.taskId).toBeTruthy();
+    expect(controller.task(result.taskId!)).toMatchObject({
+      id: result.taskId,
+      objective: "Run current GUI task",
+      sessionId: "session-current",
+      workspace: realpathSync(workspace),
+      status: "completed",
+      revision: 2,
+      options: { local: true, commandsEnabled: true, webMode: "off" },
+    });
+    expect(controller.tasks().map((record) => ({ id: record.id, status: record.status }))).toEqual([
+      { id: orphaned.id, status: "interrupted" },
+      { id: result.taskId!, status: "completed" },
+    ]);
+    expect(JSON.stringify(controller.tasks())).not.toContain("gui-session-secret");
   });
 });
 

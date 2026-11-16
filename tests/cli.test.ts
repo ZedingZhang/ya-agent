@@ -7,6 +7,7 @@ import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, LocalWorkspace, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
+import { listTasks } from "../src/service";
 import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
@@ -557,5 +558,23 @@ describe("CLI", () => {
     const capture = fakeIo();
     expect(await main(["audit", "clear", "--yes"], { io: capture.io })).toBe(0);
     expect(capture.stdout.output).toContain("No audit logs to delete");
+  });
+
+  it("persists CLI task lifecycle records through the shared service without storing credentials", async () => {
+    const capture = fakeIo();
+    expect(await main(["ask", "Inspect workspace", "--local", "--workspace", home.path, "--web", "off", "--no-feedback"], context(capture.io))).toBe(0);
+    const records = listTasks();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      objective: "Inspect workspace",
+      status: "completed",
+      revision: 2,
+      options: {
+        local: true,
+        commandsEnabled: false,
+        webMode: "off",
+      },
+    });
+    expect(JSON.stringify(records)).not.toContain("key");
   });
 });

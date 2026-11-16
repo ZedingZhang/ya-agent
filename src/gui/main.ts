@@ -144,6 +144,18 @@ function isTrustedRendererUrl(value: string): boolean {
 
 function validateTaskOptions(value: unknown): RendererTaskOptions {
   if (!isRecord(value) || typeof value.task !== "string" || !value.task.trim()) throw new Error("Enter a task first.");
+  let sessionId: string | undefined;
+  if (value.sessionId !== undefined) {
+    if (
+      typeof value.sessionId !== "string"
+      || !value.sessionId.trim()
+      || value.sessionId.trim().length > 128
+      || /[\x00-\x1F\x7F]/u.test(value.sessionId)
+    ) {
+      throw new Error("Invalid session ID.");
+    }
+    sessionId = value.sessionId.trim();
+  }
   const webMode = value.webMode;
   if (webMode !== "auto" && webMode !== "on" && webMode !== "off") throw new Error("Invalid web mode.");
   const workers = value.toaWorkers;
@@ -166,6 +178,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     return { role: message.role, content: message.content };
   });
   return {
+    ...(sessionId ? { sessionId } : {}),
     task: value.task.trim(),
     history: messages,
     webMode,

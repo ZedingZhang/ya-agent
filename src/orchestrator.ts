@@ -51,6 +51,7 @@ const WORKER_PROMPTS = {
 const WEB_AUTO_PATTERN = /\b(latest|current|today|news|price|prices|stock|weather|schedule|law|regulation|research|source|sources|cite|citation|compare|recommend|review)\b|最新|今天|新闻|价格|股价|天气|赛程|法律|法规|研究|来源|引用|对比|比较|推荐|评测/iu;
 
 export interface RunResult {
+  taskId?: string;
   content: string;
   mode: "single" | "toa";
   usage: TokenUsage;
