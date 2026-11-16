@@ -118,21 +118,20 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .busy-answer { color: var(--muted); }
 .composer-area { min-width: 0; width: min(808px, 100%); margin: 0 auto; padding: 0 24px 16px; }
 .composer { position: relative; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: var(--shadow-md); transition: border-color 140ms ease, box-shadow 140ms ease; }
-.composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-md); }
+.composer:focus-within { border-color: var(--accent); }
 .composer:has(#task-input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 textarea, input, select { color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; outline: none; }
-textarea:focus, input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+textarea:focus, input:focus, select:focus { border-color: var(--accent); }
 textarea { width: 100%; padding: 10px 11px; resize: vertical; line-height: 1.6; }
 input, select { min-height: 34px; padding: 6px 9px; }
 #task-input { display: block; min-height: 58px; max-height: 220px; padding: 6px 8px 8px; border: 0; resize: none; background: transparent; font-size: 14px; box-shadow: none; }
-#task-input:focus { box-shadow: none; }
 #task-input:focus-visible { outline: none; }
 #task-input::placeholder { color: var(--muted); }
 .composer-toolbar { display: flex; min-width: 0; align-items: center; gap: 4px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
 .composer-select { display: flex; min-width: 0; align-items: center; }
 .composer-select select { min-width: 0; min-height: 26px; max-width: 190px; padding: 3px 8px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 999px; background: var(--surface-muted); font-size: 11.5px; font-weight: 500; cursor: pointer; }
 .composer-select select:hover { color: var(--text); background: var(--hover); border-color: var(--border-strong); }
-.composer-select select:focus { box-shadow: none; border-color: var(--accent); }
+.composer-select select:focus { border-color: var(--accent); }
 .control-spacer { flex: 1; }
 .task-options { position: relative; }
 .task-options summary { list-style: none; }
@@ -168,6 +167,7 @@ button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 aut
 .command-run > summary::before { flex: 0 0 auto; color: var(--muted); content: "›"; font-size: 15px; line-height: 1; }
 .command-run[open] > summary::before { transform: rotate(90deg); }
 .command-run > summary:hover { color: var(--text); }
+.command-run > summary:focus-visible { outline-offset: -3px; }
 .command-run pre { margin: 0; padding: 8px 12px; max-height: 240px; overflow: auto; border-top: 1px solid var(--border); white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .command-run pre:empty { display: none; }
 .command-stderr { color: var(--danger); }
