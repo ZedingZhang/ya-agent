@@ -113,7 +113,7 @@ export async function runTask(
   const history = options.history ?? [];
   const toa = Boolean(options.toa);
   const toaWorkers = options.toaWorkers ?? 2;
-  if (toa && toaWorkers !== 1 && toaWorkers !== 2) throw new Error("ToA workers must be 1 or 2.");
+  if (toaWorkers !== 1 && toaWorkers !== 2) throw new Error("ToA workers must be 1 or 2.");
   assertImageCount(images.length);
   assertImageInputSupported(config.model, images.length);
 
@@ -140,13 +140,16 @@ export async function runTask(
       historyLength: history.length,
     },
   });
-  options.onTaskCreated?.(record);
+  const taskId = record.id;
+  const initialRevision = record.revision;
+  options.onTaskCreated?.(structuredClone(record));
 
+  let result: RunResult;
   try {
     options.signal?.throwIfAborted();
     const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
     const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
-    const result = toa
+    result = toa
       ? await toaAgent(client, task, config, toaWorkers, webSearch, images, history, options.signal)
       : await singleAgent(
           client,
@@ -160,18 +163,12 @@ export async function runTask(
           history,
         );
     options.signal?.throwIfAborted();
-    store.transition(record.id, "completed", {
-      expectedRevision: record.revision,
-      mode: result.mode,
-      partial: Boolean(result.partial),
-    });
-    return { ...result, taskId: record.id };
   } catch (error) {
     const terminalStatus = options.signal?.aborted ? "cancelled" : "failed";
     const rawMessage = error instanceof Error ? error.message : String(error);
     try {
-      store.transition(record.id, terminalStatus, {
-        expectedRevision: record.revision,
+      store.transition(taskId, terminalStatus, {
+        expectedRevision: initialRevision,
         error: redactSecrets(rawMessage, apiKey),
       });
     } catch (transitionError) {
@@ -181,4 +178,11 @@ export async function runTask(
     }
     throw error;
   }
+
+  store.transition(taskId, "completed", {
+    expectedRevision: initialRevision,
+    mode: result.mode,
+    partial: Boolean(result.partial),
+  });
+  return { ...result, taskId };
 }

@@ -32,9 +32,15 @@ const VALID_WEB_MODES: readonly WebMode[] = ["auto", "on", "off"];
 const FORBIDDEN_SECRET_KEYS = new Set([
   "apikey",
   "api_key",
+  "deepseekapikey",
   "token",
+  "authtoken",
   "access_token",
+  "accesstoken",
   "refresh_token",
+  "refreshtoken",
+  "clientsecret",
+  "privatekey",
   "credential",
   "credentials",
   "password",
@@ -179,13 +185,17 @@ export function validateWorkspaceIdentity(value: string): string {
 }
 
 function assertNoSecretFields(value: unknown, context: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoSecretFields(item, `${context}[${index}]`));
+    return;
+  }
   if (!isRecord(value)) return;
   for (const [key, child] of Object.entries(value)) {
     const normalized = key.toLocaleLowerCase("und");
     if (FORBIDDEN_SECRET_KEYS.has(normalized)) {
       throw new Error(`Task records must not contain credential field "${key}" in ${context}.`);
     }
-    if (isRecord(child)) assertNoSecretFields(child, `${context}.${key}`);
+    assertNoSecretFields(child, `${context}.${key}`);
   }
 }
 
@@ -534,14 +544,7 @@ export class TaskStore {
     }
   }
 
-  /**
-   * Classifies any records left active by a previous process/runtime as interrupted.
-   * Does not start or resume task execution.
-   */
-  reconcileInterrupted(): TaskRecord[] {
-    const file = this.path;
-    if (!existsSync(file)) return [];
-    const records = this.readStoreFile();
+  private interruptStaleRecords(records: readonly StoredTaskRecord[]): { records: StoredTaskRecord[]; changed: boolean } {
     let changed = false;
     const updated = records.map((record): StoredTaskRecord => {
       if (record.status !== "running" || this.isRecordActive(record)) return record;
@@ -556,6 +559,17 @@ export class TaskStore {
         ended_at: record.ended_at ?? timestamp,
       };
     });
+    return { records: updated, changed };
+  }
+
+  /**
+   * Classifies any records left active by a previous process/runtime as interrupted.
+   * Does not start or resume task execution.
+   */
+  reconcileInterrupted(): TaskRecord[] {
+    const file = this.path;
+    if (!existsSync(file)) return [];
+    const { records: updated, changed } = this.interruptStaleRecords(this.readStoreFile());
     if (changed) this.writeStoreFile(updated);
     return updated
       .filter((record) => record.status === "interrupted")
@@ -583,8 +597,12 @@ export class TaskStore {
     }
 
     const existing = this.readStoreFile();
+    if (existing.some((record) => this.isRecordActive(record))) {
+      throw new Error("A task is already running.");
+    }
+    const { records: baseRecords } = this.interruptStaleRecords(existing);
     let id = randomUUID();
-    while (existing.some((record) => record.id === id)) {
+    while (baseRecords.some((record) => record.id === id)) {
       id = randomUUID();
     }
     const timestamp = nextTimestamp(this.now);
@@ -601,7 +619,7 @@ export class TaskStore {
       updated_at: timestamp,
       runtime_id: this.runtimeId,
     };
-    this.writeStoreFile([...existing, stored]);
+    this.writeStoreFile([...baseRecords, stored]);
     this.activeTaskIds.add(id);
     return toPublicRecord(stored, true);
   }
@@ -649,6 +667,7 @@ export class TaskStore {
       throw new Error("Invalid task error message.");
     }
 
+    const sanitizedError = details.error !== undefined ? redactSecrets(details.error) : undefined;
     const timestamp = nextTimestamp(this.now, current.updated_at);
     const { runtime_id: _runtimeId, ...rest } = current;
     const updated: StoredTaskRecord = {
@@ -660,7 +679,7 @@ export class TaskStore {
       ...(nextStatus === "completed" ? { completed_at: timestamp } : {}),
       ...(details.mode ? { mode: details.mode } : {}),
       ...(details.partial !== undefined ? { partial: details.partial } : {}),
-      ...(details.error !== undefined && details.error.length > 0 ? { error: details.error } : {}),
+      ...(sanitizedError !== undefined && sanitizedError.length > 0 ? { error: sanitizedError } : {}),
     };
     const nextRecords = [...records];
     nextRecords[index] = updated;

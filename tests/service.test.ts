@@ -464,11 +464,6 @@ describe("durable task identity and lifecycle records", () => {
 
     shouldFailWrite = true;
     expect(() => store.transition(first.id, "completed", { expectedRevision: 1 })).toThrow("Simulated disk write interruption");
-    expect(() => store.create({ objective: "Second task that fails to write" })).toThrow("Simulated disk write interruption");
-
-    // Also leave an uncleaned sibling .tmp file on disk as if a process crashed mid-write.
-    writeFileSync(`${tasksPath()}.99999.crashed.tmp`, '{"version":1,"tasks":[', "utf8");
-
     expect(store.get(first.id)).toEqual(first);
     expect(store.list()).toEqual([first]);
 
@@ -476,7 +471,90 @@ describe("durable task identity and lifecycle records", () => {
     shouldFailWrite = false;
     const completed = store.transition(first.id, "completed", { expectedRevision: 1, mode: "single" });
     expect(completed).toMatchObject({ id: first.id, status: "completed", revision: 2 });
+
+    // A write failure when creating a subsequent task also leaves the completed record intact.
+    shouldFailWrite = true;
+    expect(() => store.create({ objective: "Second task that fails to write" })).toThrow("Simulated disk write interruption");
+
+    // Also leave an uncleaned sibling .tmp file on disk as if a process crashed mid-write.
+    writeFileSync(`${tasksPath()}.99999.crashed.tmp`, '{"version":1,"tasks":[', "utf8");
+
+    expect(store.get(first.id)).toEqual(completed);
+    expect(store.list()).toEqual([completed]);
     expect(new TaskStore().get(first.id)).toEqual(completed);
+  });
+
+  it("enforces the single-active-task limit and isolates onTaskCreated and completion writes", async () => {
+    const store = new TaskStore();
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let capturedId = "";
+
+    const firstRun = runTask("test-key", "Active task", new ModelConfig(), {
+      taskStore: store,
+      webMode: "off",
+      onTaskCreated: (record) => {
+        capturedId = record.id;
+        // Mutating the callback snapshot must not affect runTask's own completion update.
+        record.id = "mutated-id";
+        record.revision = 999;
+      },
+      clientFactory: () => ({
+        completeStream: async () => ({ content: "unused", toolCalls: [], usage: {}, assistantMessage: { role: "assistant", content: "unused" } }),
+        runWithTools: async () => {
+          await firstBlocked;
+          return { content: "First finished", toolCalls: [], usage: {}, assistantMessage: { role: "assistant", content: "First finished" } };
+        },
+      }) as unknown as DeepSeekClient,
+    });
+
+    await vi.waitFor(() => expect(capturedId).not.toBe(""));
+    expect(() => store.create({ objective: "Concurrent store task" })).toThrow("A task is already running.");
+    await expect(runTask("test-key", "Concurrent runTask", new ModelConfig(), {
+      taskStore: store,
+      webMode: "off",
+    })).rejects.toThrow("A task is already running.");
+
+    const active = store.get(capturedId);
+    expect(active).toMatchObject({ id: capturedId, objective: "Active task", status: "running", revision: 1 });
+    expect(store.list()).toEqual([active]);
+
+    releaseFirst();
+    const firstResult = await firstRun;
+    expect(firstResult.taskId).toBe(capturedId);
+    expect(store.get(capturedId)).toMatchObject({
+      id: capturedId,
+      status: "completed",
+      revision: 2,
+      mode: "single",
+    });
+  });
+
+  it("does not downgrade a completed execution to failed if persisting completion fails", async () => {
+    let failNextWrite = false;
+    const store = new TaskStore({
+      writeFile: (temporaryPath, content) => {
+        if (failNextWrite) throw new Error("Disk full on completion write");
+        writeFileSync(temporaryPath, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      },
+    });
+    let createdId = "";
+
+    await expect(runTask("test-key", "Task with completion write fault", new ModelConfig(), {
+      taskStore: store,
+      webMode: "off",
+      onTaskCreated: (record) => { createdId = record.id; },
+      clientFactory: (key) => new DeepSeekClient(key, async () => {
+        failNextWrite = true;
+        return Response.json({ choices: [{ message: { role: "assistant", content: "Model succeeded" } }] });
+      }),
+    })).rejects.toThrow("Disk full on completion write");
+
+    expect(store.get(createdId)).toMatchObject({
+      id: createdId,
+      status: "running",
+      revision: 1,
+    });
   });
 
   it("performs no execution or disk writes on read/list and excludes API keys and account credentials", async () => {
@@ -525,9 +603,21 @@ describe("durable task identity and lifecycle records", () => {
       options: { apiKey: apiKeySecret } as unknown as TaskRecord["options"],
     })).toThrow(/credential/iu);
     expect(() => store.create({
+      objective: "Reject nested secret fields",
+      options: { nested: [{ accessToken: accountSecret }] } as unknown as TaskRecord["options"],
+    })).toThrow(/credential/iu);
+    expect(() => store.create({
       objective: "Reject missing workspace",
       workspace: join(home.path, "does-not-exist"),
     })).toThrow(/does not exist/iu);
+
+    const directStore = new TaskStore();
+    const direct = directStore.create({ objective: "Direct transition redaction" });
+    const failed = directStore.transition(direct.id, "failed", {
+      expectedRevision: 1,
+      error: `Auth failed Bearer ${apiKeySecret} x-dsh-auth-token=${accountSecret}`,
+    });
+    expect(failed.error).toBe("Auth failed Bearer [redacted] x-dsh-auth-token=[redacted]");
     expect(existsSync(tasksPath())).toBe(true);
   });
 });
