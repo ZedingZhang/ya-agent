@@ -1,25 +1,25 @@
 :root {
   color-scheme: light dark;
-  --background: #f9fafb;
-  --sidebar: #f2f4f8;
+  --background: #fafafb;
+  --sidebar: #f4f5f7;
   --surface: #ffffff;
-  --surface-muted: #f1f3f8;
-  --hover: #e8ecf4;
-  --active-bg: #eef0ff;
-  --active-text: #4f46e5;
-  --border: #e2e6f0;
-  --border-strong: #cdd4e4;
-  --text: #11141c;
-  --text-secondary: #464e62;
-  --muted: #6c768d;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-soft: rgb(79 70 229 / 10%);
-  --focus-ring: rgb(79 70 229 / 20%);
-  --success: #15803d;
-  --success-soft: #ecfdf3;
-  --danger: #dc2626;
-  --danger-soft: #fef2f2;
+  --surface-muted: #f2f3f5;
+  --hover: #ebedf0;
+  --active-bg: #eaecf1;
+  --active-text: #272b34;
+  --border: #e4e6eb;
+  --border-strong: #d3d7df;
+  --text: #16181d;
+  --text-secondary: #4e5460;
+  --muted: #767d8a;
+  --accent: #46526e;
+  --accent-hover: #38435c;
+  --accent-soft: rgb(70 82 110 / 9%);
+  --focus-ring: rgb(70 82 110 / 16%);
+  --success: #2f7347;
+  --success-soft: #f0f6f2;
+  --danger: #b5453c;
+  --danger-soft: #faf1f0;
   --shadow-sm: 0 1px 2px rgb(15 23 42 / 5%), 0 0 0 1px rgb(15 23 42 / 2%);
   --shadow-md: 0 8px 24px -4px rgb(15 23 42 / 8%), 0 2px 6px -1px rgb(15 23 42 / 4%);
   --shadow-lg: 0 16px 36px -6px rgb(15 23 42 / 14%), 0 4px 12px -2px rgb(15 23 42 / 6%);
@@ -44,7 +44,7 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .app-sidebar { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 0 10px; background: var(--sidebar); border-right: 1px solid var(--border); }
 .sidebar-header { display: flex; height: 54px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 4px 0 8px; }
 .brand { display: flex; align-items: center; gap: 9px; }
-.brand-mark { display: grid; width: 20px; height: 20px; place-items: center; background: linear-gradient(135deg, var(--accent), #7c3aed); border-radius: 6px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 30%), 0 2px 6px rgb(79 70 229 / 28%); }
+.brand-mark { display: grid; width: 20px; height: 20px; place-items: center; background: linear-gradient(135deg, var(--accent), #5c6b8a); border-radius: 6px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 26%), 0 2px 6px rgb(39 43 52 / 18%); }
 .brand-mark::after { width: 6px; height: 6px; content: ""; background: #fff; border-radius: 50%; }
 .brand-name { font-size: 15px; font-weight: 600; letter-spacing: -.02em; }
 .sidebar-navigation { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 3px; }
@@ -155,13 +155,13 @@ input, select { min-height: 34px; padding: 6px 9px; }
 .prompt-images { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; font-size: 11px; }
 .prompt-image { padding: 2px 8px; color: var(--text-secondary); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; font-weight: 400; }
 button.primary, button.secondary, button.danger, .small-button { min-height: 32px; padding: 6px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 500; }
-button.primary { color: #fff; background: var(--accent); box-shadow: 0 1px 2px rgb(79 70 229 / 25%); }
+button.primary { color: #fff; background: var(--accent); box-shadow: 0 1px 2px rgb(39 43 52 / 18%); }
 button.primary:hover { background: var(--accent-hover); }
 button.secondary, .small-button { background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm); }
 button.secondary:hover, .small-button:hover { background: var(--hover); }
 button.danger { color: var(--danger); background: transparent; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border-strong)); }
 button.danger:hover { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 50%, var(--border-strong)); }
-button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 auto; place-items: center; padding: 5px; margin-left: 4px; border-radius: 50%; box-shadow: 0 2px 6px rgb(79 70 229 / 32%); }
+button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 auto; place-items: center; padding: 5px; margin-left: 4px; border-radius: 50%; box-shadow: 0 2px 6px rgb(39 43 52 / 20%); }
 .command-run { min-width: 0; margin-top: 12px; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-sm); }
 .command-run > summary { display: flex; align-items: baseline; gap: 8px; padding: 7px 12px; color: var(--text-secondary); background: var(--surface-muted); list-style: none; cursor: pointer; white-space: pre-wrap; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 500; }
 .command-run > summary::-webkit-details-marker { display: none; }
@@ -287,26 +287,26 @@ td.wide { white-space: normal; overflow-wrap: anywhere; }
 .prose th, .prose td { padding: 6px 9px; border: 1px solid var(--border); }
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0d0f14;
-    --sidebar: #090b10;
-    --surface: #13161f;
-    --surface-muted: #1a1e2a;
-    --hover: #212636;
-    --active-bg: rgb(99 102 241 / 16%);
-    --active-text: #c7d2fe;
-    --border: #222736;
-    --border-strong: #30374c;
-    --text: #f1f3f9;
-    --text-secondary: #b2bbd0;
-    --muted: #7e879e;
-    --accent: #6366f1;
-    --accent-hover: #818cf8;
-    --accent-soft: rgb(99 102 241 / 16%);
-    --focus-ring: rgb(99 102 241 / 28%);
-    --success: #4ade80;
-    --success-soft: rgb(34 197 94 / 14%);
-    --danger: #f87171;
-    --danger-soft: rgb(239 68 68 / 15%);
+    --background: #111317;
+    --sidebar: #0d0e12;
+    --surface: #17191f;
+    --surface-muted: #1e2128;
+    --hover: #242830;
+    --active-bg: rgb(125 141 176 / 14%);
+    --active-text: #d5dce8;
+    --border: #252932;
+    --border-strong: #333844;
+    --text: #eceef2;
+    --text-secondary: #a8b0be;
+    --muted: #78808f;
+    --accent: #687899;
+    --accent-hover: #7989ab;
+    --accent-soft: rgb(104 120 153 / 15%);
+    --focus-ring: rgb(104 120 153 / 24%);
+    --success: #5ea376;
+    --success-soft: rgb(94 163 118 / 13%);
+    --danger: #d4736a;
+    --danger-soft: rgb(212 115 106 / 14%);
     --shadow-sm: 0 1px 3px rgb(0 0 0 / 35%);
     --shadow-md: 0 10px 28px -4px rgb(0 0 0 / 50%);
     --shadow-lg: 0 18px 42px -6px rgb(0 0 0 / 65%);
