@@ -78,6 +78,7 @@ type ShellCommandEvent =
   } };
 
 interface RunResult {
+  taskId?: string;
   content: string;
   mode: "single" | "toa";
   usage: Record<string, unknown>;
@@ -223,6 +224,7 @@ interface ConversationCommand {
   result?: CommandResult;
 }
 interface ConversationTurn {
+  taskId?: string;
   task: string;
   images: SelectedImage[];
   answer: string;
@@ -421,7 +423,9 @@ function loadSessionHistory(): string | undefined {
         const images = Array.isArray(turn.images) ? turn.images.filter((image): image is SelectedImage =>
           isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
           && typeof image.size === "number" && typeof image.mimeType === "string") : [];
-        turns.push({ task: turn.task, answer: turn.answer, images,
+        turns.push({
+          ...(typeof turn.taskId === "string" && turn.taskId.trim() ? { taskId: turn.taskId.trim() } : {}),
+          task: turn.task, answer: turn.answer, images,
           status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
           partial: turn.partial === true,
           commands: Array.isArray(turn.commands) ? turn.commands.filter(validSavedCommand) : [],
@@ -872,6 +876,7 @@ async function runTask(): Promise<void> {
   setStatus(t("working"), "busy");
   try {
     const result = await bridge.runTask({
+      sessionId: currentSession.id,
       task,
       history,
       webMode: element<HTMLSelectElement>("web-mode").value,
@@ -883,6 +888,7 @@ async function runTask(): Promise<void> {
       imageIds: taskImages.map((image) => image.id),
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
     });
+    if (result.taskId) activeTurn.taskId = result.taskId;
     activeAnswerText = result.content;
     activeTurn.answer = result.content;
     activeTurn.status = "complete";

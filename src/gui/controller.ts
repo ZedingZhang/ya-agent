@@ -22,7 +22,15 @@ import {
   type MemoryMatch,
 } from "../memory";
 import { shouldUseWeb, type RunResult } from "../orchestrator";
-import { runTask, type RunTaskOptions } from "../service";
+import {
+  getTask,
+  listTasks,
+  reconcileInterruptedTasks,
+  runTask,
+  type ListTasksOptions,
+  type RunTaskOptions,
+  type TaskRecord,
+} from "../service";
 import type { ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
@@ -39,6 +47,7 @@ export interface GuiPreferences {
 }
 
 export interface GuiTaskOptions {
+  sessionId?: string;
   task: string;
   history?: ConversationMessage[];
   webMode?: WebMode;
@@ -119,6 +128,7 @@ export class GuiController {
     this.workspaces = [...new Set([...(preferences.workspaces ?? []), ...(this.workspace ? [this.workspace] : [])])];
     this.stream = preferences.stream;
     this.taskRunner = taskRunner;
+    reconcileInterruptedTasks();
   }
 
   private persistPreferences(): void {
@@ -223,6 +233,7 @@ export class GuiController {
       );
     }
     return this.taskRunner(apiKey, options.task, this.config, {
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       history: options.history,
       webMode: options.webMode ?? "auto",
       toa: options.toa ?? false,
@@ -232,6 +243,14 @@ export class GuiController {
       images: options.images,
       signal: callbacks.signal,
     });
+  }
+
+  task(id: string): TaskRecord | undefined {
+    return getTask(id);
+  }
+
+  tasks(options?: ListTasksOptions): TaskRecord[] {
+    return listTasks(options);
   }
 
   cards(): MemoryCard[] {

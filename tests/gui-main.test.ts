@@ -370,4 +370,15 @@ describe("GUI pending action lifecycle", () => {
     await expect(mocks.handlers.get("task:run")!(event, { ...options, history })).rejects.toThrow("Invalid conversation history");
     expect(mocks.run).not.toHaveBeenCalled();
   });
+
+  it("validates and forwards an originating session ID at the task IPC boundary", async () => {
+    mocks.run.mockResolvedValue("done");
+    await mocks.handlers.get("task:run")!(event, { ...options, sessionId: " session-123 " });
+    expect(mocks.run.mock.calls[0]?.[0].sessionId).toBe("session-123");
+
+    for (const invalidSessionId of ["", "   ", 123, "bad\ncontrol", "x".repeat(129)]) {
+      await expect(mocks.handlers.get("task:run")!(event, { ...options, sessionId: invalidSessionId }))
+        .rejects.toThrow("Invalid session ID.");
+    }
+  });
 });

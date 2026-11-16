@@ -48,6 +48,7 @@ export interface SettingsUpdate {
 }
 
 export interface RendererTaskOptions {
+  sessionId?: string;
   task: string;
   history?: ConversationMessage[];
   webMode: WebMode;
