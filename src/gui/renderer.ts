@@ -57,6 +57,7 @@ interface LocalActivity {
 
 type FileChange = import("../file-diff").FileChange;
 type ConversationMessage = import("../types").ConversationMessage;
+type FolderAccess = import("./shared").FolderAccess;
 
 type TaskEvent =
   | { type: "content"; content: string }
@@ -86,9 +87,9 @@ interface RunResult {
 
 interface YaRendererBridge {
   state(): Promise<AppState>;
-  chooseWorkspace(botId: string): Promise<AppState | undefined>;
-  revokeFolder(botId: string): Promise<AppState>;
-  selectBot(botId: string): Promise<AppState>;
+  chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
+  revokeFolder(botId: string): Promise<FolderAccess>;
+  selectBot(botId: string): Promise<FolderAccess>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;
@@ -552,7 +553,7 @@ async function selectBot(bot: DesktopBot): Promise<void> {
   setNavigationPending(true);
   try {
     await clearImages();
-    state = await bridge.selectBot(bot.id);
+    Object.assign(state, await bridge.selectBot(bot.id));
     currentBot = bot;
     currentDirectory = ".";
     switchPage("workspace");
@@ -616,9 +617,9 @@ async function updateFolderAccess(revoke: boolean): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
   setNavigationPending(true);
   try {
-    const nextState = revoke ? await bridge.revokeFolder(currentBot.id) : await bridge.chooseWorkspace(currentBot.id);
-    if (!nextState) return;
-    state = nextState;
+    const access = revoke ? await bridge.revokeFolder(currentBot.id) : await bridge.chooseWorkspace(currentBot.id);
+    if (!access) return;
+    Object.assign(state, access);
     currentDirectory = ".";
     element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace) && !element<HTMLInputElement>("toa-enabled").checked;
     renderWorkspaceLabel();
@@ -1710,7 +1711,7 @@ async function initialize(): Promise<void> {
   state = await bridge.state();
   const activeId = loadSessionHistory();
   currentBot = bots.find((bot) => bot.id === activeId) ?? bots[0] ?? createBot();
-  state = await bridge.selectBot(currentBot.id);
+  Object.assign(state, await bridge.selectBot(currentBot.id));
   registerEvents();
   applyLanguage();
   fillSettings();

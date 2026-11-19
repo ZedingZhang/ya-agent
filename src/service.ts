@@ -150,9 +150,7 @@ export async function runTask(
     options.signal?.throwIfAborted();
     const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
     const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
-    const context: ConversationMessage[] = options.botProfile
-      ? [{ role: "user", content: `Use this bot name and standing instructions for my requests: ${JSON.stringify(options.botProfile)}` }, ...history]
-      : history;
+    const context = options.botProfile ? { botProfile: options.botProfile, history } : history;
     result = toa
       ? await toaAgent(client, task, config, toaWorkers, webSearch, images, context, options.signal)
       : await singleAgent(

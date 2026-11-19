@@ -31,6 +31,11 @@ export interface AppState {
   auditLogBytes: number;
 }
 
+export interface FolderAccess {
+  workspace: string | undefined;
+  validWorkspace: string | undefined;
+}
+
 export interface WorkspaceModelSelection {
   model: ModelId;
   reasoningEffort: ReasoningEffort;
@@ -82,9 +87,9 @@ export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };
 
 export interface YaBridge {
   state(): Promise<AppState>;
-  chooseWorkspace(botId: string): Promise<AppState | undefined>;
-  revokeFolder(botId: string): Promise<AppState>;
-  selectBot(botId: string): Promise<AppState>;
+  chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
+  revokeFolder(botId: string): Promise<FolderAccess>;
+  selectBot(botId: string): Promise<FolderAccess>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
   workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;

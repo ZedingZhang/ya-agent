@@ -79,7 +79,6 @@ function createController(): GuiController {
 
 function appState(): AppState {
   const logs = controller.auditLogs();
-  const validWorkspace = controller.validWorkspace();
   let credential: DeepSeekCredential | undefined;
   let accountError = false;
   try { credential = controller.apiKey(); }
@@ -88,8 +87,7 @@ function appState(): AppState {
     version: VERSION,
     platform: process.platform,
     language: controller.language,
-    ...(controller.workspace ? { workspace: controller.workspace } : {}),
-    ...(validWorkspace ? { validWorkspace } : {}),
+    ...controller.folderAccess(),
     stream: controller.stream,
     hasApiKey: Boolean(credential),
     accountSignedIn: typeof credential === "object" && credential.kind === "account",
@@ -248,8 +246,7 @@ function registerIpc(): void {
     const path = selection.filePaths[0];
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     if (selection.canceled || !path) return undefined;
-    controller.grantFolder(botId, path);
-    return appState();
+    return controller.grantFolder(botId, path);
   });
 
   ipcMain.handle("bot:select", (event, botId: unknown) => {
@@ -257,15 +254,14 @@ function registerIpc(): void {
     if (taskRunning) throw new Error("Bots cannot be changed while a task is running.");
     if (typeof botId !== "string" || !botId.trim() || botId.length > 128) throw new Error("Invalid bot ID.");
     controller.activeBotId = botId;
-    return appState();
+    return controller.folderAccess();
   });
 
   ipcMain.handle("workspace:revoke", (event, botId: unknown) => {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     controller.assertActiveBot(botId);
-    controller.revokeFolder(botId);
-    return appState();
+    return controller.revokeFolder(botId);
   });
 
   ipcMain.handle("workspace:entries", (event, botId: unknown, path: unknown) => {
@@ -756,7 +752,9 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
   const first = join(root, "ya-agent");
   mkdirSync(first);
   const originalPicker = dialog.showOpenDialog;
+  const originalCards = controller.cards;
   try {
+    controller.cards = () => { throw new Error("Memory store unavailable during folder selection."); };
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [first] });
     const attached = await window.webContents.executeJavaScript(`(async () => {
       const reviewer = createBot({ title: 'Desktop reviewer', instructions: '' });
@@ -771,14 +769,15 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
       while (navigationPending && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
       if (navigationPending || !state.validWorkspace || document.querySelector('#revoke-folder').hidden) return false;
       await updateFolderAccess(true);
-      if ((await bridge.state()).workspace || !document.querySelector('#local-enabled').disabled) return false;
+      if (state.workspace || !document.querySelector('#revoke-folder').hidden || !document.querySelector('#local-enabled').disabled) return false;
       await updateFolderAccess(false);
       return currentBot === reviewer && bots.length === count && state.validWorkspace
-        && state.validWorkspace === (await bridge.state()).validWorkspace && input.value === reviewer.draft;
+        && state.validWorkspace === (await bridge.selectBot(reviewer.id)).validWorkspace && input.value === reviewer.draft;
     })()`);
     if (!attached) throw new Error("Choosing a local folder lost the bot or its draft.");
   } finally {
     dialog.showOpenDialog = originalPicker;
+    controller.cards = originalCards;
   }
   const historyChange = createFileChange("src/gui/layout.ts", "const width = 860;\n", "const width = 920;\n", "edit");
   const navigation = await window.webContents.executeJavaScript(`(async () => {
@@ -936,7 +935,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   });
   controller.setSessionApiKey("smoke-only-key");
   const originalPicker = dialog.showOpenDialog;
-  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [originalController.validWorkspace()!] });
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [originalController.folderAccess().validWorkspace!] });
   try {
     const results = await window.webContents.executeJavaScript(`(async () => {
       try {
@@ -1193,7 +1192,7 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
     const originalRequest = { role: "user", content: "新建一个 md 文件，内容是 Ya 的介绍" };
     const followUp = { role: "user", content: "继续" };
     const profileMessage = (name: string, instructions: string) => ({
-      role: "user", content: `Use this bot name and standing instructions for my requests: ${JSON.stringify({ name, instructions })}`,
+      role: "user", content: `Bot profile: ${JSON.stringify({ name, instructions })}`,
     });
     const reviewer = profileMessage("Code reviewer", "Review patches.");
     const expected = [
