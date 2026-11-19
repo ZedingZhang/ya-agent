@@ -1,6 +1,7 @@
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync, renameSync, rmSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { dirname, isAbsolute, join } from "node:path";
+import { ModelConfig, dataHome, BOT_PERMISSIONS_DIR, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
@@ -41,8 +42,6 @@ export type Language = (typeof LANGUAGES)[number];
 
 export interface GuiPreferences {
   language: Language;
-  workspace?: string;
-  workspaces?: string[];
   stream: boolean;
 }
 
@@ -91,23 +90,19 @@ export function loadPreferences(): GuiPreferences {
     const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (!isRecord(value)) return { language: "en", stream: true };
     const language = LANGUAGES.includes(value.language as Language) ? value.language as Language : "en";
-    const workspace = typeof value.workspace === "string" ? value.workspace : undefined;
     const stream = typeof value.stream === "boolean" ? value.stream : true;
-    const workspaces = Array.isArray(value.workspaces)
-      ? [...new Set(value.workspaces.filter((path): path is string => typeof path === "string" && path.length > 0))]
-      : undefined;
-    return { language, ...(workspace ? { workspace } : {}), ...(workspaces ? { workspaces } : {}), stream };
+    return { language, stream };
   } catch {
     return { language: "en", stream: true };
   }
 }
 
-export function savePreferences(language: Language, workspace?: string, stream = true, workspaces: string[] = []): void {
+export function savePreferences(language: Language, stream = true): void {
   if (!LANGUAGES.includes(language)) throw new Error("GUI language must be en or zh-CN.");
   const path = preferencesPath();
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ language, workspace: workspace ?? null, workspaces, stream }, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify({ language, stream }, null, 2)}\n`, "utf8");
   renameSync(temporary, path);
 }
 
@@ -115,8 +110,7 @@ export class GuiController {
   private pendingPrune?: { ids: string[]; includeCandidates: boolean };
   config: ModelConfig;
   language: Language;
-  workspace?: string;
-  workspaces: string[];
+  activeBotId?: string;
   stream: boolean;
   private sessionApiKey?: string;
   private readonly taskRunner: TaskRunner;
@@ -125,15 +119,13 @@ export class GuiController {
     this.config = loadConfig();
     const preferences = loadPreferences();
     this.language = preferences.language;
-    this.workspace = preferences.workspace;
-    this.workspaces = [...new Set([...(preferences.workspaces ?? []), ...(this.workspace ? [this.workspace] : [])])];
     this.stream = preferences.stream;
     this.taskRunner = taskRunner;
     reconcileInterruptedTasks();
   }
 
   private persistPreferences(): void {
-    savePreferences(this.language, this.workspace, this.stream, this.workspaces);
+    savePreferences(this.language, this.stream);
   }
 
   setLanguage(language: Language): void {
@@ -142,25 +134,42 @@ export class GuiController {
     this.persistPreferences();
   }
 
-  setWorkspace(value: string): string {
-    const workspace = resolve(value);
-    if (!existsSync(workspace)) throw new Error(`Workspace does not exist: ${value}`);
-    const physical = realpathSync(workspace);
-    if (!statSync(physical).isDirectory()) throw new Error(`Workspace is not a directory: ${physical}`);
-    this.workspace = physical;
-    this.workspaces = [physical, ...this.workspaces.filter((path) => path !== physical)];
-    this.persistPreferences();
-    return physical;
+  private grantPath(botId: string): string {
+    return join(dataHome(), BOT_PERMISSIONS_DIR, createHash("sha256").update(botId).digest("hex"));
   }
 
-  activateWorkspace(value?: string): void {
-    if (value === undefined) {
-      this.workspace = undefined;
-      this.persistPreferences();
-      return;
+  assertActiveBot(botId: unknown): asserts botId is string {
+    if (typeof botId !== "string" || !botId || botId !== this.activeBotId) throw new Error("Select this bot first.");
+  }
+
+  get workspace(): string | undefined {
+    if (!this.activeBotId) return undefined;
+    try {
+      const folder = readFileSync(this.grantPath(this.activeBotId), "utf8");
+      return isAbsolute(folder) ? folder : undefined;
+    } catch {
+      return undefined;
     }
-    if (!this.workspaces.includes(value)) throw new Error("Choose this folder through the directory picker first.");
-    this.setWorkspace(value);
+  }
+
+  grantFolder(botId: string, folder: string): void {
+    this.assertActiveBot(botId);
+    const physical = realpathSync(folder);
+    if (!statSync(physical).isDirectory()) throw new Error("Choose an existing folder.");
+    const path = this.grantPath(botId);
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    const temp = path + "." + randomUUID();
+    try {
+      writeFileSync(temp, physical, { mode: 0o600, flag: "wx" });
+      renameSync(temp, path);
+    } finally {
+      rmSync(temp, { force: true });
+    }
+  }
+
+  revokeFolder(botId: string): void {
+    this.assertActiveBot(botId);
+    rmSync(this.grantPath(botId), { force: true });
   }
 
   setStream(enabled: boolean): void {
@@ -169,10 +178,10 @@ export class GuiController {
   }
 
   validWorkspace(): string | undefined {
-    if (!this.workspace) return undefined;
+    const workspace = this.workspace;
+    if (!workspace) return undefined;
     try {
-      const workspace = realpathSync(resolve(this.workspace));
-      return statSync(workspace).isDirectory() ? workspace : undefined;
+      return realpathSync(workspace) === workspace && statSync(workspace).isDirectory() ? workspace : undefined;
     } catch {
       return undefined;
     }
@@ -220,19 +229,9 @@ export class GuiController {
     const apiKey = this.apiKey();
     if (!apiKey) throw new Error("Sign in to DeepSeek or add an API key in Settings.");
     if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
-    if (options.exec && !options.local) throw new Error("Command execution requires local workspace mode.");
-    let localWorkspace: LocalWorkspace | undefined;
-    if (options.local) {
-      const workspace = this.validWorkspace();
-      if (!workspace) throw new Error("Choose an existing local workspace before running this task.");
-      localWorkspace = new LocalWorkspace(
-        workspace,
-        callbacks.onLocalAction ?? (() => false),
-        callbacks.onLocalActivity,
-        { commandsEnabled: options.exec, signal: callbacks.signal, onCommandEvent: callbacks.onCommandEvent,
-          onFileChange: callbacks.onFileChange },
-      );
-    }
+    if (options.exec) throw new Error("Shell commands are unavailable for folder-scoped bots.");
+    const localWorkspace = options.local ? this.workspaceForBot(options.sessionId, callbacks) : undefined;
+    if (options.local && !localWorkspace) throw new Error("Grant this bot access to an existing folder first.");
     return this.taskRunner(apiKey, options.task, this.config, {
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       botProfile: options.botProfile,
@@ -263,10 +262,25 @@ export class GuiController {
     return selectRelevantCards(task);
   }
 
-  workspaceEntries(path = "."): Array<{ path: string; type: string }> {
-    const workspace = this.validWorkspace();
+  private workspaceForBot(botId: string | undefined, callbacks: GuiRunCallbacks = {}): LocalWorkspace | undefined {
+    this.assertActiveBot(botId);
+    const folder = this.validWorkspace();
+    if (!folder) return undefined;
+    const workspace = new LocalWorkspace(folder, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
+      signal: callbacks.signal,
+      onFileChange: callbacks.onFileChange,
+      assertAccess: () => {
+        this.assertActiveBot(botId);
+        if (this.validWorkspace() !== folder) throw new Error("Folder access has changed.");
+      },
+    });
+    return workspace.root === folder ? workspace : undefined;
+  }
+
+  workspaceEntries(botId: string, path = "."): Array<{ path: string; type: string }> {
+    const workspace = this.workspaceForBot(botId);
     if (!workspace) return [];
-    const payload = JSON.parse(new LocalWorkspace(workspace, () => false).list({ path })) as unknown;
+    const payload = JSON.parse(workspace.list({ path })) as unknown;
     if (!isRecord(payload) || !Array.isArray(payload.entries)) return [];
     return payload.entries.filter(isRecord).map((entry) => ({ path: String(entry.path), type: String(entry.type) }));
   }

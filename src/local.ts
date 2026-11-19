@@ -31,7 +31,7 @@ import {
   sep,
 } from "node:path";
 import { createTwoFilesPatch } from "diff";
-import { dataHome } from "./config";
+import { BOT_PERMISSIONS_DIR, dataHome } from "./config";
 import { abortable } from "./cancellation";
 import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
 import { createFileChange, type FileChange } from "./file-diff";
@@ -64,6 +64,7 @@ export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boole
 export type LocalActivityObserver = (activity: LocalActivity) => void;
 
 export interface LocalWorkspaceOptions {
+  assertAccess?: () => void;
   commandsEnabled?: boolean;
   signal?: AbortSignal;
   onCommandEvent?: (event: CommandEvent) => void;
@@ -306,6 +307,7 @@ export class LocalWorkspace {
   }
 
   private resolveInput(value: unknown): string {
+    this.options.assertAccess?.();
     this.options.signal?.throwIfAborted();
     if (typeof value !== "string" || !value.trim()) throw new Error("A non-empty path is required.");
     const expanded = expandHome(value);
@@ -334,7 +336,8 @@ export class LocalWorkspace {
   private isSensitive(path: string): boolean {
     const lowered = basename(path).toLocaleLowerCase("und");
     const extension = lowered.includes(".") ? lowered.slice(lowered.lastIndexOf(".")) : "";
-    if (path.split(sep).some((part) => part.toLocaleLowerCase("und") === ".git")) return true;
+    const parts = path.toLocaleLowerCase("und").split(sep);
+    if (parts.includes(".git") || parts.includes(BOT_PERMISSIONS_DIR)) return true;
     if (lowered === ".env" || lowered.startsWith(".env.")) return true;
     if (["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json", ".git-credentials", ".netrc", ".npmrc"].includes(lowered)) return true;
     return [".pem", ".key", ".p12", ".pfx", ".kdbx", ".der", ".token"].includes(extension) || lowered.includes("secret");
@@ -371,6 +374,7 @@ export class LocalWorkspace {
     this.options.signal?.throwIfAborted();
     const approved = await abortable(Promise.resolve(this.confirm(action)), this.options.signal);
     this.options.signal?.throwIfAborted();
+    this.options.assertAccess?.();
     if (approved) return true;
     this.audit(action.operation, action.paths, "denied");
     this.activity(action.operation, action.paths, "denied");
@@ -496,6 +500,7 @@ export class LocalWorkspace {
       if (!(await this.confirmed(action))) {
         return JSON.stringify({ status: "denied", operation: "mkdir", path: this.relativePath(path), reason: "User declined this action." });
       }
+      if (this.resolveInput(path) !== path) throw new Error("Folder changed during approval.");
       mkdirSync(path);
       this.audit("mkdir", [path], "success");
       this.activity("mkdir", [path], "success");
@@ -526,6 +531,9 @@ export class LocalWorkspace {
       if (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path
         || (existsSync(path) ? this.readText(path) : undefined) !== previous) {
         throw new Error("File changed during approval. Read again before writing.");
+      }
+      if (previous !== undefined && this.options.assertAccess && statSync(path).nlink > 1) {
+        throw new Error("Use local_edit to replace a hard-linked file without altering its other links.");
       }
       writeFileSync(path, content, { encoding: "utf8", flag: previous === undefined ? "wx" : "w" });
       this.fileChanged(path, previous, content, "write");
@@ -621,6 +629,14 @@ export class LocalWorkspace {
         throw new Error("Moving sensitive files or directories is blocked in local mode.");
       }
       if (source === this.root || !existsSync(source)) throw new Error(`Source does not exist: ${source}`);
+      // Moving a parent of the grant store would also move the authority for future tasks.
+      if (existsSync(join(dataHome(), BOT_PERMISSIONS_DIR))) {
+        const grants = realpathSync(join(dataHome(), BOT_PERMISSIONS_DIR));
+        const fromSource = relative(source, grants);
+        if (fromSource !== ".." && !fromSource.startsWith(`..${sep}`) && !isAbsolute(fromSource)) {
+          throw new Error("Moving a directory containing bot folder permissions is blocked.");
+        }
+      }
       if (existsSync(destination)) throw new Error(`Destination already exists: ${destination}`);
       if (!existsSync(dirname(destination)) || !statSync(dirname(destination)).isDirectory()) {
         throw new Error("Destination parent directory does not exist.");

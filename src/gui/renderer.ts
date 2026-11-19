@@ -86,11 +86,12 @@ interface RunResult {
 
 interface YaRendererBridge {
   state(): Promise<AppState>;
-  chooseWorkspace(): Promise<string | undefined>;
-  activateWorkspace(workspace?: string): Promise<AppState>;
+  chooseWorkspace(botId: string): Promise<AppState | undefined>;
+  revokeFolder(botId: string): Promise<AppState>;
+  selectBot(botId: string): Promise<AppState>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
+  workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;
   saveWorkspaceModelSelection(selection: {
     model: AppState["config"]["model"];
     reasoningEffort: AppState["config"]["reasoningEffort"];
@@ -122,7 +123,7 @@ const TEXT = {
     welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
-    workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", chooseFolder: "Choose folder…", choose: "Choose…", refresh: "Refresh",
+    workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", allowedFolder: "Allowed folder", folderMissing: "Folder unavailable", chooseFolder: "Choose folder…", revokeFolder: "Revoke access", choose: "Choose…", refresh: "Refresh",
     changes: "Changes", noChanges: "File changes made by Ya will appear here after approval.",
     changesSummary: "{files} files · {changes} changes", createdFile: "Created", editedFile: "Edited", replacedFile: "Replaced",
     noTextChanges: "No text changes.", emptyFileCreated: "Created an empty file.",
@@ -132,11 +133,11 @@ const TEXT = {
     local: "Enable local tools", task: "Task", taskPlaceholder: "Message {name}…", send: "Send",
     model: "Model", thinking: "Thinking", web: "Web", toa: "Tree of Agents", workers: "Workers", auto: "Auto", on: "On", off: "Off",
     ready: "Ready", working: "Working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
-    commands: "Allow command execution", stop: "Stop", stopping: "Stopping…", success: "Succeeded", failed: "Failed",
+    stop: "Stop", stopping: "Stopping…", success: "Succeeded", failed: "Failed",
     timed_out: "Timed out", cancelled: "Cancelled", error: "Error", truncated: "Output truncated; showing the tail.",
     noRelevant: "No relevant approved memory found.", activity: "Activity", noActivity: "No local activity for this task.",
     pendingAction: "Pending action", noAction: "No action is waiting for approval.", approve: "Approve", deny: "Deny",
-    noTasks: "Ask a question to begin.", answer: "Ya", learn: "Learn from this answer", noWorkspace: "Choose a workspace folder",
+    noTasks: "Ask a question to begin.", answer: "Ya", learn: "Learn from this answer", noWorkspace: "Choose a folder to allow this bot to access its files and subfolders.",
     status: "Status", kind: "Kind", text: "Text", evidence: "Evidence", actions: "Actions", candidateText: "What should Ya learn?",
     createCandidate: "Create candidate", prune: "Prune", includeCandidates: "Include candidates", reject: "Reject", revoke: "Revoke",
     language: "Language", stream: "Stream simple answers", reasoning: "Reasoning effort", budget: "ToA token budget",
@@ -165,7 +166,7 @@ const TEXT = {
     welcome: "今天想做些什么？", welcomeHint: "发条消息，开始对话。",
     toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
     interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存 Bot 记录，本地存储空间可能已满。",
-    workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", chooseFolder: "选择文件夹…", choose: "选择…", refresh: "刷新",
+    workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", allowedFolder: "已授权目录", folderMissing: "文件夹不可用", chooseFolder: "选择文件夹…", revokeFolder: "撤销授权", choose: "选择…", refresh: "刷新",
     changes: "变更", noChanges: "Ya 经批准完成的文件变更将显示在这里。",
     changesSummary: "{files} 个文件 · {changes} 次变更", createdFile: "新建", editedFile: "编辑", replacedFile: "替换",
     noTextChanges: "文本没有变化。", emptyFileCreated: "已创建空文件。",
@@ -175,11 +176,11 @@ const TEXT = {
     local: "启用本地工具", task: "任务", taskPlaceholder: "给 {name} 发消息…", send: "发送",
     model: "模型", thinking: "思考", web: "网页", toa: "Tree of Agents", workers: "工作 Agent", auto: "自动", on: "开启", off: "关闭",
     ready: "就绪", working: "正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
-    commands: "允许命令执行", stop: "停止", stopping: "正在停止…", success: "成功", failed: "失败",
+    stop: "停止", stopping: "正在停止…", success: "成功", failed: "失败",
     timed_out: "超时", cancelled: "已取消", error: "错误", truncated: "输出已截断，显示末尾内容。",
     noRelevant: "没有找到相关的已批准记忆。", activity: "活动", noActivity: "本次任务还没有本地活动。",
     pendingAction: "待确认操作", noAction: "当前没有等待确认的操作。", approve: "批准", deny: "拒绝",
-    noTasks: "输入问题即可开始。", answer: "Ya", learn: "从此回答中学习", noWorkspace: "请选择工作区文件夹",
+    noTasks: "输入问题即可开始。", answer: "Ya", learn: "从此回答中学习", noWorkspace: "选择文件夹，授权此 Bot 访问其中的文件和子目录。",
     status: "状态", kind: "类别", text: "内容", evidence: "依据", actions: "操作", candidateText: "Ya 应该学到什么？",
     createCandidate: "创建候选记忆", prune: "清理", includeCandidates: "包括候选项", reject: "拒绝", revoke: "撤销",
     language: "语言", stream: "简单回答使用流式输出", reasoning: "推理强度", budget: "ToA Token 预算",
@@ -236,7 +237,6 @@ interface ConversationTurn {
 }
 interface DesktopBot {
   id: string;
-  workspace?: string;
   title: string;
   instructions: string;
   updatedAt: number;
@@ -335,9 +335,12 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
 
 function renderWorkspaceLabel(): void {
   const label = element<HTMLDivElement>("workspace-path");
-  label.textContent = state.validWorkspace ?? "";
+  label.textContent = state.workspace ?? "";
   label.title = label.textContent;
-  label.hidden = !state.validWorkspace;
+  label.hidden = !state.workspace;
+  element<HTMLDivElement>("folder-scope").textContent = state.workspace ?? t("noWorkspace");
+  element<HTMLDivElement>("file-toolbar").hidden = !state.validWorkspace;
+  element<HTMLButtonElement>("revoke-folder").hidden = !state.workspace;
 }
 
 function renderPageTitle(): void {
@@ -408,7 +411,7 @@ function loadSessionHistory(): string | undefined {
     for (const value of saved.sessions) {
       if (!isRecord(value) || typeof value.id !== "string" || ids.has(value.id) || typeof value.title !== "string"
         || typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt) || typeof value.draft !== "string"
-        || (value.workspace !== undefined && typeof value.workspace !== "string") || !Array.isArray(value.turns)) continue;
+        || !Array.isArray(value.turns)) continue;
       const turns: ConversationTurn[] = [];
       for (const turn of value.turns) {
         if (!isRecord(turn) || typeof turn.task !== "string" || typeof turn.answer !== "string"
@@ -430,7 +433,7 @@ function loadSessionHistory(): string | undefined {
         && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
       bots.push({ id: value.id, title: value.title.trim() || "Ya",
         instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
-        ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}), turns, activities: savedActivities });
+        turns, activities: savedActivities });
       ids.add(value.id);
     }
     return typeof saved.activeId === "string" ? saved.activeId : undefined;
@@ -475,6 +478,7 @@ function renderNavigation(): void {
   element<HTMLButtonElement>("edit-bot").disabled = disabled;
   element<HTMLButtonElement>("new-bot").disabled = disabled;
   element<HTMLButtonElement>("choose-workspace").disabled = disabled;
+  element<HTMLButtonElement>("revoke-folder").disabled = disabled;
 }
 
 function renderBot(): void {
@@ -515,7 +519,6 @@ function renderBot(): void {
   resizeTaskInput();
   element<HTMLButtonElement>("learn-button").disabled = !lastAnswer;
   element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace);
-  element<HTMLInputElement>("commands-enabled").checked = false;
   activities = currentBot.activities;
   pendingAction = undefined;
   renderActivities();
@@ -549,7 +552,7 @@ async function selectBot(bot: DesktopBot): Promise<void> {
   setNavigationPending(true);
   try {
     await clearImages();
-    await activateBotWorkspace(bot.workspace);
+    state = await bridge.selectBot(bot.id);
     currentBot = bot;
     currentDirectory = ".";
     switchPage("workspace");
@@ -593,17 +596,6 @@ async function showBotEditor(bot?: DesktopBot): Promise<void> {
   }
 }
 
-async function activateBotWorkspace(workspace?: string): Promise<void> {
-  if (state.workspace === workspace && state.validWorkspace === workspace) return;
-  try {
-    state = await bridge.activateWorkspace(workspace);
-  } catch (error) {
-    if (!workspace) throw error;
-    // History is independent of the folder, but must never inherit another bot's folder.
-    state = await bridge.activateWorkspace();
-  }
-}
-
 function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
   drawerPage = page;
   element<HTMLElement>("details-drawer").hidden = page === undefined;
@@ -620,20 +612,16 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
   }
 }
 
-async function chooseWorkspace(): Promise<void> {
+async function updateFolderAccess(revoke: boolean): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
   setNavigationPending(true);
   try {
-    const selected = await bridge.chooseWorkspace();
-    if (!selected) return;
-    currentBot.workspace = selected;
-    state.workspace = selected;
-    state.validWorkspace = selected;
+    const nextState = revoke ? await bridge.revokeFolder(currentBot.id) : await bridge.chooseWorkspace(currentBot.id);
+    if (!nextState) return;
+    state = nextState;
     currentDirectory = ".";
-    element<HTMLInputElement>("local-enabled").checked = !element<HTMLInputElement>("toa-enabled").checked;
-    element<HTMLInputElement>("commands-enabled").checked = false;
+    element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace) && !element<HTMLInputElement>("toa-enabled").checked;
     renderWorkspaceLabel();
-    persistSessions();
     await renderFiles();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
@@ -712,17 +700,19 @@ async function renderFiles(): Promise<void> {
   list.replaceChildren();
   breadcrumb.textContent = currentDirectory;
   if (!state.validWorkspace) {
+    if (!state.workspace) return;
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = t("noWorkspace");
+    empty.textContent = t("folderMissing");
     list.append(empty);
     return;
   }
   try {
     const workspace = state.validWorkspace;
     const directory = currentDirectory;
-    const entries = await bridge.workspaceEntries(currentDirectory);
-    if (workspace !== state.validWorkspace || directory !== currentDirectory) return;
+    const botId = currentBot.id;
+    const entries = await bridge.workspaceEntries(botId, currentDirectory);
+    if (botId !== currentBot.id || workspace !== state.validWorkspace || directory !== currentDirectory) return;
     if (currentDirectory !== ".") {
       const up = fileRow("..", "directory");
       up.addEventListener("click", () => {
@@ -863,7 +853,6 @@ async function runTask(): Promise<void> {
       toaWorkers: Number(element<HTMLSelectElement>("toa-workers").value),
       stream: state.stream,
       local,
-      exec: local && element<HTMLInputElement>("commands-enabled").checked,
       imageIds: taskImages.map((image) => image.id),
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
     });
@@ -1336,9 +1325,6 @@ function syncWorkspaceControls(): void {
   element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving || navigationPending;
   const local = element<HTMLInputElement>("local-enabled");
   local.disabled = running || navigationPending || !state.validWorkspace;
-  const commands = element<HTMLInputElement>("commands-enabled");
-  commands.disabled = running || navigationPending || !local.checked;
-  if (!local.checked) commands.checked = false;
   element<HTMLSelectElement>("web-mode").disabled = running;
   element<HTMLInputElement>("toa-enabled").disabled = running;
   element<HTMLSelectElement>("toa-workers").disabled = running || !element<HTMLInputElement>("toa-enabled").checked;
@@ -1590,7 +1576,8 @@ function registerEvents(): void {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
-  element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
+  element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void updateFolderAccess(false));
+  element<HTMLButtonElement>("revoke-folder").addEventListener("click", () => void updateFolderAccess(true));
   element<HTMLButtonElement>("edit-bot").addEventListener("click", () => void showBotEditor(currentBot));
   element<HTMLButtonElement>("cancel-bot").addEventListener("click", () => element<HTMLDialogElement>("bot-editor").close());
   const name = element<HTMLInputElement>("bot-name");
@@ -1723,7 +1710,7 @@ async function initialize(): Promise<void> {
   state = await bridge.state();
   const activeId = loadSessionHistory();
   currentBot = bots.find((bot) => bot.id === activeId) ?? bots[0] ?? createBot();
-  await activateBotWorkspace(currentBot.workspace);
+  state = await bridge.selectBot(currentBot.id);
   registerEvents();
   applyLanguage();
   fillSettings();

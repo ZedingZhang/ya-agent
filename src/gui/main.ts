@@ -174,7 +174,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   const imageDetail = value.imageDetail ?? "auto";
   if (!isImageDetail(imageDetail)) throw new Error("Invalid image detail.");
   if (value.exec !== undefined && typeof value.exec !== "boolean") throw new Error("Invalid command execution setting.");
-  if (value.exec && !value.local) throw new Error("Command execution requires local workspace mode.");
+  if (value.exec) throw new Error("Shell commands are unavailable for folder-scoped bots.");
   const history = value.history === undefined ? [] : value.history;
   if (!Array.isArray(history)) throw new Error("Invalid conversation history.");
   const messages = history.map((message): ConversationMessage => {
@@ -193,7 +193,6 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     toaWorkers: workers,
     stream: Boolean(value.stream),
     local: Boolean(value.local),
-    exec: value.exec === true,
     imageIds,
     imageDetail,
   };
@@ -235,27 +234,44 @@ function registerIpc(): void {
     return appState();
   });
 
-  ipcMain.handle("workspace:choose", async (event) => {
+  ipcMain.handle("workspace:choose", async (event, botId: unknown) => {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
+    controller.assertActiveBot(botId);
     if (!mainWindow) return undefined;
-    const selection = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
+    const chinese = controller.language === "zh-CN";
+    const selection = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory", "createDirectory"],
+      title: chinese ? "授权此 Bot 访问所选文件夹及其子目录" : "Allow this bot to access a folder and its subfolders",
+      buttonLabel: chinese ? "授予访问权限" : "Grant access",
+    });
     const path = selection.filePaths[0];
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
-    return selection.canceled || !path ? undefined : controller.setWorkspace(path);
-  });
-
-  ipcMain.handle("workspace:activate", (event, workspace: unknown) => {
-    assertTrustedSender(event);
-    if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
-    if (workspace !== undefined && typeof workspace !== "string") throw new Error("Invalid folder selection.");
-    controller.activateWorkspace(workspace);
+    if (selection.canceled || !path) return undefined;
+    controller.grantFolder(botId, path);
     return appState();
   });
 
-  ipcMain.handle("workspace:entries", (event, path: unknown) => {
+  ipcMain.handle("bot:select", (event, botId: unknown) => {
     assertTrustedSender(event);
-    return controller.workspaceEntries(typeof path === "string" ? path : ".");
+    if (taskRunning) throw new Error("Bots cannot be changed while a task is running.");
+    if (typeof botId !== "string" || !botId.trim() || botId.length > 128) throw new Error("Invalid bot ID.");
+    controller.activeBotId = botId;
+    return appState();
+  });
+
+  ipcMain.handle("workspace:revoke", (event, botId: unknown) => {
+    assertTrustedSender(event);
+    if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
+    controller.assertActiveBot(botId);
+    controller.revokeFolder(botId);
+    return appState();
+  });
+
+  ipcMain.handle("workspace:entries", (event, botId: unknown, path: unknown) => {
+    assertTrustedSender(event);
+    controller.assertActiveBot(botId);
+    return controller.workspaceEntries(botId, typeof path === "string" ? path : ".");
   });
 
   ipcMain.handle("workspace:model-selection", (event, raw: unknown) => {
@@ -558,10 +574,8 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const workspaceControls = model instanceof HTMLSelectElement && !model.disabled && model.value !== ''
       && reasoning instanceof HTMLSelectElement && !reasoning.disabled && reasoning.value !== ''
       && Array.from(reasoning.options, (option) => option.value).join(',') === 'low,high,max';
-    const commands = document.querySelector('#commands-enabled');
     const stop = document.querySelector('#stop-button');
-    const commandControls = commands instanceof HTMLInputElement && !commands.checked
-      && stop instanceof HTMLButtonElement && stop.hidden && typeof window.ya.cancelTask === 'function';
+    const stopControls = stop instanceof HTMLButtonElement && stop.hidden && typeof window.ya.cancelTask === 'function';
     const sidebar = document.querySelector('.app-sidebar');
     const settingsButton = document.querySelector('#settings-tab');
     const timeline = document.querySelector('#timeline');
@@ -583,7 +597,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     if (pathLabel && restoreText !== null) pathLabel.textContent = restoreText;
     return {
       memoryActive, settingsActive, workspaceActive, legacySettingsModelControls, visionOption, imagePicker,
-      workspaceControls, commandControls, leftNavigation, bottomSettings, rightComposer, workspaceOverflow, formOverflow, keychainVisible,
+      workspaceControls, stopControls, leftNavigation, bottomSettings, rightComposer, workspaceOverflow, formOverflow, keychainVisible,
     };
   })()`) as {
     memoryActive?: boolean;
@@ -593,7 +607,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     visionOption?: boolean;
     imagePicker?: boolean;
     workspaceControls?: boolean;
-    commandControls?: boolean;
+    stopControls?: boolean;
     leftNavigation?: boolean;
     bottomSettings?: boolean;
     rightComposer?: boolean;
@@ -602,7 +616,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     keychainVisible?: boolean;
   };
   if (!pages.memoryActive || !pages.settingsActive || !pages.workspaceActive || pages.legacySettingsModelControls
-    || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls || !pages.commandControls) {
+    || !pages.visionOption || !pages.imagePicker || !pages.workspaceControls || !pages.stopControls) {
     throw new Error("Renderer navigation, vision or command controls failed.");
   }
   if (!pages.leftNavigation || !pages.bottomSettings || !pages.rightComposer) {
@@ -628,7 +642,6 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     try {
       setRunning(true);
       const stopVisible = !document.querySelector('#stop-button').hidden;
-      const commandDisabled = document.querySelector('#commands-enabled').disabled;
       renderCommand({ type: 'start', id: 'smoke-command', command: 'npm test', cwd: '.' });
       renderCommand({ type: 'output', id: 'smoke-command', stream: 'stdout', text: 'checking...' });
       const liveOutput = turn.querySelector('.command-run pre').textContent === 'checking...';
@@ -643,7 +656,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
       const stderr = turn.querySelector('.command-stderr').textContent === 'expected true';
       setRunning(false);
       const stopHidden = document.querySelector('#stop-button').hidden;
-      return stopVisible && commandDisabled && liveOutput && plainOutput && finalStatus && stderr && stopHidden;
+      return stopVisible && liveOutput && plainOutput && finalStatus && stderr && stopHidden;
     } finally {
       setRunning(false);
       activeAnswer = priorAnswer;
@@ -741,10 +754,7 @@ async function verifyFileDiffRendering(window: BrowserWindow): Promise<void> {
 
 async function verifyBotNavigation(window: BrowserWindow, root: string): Promise<void> {
   const first = join(root, "ya-agent");
-  const second = join(root, "notes");
   mkdirSync(first);
-  mkdirSync(second);
-  const secondFolder = controller.setWorkspace(second);
   const originalPicker = dialog.showOpenDialog;
   try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [first] });
@@ -759,8 +769,12 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
       document.querySelector('#drawer-files #choose-workspace').click();
       const deadline = Date.now() + 3000;
       while (navigationPending && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-      return !navigationPending && currentBot === reviewer && bots.length === count && reviewer.workspace
-        && reviewer.workspace === (await bridge.state()).validWorkspace && input.value === reviewer.draft;
+      if (navigationPending || !state.validWorkspace || document.querySelector('#revoke-folder').hidden) return false;
+      await updateFolderAccess(true);
+      if ((await bridge.state()).workspace || !document.querySelector('#local-enabled').disabled) return false;
+      await updateFolderAccess(false);
+      return currentBot === reviewer && bots.length === count && state.validWorkspace
+        && state.validWorkspace === (await bridge.state()).validWorkspace && input.value === reviewer.draft;
     })()`);
     if (!attached) throw new Error("Choosing a local folder lost the bot or its draft.");
   } finally {
@@ -769,13 +783,13 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
   const historyChange = createFileChange("src/gui/layout.ts", "const width = 860;\n", "const width = 920;\n", "edit");
   const navigation = await window.webContents.executeJavaScript(`(async () => {
     state = await bridge.state();
-    const first = currentBot.workspace;
+    const first = state.validWorkspace;
     const firstId = currentBot.id;
     const writer = createBot({ title: 'Writer', instructions: '' });
-    writer.workspace = ${JSON.stringify(secondFolder)};
+    writer.workspace = first; // A path in legacy renderer history is not a grant.
     const input = document.querySelector('#task-input');
     await selectBot(writer);
-    const draftsIsolated = input.value === '';
+    const draftsIsolated = input.value === '' && !state.validWorkspace && document.querySelector('#local-enabled').disabled;
     await selectBot(bots.find((session) => session.id === firstId));
     const draftRestored = input.value === 'A draft for the first bot';
     const folderRestored = (await bridge.state()).validWorkspace === first;
@@ -921,14 +935,16 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
     return { content: "A streamed reply.", mode: "single", usage: {} };
   });
   controller.setSessionApiKey("smoke-only-key");
+  const originalPicker = dialog.showOpenDialog;
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [originalController.validWorkspace()!] });
   try {
     const results = await window.webContents.executeJavaScript(`(async () => {
       try {
       const originalSession = currentBot;
       state = await bridge.state();
       const fixtureBot = createBot();
-      fixtureBot.workspace = state.workspace;
       await selectBot(fixtureBot);
+      await updateFolderAccess(false);
       const testSession = currentBot;
       const input = document.querySelector('#task-input');
       document.querySelector('#local-enabled').checked = false;
@@ -954,7 +970,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
         && !document.querySelector('#action-content').hidden;
       const originalFolder = state.workspace;
       let folderLocked = false;
-      try { await bridge.activateWorkspace(); } catch (error) { folderLocked = errorText(error).includes('running'); }
+      try { await bridge.revokeFolder(currentBot.id); } catch (error) { folderLocked = errorText(error).includes('running'); }
       const navigationLocked = document.querySelector('#new-bot').disabled
         && document.querySelector('#choose-workspace').disabled;
       document.querySelector('#action-approve').click();
@@ -997,6 +1013,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       if (value !== true) throw new Error(`Desktop task history check failed: ${name} (${value}).`);
     }
   } finally {
+    dialog.showOpenDialog = originalPicker;
     controller = originalController;
     await window.webContents.executeJavaScript("(async () => { state = await bridge.state(); fillSettings(); renderNavigation(); })()");
   }
@@ -1288,14 +1305,11 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
 
 async function verifyUnavailableHistory(window: BrowserWindow, root: string): Promise<void> {
   const directory = join(root, "archived-folder");
-  const originalWorkspace = controller.workspace;
   mkdirSync(directory);
-  const unavailable = controller.setWorkspace(directory);
   const fixture = await window.webContents.executeJavaScript(`(async () => {
     const originalId = currentBot.id;
     state = await bridge.state();
     const archived = createBot({ title: 'Archived history', instructions: '' });
-    archived.workspace = state.workspace;
     await selectBot(archived);
     currentBot.turns.push({ task: 'Saved task', images: [], answer: 'Saved answer', status: 'complete', commands: [] });
     renderBot();
@@ -1304,6 +1318,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     persistSessions();
     return { originalId, archivedId: currentBot.id };
   })()`) as { originalId: string; archivedId: string };
+  controller.grantFolder(fixture.archivedId, directory);
   rmdirSync(directory);
   try {
     await window.loadFile(rendererFile);
@@ -1319,9 +1334,8 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       const main = await bridge.state();
       return currentBot.id === archived.id && document.querySelector('#timeline').textContent.includes('Saved answer')
         && document.querySelector('#task-input').value === 'Saved draft'
-        && main.workspace === undefined && main.validWorkspace === undefined
+        && main.validWorkspace === undefined
         && !document.querySelector('#local-enabled').checked && document.querySelector('#local-enabled').disabled
-        && !document.querySelector('#commands-enabled').checked && document.querySelector('#commands-enabled').disabled
         && document.querySelectorAll('#file-list .file-row').length === 0;
     })()`) as boolean;
     if (!restored) throw new Error("Unavailable-folder history cannot open independently of the previous bot's files.");
@@ -1331,8 +1345,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       && currentBot.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
     if (!reopened) throw new Error("Unavailable-folder selection or draft was lost after reload.");
   } finally {
-    controller.workspaces = controller.workspaces.filter((path) => path !== unavailable);
-    controller.activateWorkspace(originalWorkspace);
+    controller.revokeFolder(fixture.archivedId);
     await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
       bots = bots.filter((session) => session.id !== '${fixture.archivedId}');
@@ -1429,8 +1442,8 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
 /** YA_SMOKE_CAPTURE=<file> writes a PNG; YA_SMOKE_CAPTURE_PAGE=changes also opens the diff drawer. */
 async function captureGuiPage(window: BrowserWindow, target: string): Promise<void> {
   const page = process.env.YA_SMOKE_CAPTURE_PAGE ?? "memory";
-  if (!["workspace", "changes", "memory", "settings"].includes(page)) {
-    throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, changes, memory, or settings.");
+  if (!["workspace", "changes", "files", "memory", "settings"].includes(page)) {
+    throw new Error("YA_SMOKE_CAPTURE_PAGE must be workspace, changes, files, memory, or settings.");
   }
   const language = process.env.YA_SMOKE_LANGUAGE;
   if (language && LANGUAGES.includes(language as Language)) {
@@ -1440,7 +1453,8 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
   const size = process.env.YA_SMOKE_SIZE?.match(/^(\d+)x(\d+)$/u);
   if (size) window.setSize(Number(size[1]), Number(size[2]));
-  await window.webContents.executeJavaScript(`switchPage('${page === "changes" ? "workspace" : page}');
+  await window.webContents.executeJavaScript(`switchPage('${page === "changes" || page === "files" ? "workspace" : page}');
+    ${page === "files" ? "setDrawer('files');" : ""}
     ${page === "changes" ? "setDrawer('changes'); document.querySelector('#change-list .file-change')?.setAttribute('open', '');" : ""}`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());

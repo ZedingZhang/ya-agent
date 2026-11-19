@@ -1,7 +1,7 @@
 import { basename, join, resolve } from "node:path";
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ModelConfig, loadConfig } from "../src/config";
+import { BOT_PERMISSIONS_DIR, ModelConfig, loadConfig } from "../src/config";
 import {
   GuiController,
   loadPreferences,
@@ -43,46 +43,56 @@ describe("GUI controller", () => {
     expect(loadPreferences()).toEqual({ language: "en", stream: true });
   });
 
-  it("persists an existing workspace but rejects it after removal", () => {
-    const workspace = join(home.path, "workspace");
-    mkdirSync(workspace);
+  it("persists only picker grants per bot and ignores legacy workspace preferences", () => {
+    const folder = join(home.path, "workspace");
+    mkdirSync(folder);
+    writeFileSync(preferencesPath(), JSON.stringify({ workspace: folder, workspaces: [folder], language: "zh-CN" }));
     const controller = new GuiController();
+    controller.activeBotId = "first";
     expect(controller.workspace).toBeUndefined();
-    expect(controller.setWorkspace(workspace)).toBe(realpathSync(workspace));
-    expect(new GuiController().validWorkspace()).toBe(realpathSync(workspace));
-    rmSync(workspace, { recursive: true });
-    expect(new GuiController().validWorkspace()).toBeUndefined();
+    controller.grantFolder("first", folder);
+    expect(controller.validWorkspace()).toBe(realpathSync(folder));
+    controller.activeBotId = "second";
+    expect(controller.workspaceEntries("second")).toEqual([]);
+    expect(() => controller.workspaceEntries("first")).toThrow("Select this bot");
+    expect(() => controller.grantFolder("first", folder)).toThrow("Select this bot");
+    const restarted = new GuiController();
+    expect(restarted.workspace).toBeUndefined();
+    restarted.activeBotId = "first";
+    expect(restarted.validWorkspace()).toBe(realpathSync(folder));
+    restarted.revokeFolder("first");
+    controller.activeBotId = "first";
+    expect(controller.validWorkspace()).toBeUndefined();
   });
 
-  it("remembers approved folders and validates activation without changing the current folder on failure", () => {
+  it("allows subdirectories, rejects redirected folders, and replaces the old scope on a new grant", () => {
     const first = join(home.path, "first");
     const second = join(home.path, "second");
-    const unchosen = join(home.path, "unchosen");
-    for (const path of [first, second, unchosen]) mkdirSync(path);
-    const physicalSecond = realpathSync(second);
+    mkdirSync(join(first, "nested"), { recursive: true });
+    writeFileSync(join(first, "nested", "notes.txt"), "example");
+    mkdirSync(second);
     const controller = new GuiController();
-    controller.setWorkspace(first);
-    controller.setWorkspace(second);
-    const restored = new GuiController();
-    expect(restored.workspaces).toEqual([realpathSync(second), realpathSync(first)]);
-    restored.activateWorkspace(realpathSync(first));
-    expect(restored.validWorkspace()).toBe(realpathSync(first));
-    expect(() => restored.activateWorkspace(realpathSync(unchosen))).toThrow(/directory picker/u);
-    expect(restored.validWorkspace()).toBe(realpathSync(first));
-    rmSync(second, { recursive: true });
-    expect(() => restored.activateWorkspace(physicalSecond)).toThrow(/does not exist/u);
-    expect(restored.validWorkspace()).toBe(realpathSync(first));
-    restored.activateWorkspace();
-    expect(new GuiController().workspace).toBeUndefined();
-    expect(new GuiController().workspaces).toEqual([realpathSync(first), physicalSecond]);
+    controller.activeBotId = "bot";
+    controller.grantFolder("bot", first);
+    expect(controller.workspaceEntries("bot", "nested")).toEqual([{ path: join("nested", "notes.txt"), type: "file" }]);
+    renameSync(first, first + "-moved");
+    symlinkSync(second, first, process.platform === "win32" ? "junction" : "dir");
+    expect(controller.validWorkspace()).toBeUndefined();
+    expect(controller.workspaceEntries("bot")).toEqual([]);
+    controller.grantFolder("bot", second);
+    expect(() => controller.workspaceEntries("bot", first + "-moved")).toThrow("inside the authorized workspace");
   });
 
-  it("keeps the approved folder when loading preferences from the previous desktop layout", () => {
-    const workspace = join(home.path, "legacy");
-    mkdirSync(workspace);
-    const physical = realpathSync(workspace);
-    writeFileSync(preferencesPath(), JSON.stringify({ language: "zh-CN", workspace: physical, stream: false }));
-    expect(new GuiController()).toMatchObject({ workspace: physical, workspaces: [physical], language: "zh-CN", stream: false });
+  it("keeps folder grants private when the user selects the Ya data directory", async () => {
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
+    const controller = new GuiController(runner);
+    controller.setSessionApiKey("key");
+    controller.activeBotId = "bot";
+    controller.grantFolder("bot", home.path);
+    expect(() => controller.workspaceEntries("bot", BOT_PERMISSIONS_DIR)).toThrow("sensitive");
+    await controller.run({ task: "write", sessionId: "bot", local: true });
+    const files = runner.mock.calls[0]![3]!.localWorkspace!;
+    await expect(files.write({ path: join(BOT_PERMISSIONS_DIR, "new"), content: home.path })).rejects.toThrow("sensitive");
   });
 
   it("saves model configuration and keeps a session-only API key", () => {
@@ -141,50 +151,54 @@ describe("GUI controller", () => {
     mkdirSync(workspace);
     const controller = new GuiController(runner);
     controller.setSessionApiKey("key");
-    controller.setWorkspace(workspace);
-    await controller.run({ task: "Create notes", local: true }, { onLocalAction: () => true });
+    controller.activeBotId = "bot";
+    controller.grantFolder("bot", workspace);
+    await controller.run({ task: "Create notes", sessionId: "bot", local: true }, { onLocalAction: () => true });
     const options = calls[0]![3]!;
     expect(options.localWorkspace?.root).toBe(realpathSync(workspace));
     expect(options.onContent).toBeUndefined();
     expect(await options.localWorkspace?.confirm({ operation: "mkdir", paths: [join(workspace, "notes")], summary: "Create" })).toBe(true);
   });
 
-  it("passes command opt-in, events and cancellation through the shared service", async () => {
-    const calls: Parameters<TaskRunner>[] = [];
-    const runner: TaskRunner = async (...arguments_) => {
-      calls.push(arguments_);
-      return { content: "answer", mode: "single", usage: {} };
-    };
+  it("binds local tools to the active bot and rechecks grants after approval", async () => {
+    const first = join(home.path, "first");
+    const second = join(home.path, "second");
+    mkdirSync(first);
+    mkdirSync(second);
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
     const controller = new GuiController(runner);
     controller.setSessionApiKey("key");
-    controller.setWorkspace(home.path);
-    const cancellation = new AbortController();
-    await controller.run({ task: "Test", local: true }, { signal: cancellation.signal });
-    expect(calls[0]?.[3]?.localWorkspace?.toolHandlers.local_run).toBeUndefined();
-    await controller.run({ task: "Test", local: true, exec: true }, { signal: cancellation.signal, onLocalAction: () => false });
-    expect(calls[1]?.[3]?.signal).toBe(cancellation.signal);
-    const workspace = calls[1]?.[3]?.localWorkspace;
-    expect(workspace?.tools.map((tool) => tool.function.name)).toContain("local_run");
-    expect(JSON.parse(await workspace!.run({ command: "echo check" })).status).toBe("denied");
-    await expect(controller.run({ task: "Test", exec: true })).rejects.toThrow("requires local");
-    cancellation.abort(new Error("Stop"));
-    await expect(controller.run({ task: "Test", local: true, exec: true }, { signal: cancellation.signal })).rejects.toThrow("Stop");
+    controller.activeBotId = "a";
+    controller.grantFolder("a", first);
+    const task = { task: "update notes", sessionId: "a", local: true };
+    await expect(controller.run({ ...task, sessionId: "b" })).rejects.toThrow("Select this bot");
+    await expect(controller.run({ ...task, exec: true })).rejects.toThrow("Shell commands");
+    expect(runner).not.toHaveBeenCalled();
+    await controller.run(task, { onLocalAction: () => { controller.revokeFolder("a"); return true; } });
+    const files = runner.mock.calls[0]![3]!.localWorkspace!;
+    expect(files.commandsEnabled).toBe(false);
+    expect(() => files.list({ path: second })).toThrow("inside the authorized workspace");
+    await expect(files.write({ path: "note", content: "hi" })).rejects.toThrow("Folder access has changed");
+    expect(() => files.list({ path: "." })).toThrow("Folder access has changed");
+    controller.grantFolder("a", second);
+    expect(() => files.list({ path: "." })).toThrow("Folder access has changed");
   });
 
-  it("provides the GUI the full command and line count and refuses padding before approval", async () => {
-    let command = "echo first\n\n\techo last";
-    const controller = new GuiController(async (_key, _task, _config, options) => {
-      await options!.localWorkspace!.run({ command });
-      return { content: "denied", mode: "single", usage: {} };
-    });
-    controller.setSessionApiKey("key"); controller.setWorkspace(home.path);
-    const onLocalAction = vi.fn(() => false);
-    await controller.run({ task: "check", local: true, exec: true }, { onLocalAction });
-    expect(onLocalAction.mock.calls[0]?.[0].summary).toContain(`Run command (3 lines):\n${command}`);
-    onLocalAction.mockClear();
-    command = `echo hidden;${"\n".repeat(8_000)}npm test`;
-    await expect(controller.run({ task: "check", local: true, exec: true }, { onLocalAction })).rejects.toThrow(/lines/u);
-    expect(onLocalAction).not.toHaveBeenCalled();
+  it("preserves other links when a scoped bot requests a whole-file overwrite", async () => {
+    const folder = join(home.path, "allowed");
+    mkdirSync(folder);
+    const original = join(home.path, "outside.txt");
+    writeFileSync(original, "original");
+    linkSync(original, join(folder, "linked.txt"));
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
+    const controller = new GuiController(runner);
+    controller.setSessionApiKey("key");
+    controller.activeBotId = "bot";
+    controller.grantFolder("bot", folder);
+    await controller.run({ task: "write", sessionId: "bot", local: true }, { onLocalAction: () => true });
+    await expect(runner.mock.calls[0]![3]!.localWorkspace!.write({ path: "linked.txt", content: "new" }))
+      .rejects.toThrow("hard-linked");
+    expect(readFileSync(original, "utf8")).toBe("original");
   });
 
   it("passes a stream callback only for simple tasks", async () => {
@@ -241,7 +255,8 @@ describe("GUI controller", () => {
     const controller = new GuiController(async () => ({ content: "", mode: "single", usage: {} }));
     controller.setSessionApiKey("key");
     await expect(controller.run({ task: "test", toa: true, local: true })).rejects.toThrow(/cannot be used/u);
-    await expect(controller.run({ task: "test", local: true })).rejects.toThrow(/Choose an existing/u);
+    controller.activeBotId = "bot";
+    await expect(controller.run({ task: "test", sessionId: "bot", local: true })).rejects.toThrow(/Grant this bot/u);
   });
 
   it("uses only the active workspace even if a task supplies an arbitrary path", async () => {
@@ -251,10 +266,11 @@ describe("GUI controller", () => {
     const selected = join(home.path, "selected");
     const outside = join(home.path, "outside");
     mkdirSync(selected); mkdirSync(outside);
-    const options = { task: "Read notes", local: true, workspace: outside };
-    await expect(controller.run(options)).rejects.toThrow(/Choose an existing/u);
+    const options = { task: "Read notes", sessionId: "bot", local: true, workspace: outside };
+    controller.activeBotId = "bot";
+    await expect(controller.run(options)).rejects.toThrow(/Grant this bot/u);
     expect(runner).not.toHaveBeenCalled();
-    controller.setWorkspace(selected);
+    controller.grantFolder("bot", selected);
     await controller.run(options);
     expect(runner.mock.calls[0]?.[3]?.localWorkspace?.root).toBe(realpathSync(selected));
   });
@@ -265,8 +281,9 @@ describe("GUI controller", () => {
     mkdirSync(join(workspace, "folder"));
     writeFileSync(join(workspace, "notes.txt"), "private note", "utf8");
     const controller = new GuiController();
-    controller.setWorkspace(workspace);
-    const entries = controller.workspaceEntries();
+    controller.activeBotId = "bot";
+    controller.grantFolder("bot", workspace);
+    const entries = controller.workspaceEntries("bot");
     expect(entries).toEqual([{ path: "folder", type: "directory" }, { path: "notes.txt", type: "file" }]);
     expect(JSON.stringify(entries)).not.toContain("private note");
   });
@@ -321,12 +338,12 @@ describe("GUI controller", () => {
     });
 
     controller.setSessionApiKey("gui-session-secret");
-    controller.setWorkspace(workspace);
+    controller.activeBotId = "session-current";
+    controller.grantFolder("session-current", workspace);
     const result = await controller.run({
       sessionId: "session-current",
       task: "Run current GUI task",
       local: true,
-      exec: true,
       webMode: "off",
     });
     expect(result.taskId).toBeTruthy();
@@ -337,7 +354,7 @@ describe("GUI controller", () => {
       workspace: realpathSync(workspace),
       status: "completed",
       revision: 2,
-      options: { local: true, commandsEnabled: true, webMode: "off" },
+      options: { local: true, commandsEnabled: false, webMode: "off" },
     });
     expect(controller.tasks().map((record) => ({ id: record.id, status: record.status }))).toEqual([
       { id: orphaned.id, status: "interrupted" },

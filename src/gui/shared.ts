@@ -82,11 +82,12 @@ export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };
 
 export interface YaBridge {
   state(): Promise<AppState>;
-  chooseWorkspace(): Promise<string | undefined>;
-  activateWorkspace(workspace?: string): Promise<AppState>;
+  chooseWorkspace(botId: string): Promise<AppState | undefined>;
+  revokeFolder(botId: string): Promise<AppState>;
+  selectBot(botId: string): Promise<AppState>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
+  workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   loginDeepSeek(): Promise<AppState>;

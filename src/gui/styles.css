@@ -205,6 +205,9 @@ button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 aut
 .drawer-tab:hover { color: var(--text); }
 .drawer-tab.active { color: var(--text); background: var(--surface); box-shadow: var(--shadow-sm); font-weight: 500; }
 .files-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+.folder-permission { display: grid; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
+#folder-scope { color: var(--muted); overflow-wrap: anywhere; }
+.folder-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 14px; font-size: 12px; }
 .panel-heading .muted { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .file-list { flex: 1; padding: 4px 12px; overflow: auto; scrollbar-width: thin; }

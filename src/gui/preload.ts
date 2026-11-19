@@ -21,11 +21,12 @@ async function flushTaskEvents(): Promise<void> {
 
 const bridge: YaBridge = {
   state: () => ipcRenderer.invoke("state:get"),
-  chooseWorkspace: () => ipcRenderer.invoke("workspace:choose"),
-  activateWorkspace: (workspace) => ipcRenderer.invoke("workspace:activate", workspace),
+  chooseWorkspace: (botId) => ipcRenderer.invoke("workspace:choose", botId),
+  revokeFolder: (botId) => ipcRenderer.invoke("workspace:revoke", botId),
+  selectBot: (botId) => ipcRenderer.invoke("bot:select", botId),
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   clearImages: () => ipcRenderer.invoke("images:clear"),
-  workspaceEntries: (path = ".") => ipcRenderer.invoke("workspace:entries", path),
+  workspaceEntries: (botId, path = ".") => ipcRenderer.invoke("workspace:entries", botId, path),
   saveWorkspaceModelSelection: (selection: WorkspaceModelSelection) => ipcRenderer.invoke("workspace:model-selection", selection),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
   loginDeepSeek: () => ipcRenderer.invoke("account:login"),

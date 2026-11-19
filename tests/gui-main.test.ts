@@ -300,7 +300,7 @@ describe("GUI pending action lifecycle", () => {
     });
     await Promise.resolve();
     expect(stateReady).toBe(false);
-    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    expect(() => mocks.handlers.get("bot:select")!(event)).toThrow(/running/);
     const sent = sender.send.mock.calls.length;
     callbacks.onContent("late reply");
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task.txt"], status: "success" });
@@ -330,7 +330,7 @@ describe("GUI pending action lifecycle", () => {
 
   it("rejects folder switching and directory picking while an approval is pending", async () => {
     const task = start();
-    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    expect(() => mocks.handlers.get("bot:select")!(event)).toThrow(/running/);
     await expect(mocks.handlers.get("workspace:choose")!(event)).rejects.toThrow(/running/);
     respond(true);
     await expect(task).resolves.toBe("done");
@@ -338,13 +338,13 @@ describe("GUI pending action lifecycle", () => {
 
   it("rejects untrusted folder activation before changing workspace", () => {
     const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
-    expect(() => mocks.handlers.get("workspace:activate")!(untrusted)).toThrow("Untrusted");
-    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid folder");
+    expect(() => mocks.handlers.get("bot:select")!(untrusted)).toThrow("Untrusted");
+    expect(() => mocks.handlers.get("bot:select")!(event, 123)).toThrow("Invalid bot ID");
   });
 
   it("validates execution opt-in at the IPC boundary", async () => {
     await expect(mocks.handlers.get("task:run")!(event, { ...options, exec: "true" })).rejects.toThrow("Invalid command");
-    await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("requires local");
+    await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("unavailable");
     expect(mocks.run).not.toHaveBeenCalled();
   });
 
