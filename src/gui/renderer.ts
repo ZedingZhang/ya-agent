@@ -522,6 +522,7 @@ function renderNavigation(): void {
 
 function renderSession(): void {
   const timeline = element<HTMLDivElement>("timeline");
+  timeline.querySelector(".home-sprout")?.remove();
   timeline.querySelectorAll(".turn").forEach((turn) => turn.remove());
   commandLogs.clear();
   lastAnswer = "";
@@ -1607,7 +1608,33 @@ function tableSeparator(line: string): boolean {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
 }
 
+function registerHomeSprout(): void {
+  const timeline = element<HTMLDivElement>("timeline");
+  const home = element<HTMLDivElement>("timeline-empty");
+  const template = element<HTMLTemplateElement>("sprout-artwork");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let codeFill = false;
+
+  timeline.addEventListener("click", (event) => {
+    if (event.button !== 0 || (event.target !== home && event.target !== timeline)) return;
+    if (home.hidden || reducedMotion.matches || home.querySelector(".home-sprout")) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && timeline.contains(selection.anchorNode)) return;
+
+    const sprout = template.content.querySelector("svg")!.cloneNode(true) as SVGSVGElement;
+    sprout.classList.toggle("code-fill", codeFill);
+    codeFill = !codeFill;
+    const finish = (event: AnimationEvent) => {
+      if (event.target === sprout) sprout.remove();
+    };
+    sprout.addEventListener("animationend", finish);
+    sprout.addEventListener("animationcancel", finish);
+    home.append(sprout);
+  });
+}
+
 function registerEvents(): void {
+  registerHomeSprout();
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
