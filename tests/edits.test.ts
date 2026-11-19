@@ -115,11 +115,15 @@ describe("reliable local edits", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("refuses an edit whose ownership it cannot restore", async () => {
+  it("refuses an edit whose ownership it cannot restore", async () => {
     const path = join(root, "code.txt");
     writeFileSync(path, "old");
     const args = request("code.txt", "old", "new");
-    vi.mocked(fstatSync).mockReturnValueOnce({ uid: 4242, gid: 4242 } as unknown as ReturnType<typeof fstatSync>);
+    const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    vi.mocked(fstatSync).mockImplementationOnce((fd) => {
+      const staged = fs.fstatSync(fd, { bigint: true });
+      return Object.assign(staged, { uid: staged.uid + 1n });
+    });
     vi.mocked(fchownSync).mockImplementationOnce(() => { throw new Error("EPERM: operation not permitted"); });
     await expect(workspace.edit(args)).rejects.toThrow("Cannot preserve the owner");
     expect(readFileSync(path, "utf8")).toBe("old");
