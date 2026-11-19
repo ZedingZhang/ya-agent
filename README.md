@@ -156,6 +156,8 @@ ya ask --format terminal "Create a concise table"
 ya ask --format markdown "Create a concise table" > answer.md
 ```
 
+The result banner goes to stderr when Markdown output is redirected. The feedback prompt appears only when both stdin and stdout are terminals.
+
 Simple tool-free answers stream by default in an interactive terminal. Web research, ToA, local workspace tasks, pipes, and Markdown output remain buffered. Use `--stream off` to disable streaming.
 
 ### Vision input

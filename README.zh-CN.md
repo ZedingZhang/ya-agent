@@ -156,6 +156,8 @@ ya ask --format terminal "生成一个简洁表格"
 ya ask --format markdown "生成一个简洁表格" > answer.md
 ```
 
+重定向 Markdown 输出时，结果提示会写入 stderr。只有 stdin 和 stdout 都连接到终端时，Ya 才会询问是否提供反馈。
+
 简单、无工具的回答在交互终端中默认流式输出。网页研究、ToA、本地工作区任务、管道和 Markdown 输出保持缓冲。使用 `--stream off` 可关闭流式输出。
 
 ### 视觉输入

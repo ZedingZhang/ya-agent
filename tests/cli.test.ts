@@ -318,7 +318,18 @@ describe("CLI", () => {
 
     const pipe = fakeIo(false);
     expect(await main(["ask", "test", "--no-feedback"], context(pipe.io))).toBe(0);
-    expect(pipe.stdout.output).toContain("## Title");
+    expect(pipe.stdout.output).toBe("## Title\n\n**bold**\n");
+  });
+
+  it.each(["auto", "markdown"])("writes only the answer with --format %s when stdout is redirected but stdin is a TTY", async (format) => {
+    const capture = fakeIo(true);
+    capture.stdout.isTTY = false;
+
+    expect(await main(["ask", "test", "--format", format, "--web", "off"], context(capture.io))).toBe(0);
+
+    expect(capture.prompts).toEqual([]);
+    expect(capture.stdout.output).toBe("## Title\n\n**bold**\n");
+    expect(capture.stderr.output).toContain("[Ya single result]");
   });
 
   it("sends local images as vision content blocks with the selected detail", async () => {
@@ -409,7 +420,7 @@ describe("CLI", () => {
     await main(["ask", "Explain PostgreSQL indexes", "--show-memory", "--no-feedback"], context(capture.io, fakeClient("answer")));
     expect(capture.stdout.output).toContain("[Ya memory context]");
     expect(capture.stdout.output).toContain(card.id);
-    expect(capture.stdout.output.indexOf(card.id)).toBeLessThan(capture.stdout.output.indexOf("[Ya single result]"));
+    expect(capture.stdout.output.indexOf(card.id)).toBeLessThan(capture.stdout.output.indexOf("\nanswer\n"));
 
     const silent = fakeIo(false);
     await main(["ask", "Explain PostgreSQL indexes", "--no-feedback"], context(silent.io, fakeClient("answer")));
