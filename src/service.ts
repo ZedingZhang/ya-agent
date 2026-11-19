@@ -142,10 +142,10 @@ export async function runTask(
   });
   const taskId = record.id;
   const initialRevision = record.revision;
-  options.onTaskCreated?.(structuredClone(record));
 
   let result: RunResult;
   try {
+    options.onTaskCreated?.(structuredClone(record));
     options.signal?.throwIfAborted();
     const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
     const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
