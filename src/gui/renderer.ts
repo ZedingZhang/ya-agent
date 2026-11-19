@@ -80,6 +80,7 @@ interface YaRendererBridge {
   restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
+  checkFolder(botId: string): Promise<FolderAccess>;
   workspaceEntries(botId: string, path: string, folderGrantVersion?: string): Promise<import("./shared").WorkspaceListing>;
   saveWorkspaceModelSelection(selection: {
     model: AppState["config"]["model"];
@@ -559,7 +560,7 @@ async function selectBot(bot: DesktopBot): Promise<void> {
     switchPage("workspace");
     renderBot();
     setDrawer(undefined);
-    await renderFiles();
+    void checkSelectedFolder();
     setStatus(t("ready"));
     persistSessions();
     element<HTMLTextAreaElement>("task-input").focus();
@@ -624,7 +625,7 @@ async function updateFolderAccess(revoke: boolean): Promise<void> {
     currentDirectory = ".";
     element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace) && !element<HTMLInputElement>("toa-enabled").checked;
     renderWorkspaceLabel();
-    await renderFiles();
+    void renderFiles();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
@@ -697,6 +698,28 @@ async function clearImages(): Promise<void> {
 }
 
 let fileRequest = 0;
+
+function applyFolderAvailability(access: FolderAccess): void {
+  if (!state.validWorkspace && access.validWorkspace && !element<HTMLInputElement>("toa-enabled").checked) {
+    element<HTMLInputElement>("local-enabled").checked = true;
+  }
+  Object.assign(state, access);
+  syncWorkspaceControls();
+}
+
+async function checkSelectedFolder(): Promise<void> {
+  const request = ++fileRequest;
+  const botId = currentBot.id;
+  element<HTMLDivElement>("file-list").replaceChildren();
+  if (!state.workspace) return;
+  try {
+    const access = await bridge.checkFolder(botId);
+    if (request !== fileRequest || currentBot.id !== botId) return;
+    applyFolderAvailability(access);
+  } catch (error) {
+    if (request === fileRequest && currentBot.id === botId) setStatus(errorText(error), "error");
+  }
+}
 async function renderFiles(): Promise<void> {
   const request = ++fileRequest;
   const botId = currentBot.id;
@@ -709,8 +732,7 @@ async function renderFiles(): Promise<void> {
   try {
     const { access, entries } = await bridge.workspaceEntries(botId, directory, expectedVersion);
     if (request !== fileRequest || botId !== currentBot.id || directory !== currentDirectory) return;
-    Object.assign(state, access);
-    syncWorkspaceControls();
+    applyFolderAvailability(access);
     if (!access.validWorkspace) return;
     directoryGrantVersion = access.folderGrantVersion;
     if (expectedVersion !== access.folderGrantVersion) {
@@ -868,9 +890,15 @@ async function runTask(): Promise<void> {
     };
     let result = await bridge.runTask(options);
     if ("folderAccessChanged" in result) {
+      // A replacement grant has its own root, even when Files is closed.
+      ++fileRequest;
+      currentDirectory = ".";
+      directoryGrantVersion = result.folderAccessChanged.folderGrantVersion;
+      element<HTMLDivElement>("file-location").textContent = ".";
+      element<HTMLDivElement>("file-list").replaceChildren();
       Object.assign(state, result.folderAccessChanged);
       syncWorkspaceControls();
-      await renderFiles();
+      if (drawerPage === "files" && state.validWorkspace) void renderFiles();
       if (state.validWorkspace) {
         setStatus(interpolate(t("folderChanged"), { folder: state.validWorkspace }));
         return;
@@ -916,7 +944,7 @@ async function runTask(): Promise<void> {
       try { state = await bridge.state(); fillSettings(); }
       catch { /* Keep the task error visible if refreshing account state also fails. */ }
     }
-    if (local) await renderFiles();
+    if (local && drawerPage === "files") void renderFiles();
   } finally {
     pendingAction = undefined;
     renderPendingAction();
@@ -1763,7 +1791,7 @@ async function initialize(): Promise<void> {
   renderMemory();
   renderBot();
   persistSessions();
-  await renderFiles();
+  void checkSelectedFolder();
   document.body.dataset.ready = "true";
   document.body.inert = false;
 }

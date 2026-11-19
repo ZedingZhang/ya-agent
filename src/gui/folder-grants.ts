@@ -1,6 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { constants, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { open, realpath, stat, type FileHandle } from "node:fs/promises";
+import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
 import type { FolderAccess } from "./shared";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
@@ -34,10 +36,21 @@ export function nativeIdentity(path: string, create: boolean, binary = folderIde
   }
 }
 
-export class FolderGrants {
-  private readonly pins = new Map<string, { fd: number; identity: string }>();
+async function identifyPickedFolder(path: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await promisify(execFile)(folderIdentityExecutable(), ["grant", toNamespacedPath(path)], {
+      encoding: "utf8", windowsHide: true, timeout: 3_000,
+    });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
-  constructor(private readonly identify = nativeIdentity) {}
+export class FolderGrants {
+  private readonly pins = new Map<string, { handle: FileHandle; identity: string; directoryId: { dev: string; ino: string } }>();
+
+  constructor(private readonly identify: (path: string) => string | undefined | Promise<string | undefined> = identifyPickedFolder) {}
 
   private recordPath(botId: string): string {
     return join(dataHome(), BOT_PERMISSIONS_DIR, createHash("sha256").update(botId).digest("hex"));
@@ -64,52 +77,38 @@ export class FolderGrants {
   sessionDirectoryId(botId: string, grant: FolderGrant): { dev: string; ino: string } | undefined {
     const pin = this.pins.get(botId);
     if (pin?.identity !== grant.identity) return undefined;
-    const held = fstatSync(pin.fd, { bigint: true });
-    return { dev: String(held.dev), ino: String(held.ino) };
+    // The open descriptor pins this directory until the grant is released.
+    return pin.directoryId;
   }
 
-  matches(botId: string, grant: FolderGrant): boolean {
-    try {
-      if (realpathSync(grant.path) !== grant.path) return false;
-      if (!grant.identity.startsWith("session:")) {
-        return this.identify(grant.path, false) === grant.identity;
-      }
-      const pin = this.pins.get(botId);
-      if (pin?.identity !== grant.identity) return false;
-      // The open directory retains its inode for the lifetime of this grant.
-      const held = fstatSync(pin.fd, { bigint: true });
-      const current = statSync(grant.path, { bigint: true });
-      return held.isDirectory() && held.nlink > 0n && held.ino !== 0n && held.ino === current.ino && held.dev === current.dev;
-    } catch {
-      return false;
-    }
-  }
-
-  grant(botId: string, folder: string): FolderGrant {
-    const path = realpathSync(folder);
+  async grant(botId: string, folder: string, checkSelection?: () => void): Promise<FolderGrant> {
+    const path = await realpath(folder);
     const record = this.recordPath(botId);
     const temp = record + "." + randomUUID();
-    let fd: number | undefined;
+    let handle: FileHandle | undefined;
+    let directoryId: { dev: string; ino: string } | undefined;
     try {
-      let identity = this.identify(path, true);
+      let identity = await this.identify(path);
       if (!identity) {
-        fd = openSync(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0));
-        const held = fstatSync(fd, { bigint: true });
-        const current = statSync(path, { bigint: true });
-        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || realpathSync(path) !== path) {
+        handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0));
+        const held = await handle.stat({ bigint: true });
+        const current = await stat(path, { bigint: true });
+        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await realpath(path) !== path) {
           throw new Error("Choose a folder with a verifiable filesystem identity.");
         }
         identity = "session:" + randomUUID();
+        directoryId = { dev: String(held.dev), ino: String(held.ino) };
       }
+      checkSelection?.();
       const grant = { path, identity, version: randomUUID() };
       mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
       writeFileSync(temp, JSON.stringify(grant), { mode: 0o600, flag: "wx" });
       renameSync(temp, record);
       this.release(botId);
-      if (fd !== undefined) this.pins.set(botId, { fd, identity });
+      if (handle && directoryId) this.pins.set(botId, { handle, identity, directoryId });
       return grant;
     } catch (error) {
-      if (fd !== undefined) closeSync(fd);
+      await handle?.close();
       rmSync(temp, { force: true });
       throw error;
     }
@@ -122,7 +121,7 @@ export class FolderGrants {
 
   private release(botId: string): void {
     const pin = this.pins.get(botId);
-    if (pin) closeSync(pin.fd);
+    if (pin) void pin.handle.close();
     this.pins.delete(botId);
   }
 }

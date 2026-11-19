@@ -53,7 +53,7 @@ vi.mock("../src/gui/controller", () => ({
 
     auditLogs() { return []; }
     auditLogTotalBytes() { return 0; }
-    folderAccess() { return { workspace: undefined, validWorkspace: undefined }; }
+    folderState() { return { workspace: undefined, validWorkspace: undefined }; }
     apiKey() { return mocks.accountCredential() ?? "test-key"; }
     cards() { return []; }
     run = mocks.run;

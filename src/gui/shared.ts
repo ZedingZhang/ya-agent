@@ -104,6 +104,7 @@ export interface YaBridge {
   restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
+  checkFolder(botId: string): Promise<FolderAccess>;
   workspaceEntries(botId: string, path: string, folderGrantVersion?: string): Promise<WorkspaceListing>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;

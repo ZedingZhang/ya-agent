@@ -123,6 +123,7 @@ function describeFolderAccess(grant?: FolderGrant, validWorkspace?: string): Fol
 
 export class GuiController {
   private readonly grants = new FolderGrants();
+  private readonly verifiedGrants = new Map<string, string>();
   private pendingPrune?: { ids: string[]; includeCandidates: boolean };
   config: ModelConfig;
   language: Language;
@@ -154,21 +155,40 @@ export class GuiController {
     if (typeof botId !== "string" || !botId || botId !== this.activeBotId) throw new Error("Select this bot first.");
   }
 
-  folderAccess(): FolderAccess {
-    const grant = this.activeBotId ? this.grants.read(this.activeBotId) : undefined;
-    const valid = this.activeBotId && grant && this.grants.matches(this.activeBotId, grant);
+  // Display state only. A task and each operation independently verify the grant.
+  folderState(): FolderAccess {
+    const botId = this.activeBotId;
+    const grant = botId ? this.grants.read(botId) : undefined;
+    return describeFolderAccess(grant, botId && grant && this.verifiedGrants.get(botId) === grant.version ? grant.path : undefined);
+  }
+
+  async folderAccess(signal?: AbortSignal): Promise<FolderAccess> {
+    const botId = this.activeBotId;
+    if (!botId) return describeFolderAccess();
+    const grant = this.grants.read(botId);
+    if (!grant) return describeFolderAccess();
+    const valid = await new GrantedFolderIO(this.grants, botId, grant).available(signal);
+    this.assertActiveBot(botId);
+    if (this.grants.read(botId)?.version !== grant.version) return this.folderState();
+    if (valid) this.verifiedGrants.set(botId, grant.version);
+    else this.verifiedGrants.delete(botId);
     return describeFolderAccess(grant, valid ? grant.path : undefined);
   }
 
-  grantFolder(botId: string, folder: string): FolderAccess {
+  async grantFolder(botId: string, folder: string, beforeCommit?: () => void): Promise<FolderAccess> {
     this.assertActiveBot(botId);
-    const grant = this.grants.grant(botId, folder);
+    const grant = await this.grants.grant(botId, folder, () => {
+      this.assertActiveBot(botId);
+      beforeCommit?.();
+    });
+    this.verifiedGrants.set(botId, grant.version);
     return describeFolderAccess(grant, grant.path);
   }
 
   revokeFolder(botId: string): FolderAccess {
     this.assertActiveBot(botId);
     this.grants.revoke(botId);
+    this.verifiedGrants.delete(botId);
     return describeFolderAccess();
   }
 
@@ -221,12 +241,14 @@ export class GuiController {
     let localWorkspace: TaskWorkspace | undefined;
     if (options.local) {
       this.assertActiveBot(options.sessionId);
+      const access = await this.folderAccess(callbacks.signal);
       const grant = this.grants.read(options.sessionId);
-      if (grant && grant.version === options.folderGrantVersion) {
-        localWorkspace = this.workspaceForBot(options.sessionId, grant, callbacks);
+      if (!access.validWorkspace || !grant || grant.version !== options.folderGrantVersion || grant.version !== access.folderGrantVersion) {
+        throw new FolderAccessChangedError(access);
       }
-      if (!localWorkspace) throw new FolderAccessChangedError(this.folderAccess());
+      localWorkspace = this.workspaceForBot(options.sessionId, grant, callbacks);
     }
+    callbacks.signal?.throwIfAborted();
     const images = callbacks.loadImages ? callbacks.loadImages() : options.images;
     callbacks.onStarted?.();
     const apiKey = this.apiKey();
@@ -261,35 +283,34 @@ export class GuiController {
     return selectRelevantCards(task);
   }
 
-  private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace | undefined {
-    if (!this.grants.matches(botId, grant)) return undefined;
-    const workspace = new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
+  private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace {
+    return new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
       signal: callbacks.signal,
       onFileChange: callbacks.onFileChange,
       scopedFolder: new GrantedFolderIO(this.grants, botId, grant),
       assertAccess: () => {
         this.assertActiveBot(botId);
         const current = this.grants.read(botId);
-        if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity || !this.grants.matches(botId, grant)) {
+        if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity) {
           throw new Error("Folder access has changed.");
         }
       },
     });
-    return workspace.root === grant.path ? workspace : undefined;
   }
 
-  workspaceEntries(botId: string, path = ".", folderGrantVersion?: string): WorkspaceListing {
+  async workspaceEntries(botId: string, path = ".", folderGrantVersion?: string, signal?: AbortSignal): Promise<WorkspaceListing> {
     this.assertActiveBot(botId);
     const grant = this.grants.read(botId);
-    const workspace = grant && this.workspaceForBot(botId, grant);
-    const access = describeFolderAccess(grant, workspace?.root);
-    if (!workspace || (path !== "." && grant?.version !== folderGrantVersion)) return { access, entries: [] };
+    if (!grant || (path !== "." && grant.version !== folderGrantVersion)) return { access: await this.folderAccess(signal), entries: [] };
     try {
-      const payload = JSON.parse(workspace.list({ path })) as { entries: Array<{ path: string; type: string }> };
-      return { access, entries: payload.entries };
+      const workspace = this.workspaceForBot(botId, grant, { signal });
+      const payload = JSON.parse(await workspace.list({ path })) as { entries: Array<{ path: string; type: string }> };
+      this.verifiedGrants.set(botId, grant.version);
+      return { access: describeFolderAccess(grant, grant.path), entries: payload.entries };
     } catch (error) {
-      const access = this.folderAccess();
-      if (!access.validWorkspace || access.folderGrantVersion !== grant?.version) return { access, entries: [] };
+      signal?.throwIfAborted();
+      const access = await this.folderAccess(signal);
+      if (!access.validWorkspace || access.folderGrantVersion !== grant.version) return { access, entries: [] };
       throw error;
     }
   }

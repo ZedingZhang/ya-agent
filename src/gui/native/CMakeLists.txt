@@ -4,6 +4,10 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 project(ya_folder_identity LANGUAGES C)
 add_executable(ya-folder-identity folder-identity.c)
-set_target_properties(ya-folder-identity PROPERTIES
+add_executable(ya-folder-move folder-move.c)
+if(WIN32)
+  target_link_libraries(ya-folder-move PRIVATE ntdll)
+endif()
+set_target_properties(ya-folder-identity ya-folder-move PROPERTIES
   MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../../dist/gui-native/$<0:>")

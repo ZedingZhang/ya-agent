@@ -327,7 +327,7 @@ The application does not start a local web server. The renderer cannot access No
 ## Development
 
 The shared core, CLI, and Electron desktop application are written in TypeScript.
-Development requires Node.js 22 or later. Desktop builds and tests also use CMake 3.15+ and a C compiler to build the bundled directory-identity helper.
+Development requires Node.js 22 or later. Desktop builds and tests also use CMake 3.15+ and a C compiler for the native directory identity and file move helpers.
 
 ```sh
 npm ci

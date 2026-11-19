@@ -52,6 +52,8 @@ app.setName("Ya");
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 let activeTaskController: AbortController | undefined;
+let folderBrowserRequest: AbortController | undefined;
+let folderSelectionRevision = 0;
 let activeTaskPromise: Promise<RunResult> | undefined;
 let activeLoginController: AbortController | undefined;
 let activeLoginPromise: Promise<void> | undefined;
@@ -88,7 +90,7 @@ function appState(): AppState {
     version: VERSION,
     platform: process.platform,
     language: controller.language,
-    ...controller.folderAccess(),
+    ...controller.folderState(),
     stream: controller.stream,
     hasApiKey: Boolean(credential),
     accountSignedIn: typeof credential === "object" && credential.kind === "account",
@@ -231,6 +233,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+async function readFolderForDisplay<T>(botId: unknown, read: (botId: string, signal: AbortSignal) => Promise<T>): Promise<T> {
+  controller.assertActiveBot(botId);
+  folderBrowserRequest?.abort();
+  const request = new AbortController();
+  folderBrowserRequest = request;
+  try {
+    return await read(botId, request.signal);
+  } finally {
+    if (folderBrowserRequest === request) folderBrowserRequest = undefined;
+  }
+}
+
 function registerIpc(): void {
   ipcMain.handle("state:get", async (event) => {
     assertTrustedSender(event);
@@ -244,6 +258,7 @@ function registerIpc(): void {
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     controller.assertActiveBot(botId);
     if (!mainWindow) return undefined;
+    const revision = ++folderSelectionRevision;
     const chinese = controller.language === "zh-CN";
     const selection = await dialog.showOpenDialog(mainWindow, {
       properties: ["openDirectory", "createDirectory"],
@@ -253,15 +268,19 @@ function registerIpc(): void {
     const path = selection.filePaths[0];
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     if (selection.canceled || !path) return undefined;
-    return controller.grantFolder(botId, path);
+    return controller.grantFolder(botId, path, () => {
+      if (taskRunning || revision !== folderSelectionRevision) throw new Error("Folder selection is no longer current.");
+    });
   });
 
   ipcMain.handle("bot:select", (event, botId: unknown) => {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("Bots cannot be changed while a task is running.");
     if (!validBotId(botId)) throw new Error("Invalid bot ID.");
+    ++folderSelectionRevision;
+    folderBrowserRequest?.abort();
     controller.activeBotId = botId;
-    return controller.folderAccess();
+    return controller.folderState();
   });
 
   ipcMain.handle("bot:restore-ids", (event, ids: unknown) => {
@@ -278,13 +297,19 @@ function registerIpc(): void {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     controller.assertActiveBot(botId);
+    ++folderSelectionRevision;
     return controller.revokeFolder(botId);
+  });
+
+  ipcMain.handle("workspace:check", (event, botId: unknown) => {
+    assertTrustedSender(event);
+    return readFolderForDisplay(botId, (_id, signal) => controller.folderAccess(signal));
   });
 
   ipcMain.handle("workspace:entries", (event, botId: unknown, path: unknown, version: unknown) => {
     assertTrustedSender(event);
-    controller.assertActiveBot(botId);
-    return controller.workspaceEntries(botId, typeof path === "string" ? path : ".", typeof version === "string" ? version : undefined);
+    return readFolderForDisplay(botId, (id, signal) => controller.workspaceEntries(id,
+      typeof path === "string" ? path : ".", typeof version === "string" ? version : undefined, signal));
   });
 
   ipcMain.handle("workspace:model-selection", (event, raw: unknown) => {
@@ -377,6 +402,7 @@ function registerIpc(): void {
     if (activeLoginPromise) throw new Error("Finish or cancel DeepSeek sign-in before starting a task.");
     if (taskRunning) throw new Error("A task is already running.");
     const options = validateTaskOptions(raw);
+    ++folderSelectionRevision;
     taskRunning = true;
     const taskController = new AbortController();
     activeTaskController = taskController;
@@ -536,14 +562,20 @@ async function createWindow(show = true): Promise<BrowserWindow> {
     if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
   mainWindow.webContents.on("did-start-loading", () => {
+    ++folderSelectionRevision;
+    folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window reload."));
     cancelTask(new Error("The renderer was reloaded while running a task."));
   });
   mainWindow.webContents.on("destroyed", () => {
+    ++folderSelectionRevision;
+    folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window close."));
     cancelTask(new Error("The renderer was destroyed while running a task."));
   });
   mainWindow.webContents.on("render-process-gone", () => {
+    ++folderSelectionRevision;
+    folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by renderer exit."));
     cancelTask(new Error("The renderer exited while running a task."));
   });
@@ -966,7 +998,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   });
   controller.setSessionApiKey("smoke-only-key");
   const originalPicker = dialog.showOpenDialog;
-  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [originalController.folderAccess().validWorkspace!] });
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [originalController.folderState().validWorkspace!] });
   try {
     const results = await window.webContents.executeJavaScript(`(async () => {
       try {
@@ -1366,7 +1398,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     mkdirSync(join(directory, "nested"));
     mkdirSync(replacement);
     writeFileSync(note, "new root");
-    controller.grantFolder(fixture.archivedId, directory);
+    await controller.grantFolder(fixture.archivedId, directory);
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [picture] });
     await window.webContents.executeJavaScript(`(async () => {
       await selectBot(currentBot);
@@ -1374,12 +1406,15 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       await renderFiles();
       await chooseImages();
     })()`);
-    const grant = controller.grantFolder(fixture.archivedId, replacement);
+    const grant = await controller.grantFolder(fixture.archivedId, replacement);
     const held = await window.webContents.executeJavaScript(`(async () => {
       const before = currentBot.turns.length;
       // A background state refresh can see the new grant before the folder label does.
       state = await bridge.state();
       await runTask();
+      if (currentDirectory !== '.') return false;
+      // Opening Files enumerates the newly selected folder independently of the composer.
+      await renderFiles();
       return currentBot.turns.length === before && currentBot.draft === 'Saved draft'
         && document.querySelector('#task-input').value === 'Saved draft' && selectedImages.length === 1
         && state.validWorkspace === ${JSON.stringify(grant.validWorkspace)} && currentDirectory === '.'
@@ -1443,6 +1478,61 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
   }
 }
 
+async function verifyPendingFolderChat(window: BrowserWindow, root: string): Promise<void> {
+  const original = controller;
+  controller = new GuiController(async (_key, _task, _config, options) => {
+    if (options?.localWorkspace) throw new Error("Expected an ordinary chat.");
+    return { content: "Reply while folder is pending", mode: "single", usage: {} };
+  });
+  controller.setSessionApiKey("smoke-only-key");
+  const { originalId, slowId } = await window.webContents.executeJavaScript(`(async () => {
+    const originalId = currentBot.id;
+    await selectBot(createBot({ title: 'Slow folder', instructions: '' }));
+    return { originalId, slowId: currentBot.id };
+  })()`) as { originalId: string; slowId: string };
+  const requests = new Map<string, AbortSignal>();
+  const waitForCancellation = (kind: string, signal?: AbortSignal) => new Promise<never>((_resolve, reject) => {
+    if (!signal) throw new Error("Missing folder browser cancellation.");
+    requests.set(kind, signal);
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  try {
+    await controller.grantFolder(slowId, root);
+    controller.folderAccess = (signal) => waitForCancellation("probe", signal);
+    controller.workspaceEntries = (_id, _path, _version, signal) => waitForCancellation("listing", signal);
+    await window.loadFile(rendererFile);
+    const replied = await window.webContents.executeJavaScript(`(async () => {
+      const deadline = Date.now() + 5000;
+      while (document.body.dataset.ready !== 'true' && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+      if (document.body.inert || document.querySelector('#send-button').disabled) return false;
+      document.querySelector('#local-enabled').checked = false;
+      document.querySelector('#task-input').value = 'Chat with the folder disconnected';
+      await runTask();
+      return currentBot.turns.at(-1)?.answer === 'Reply while folder is pending';
+    })()`);
+    const probe = requests.get("probe");
+    if (!replied || !probe || probe.aborted || requests.has("listing")) throw new Error("Startup or ordinary chat waited for folder I/O.");
+    await window.webContents.executeJavaScript("setDrawer('files'); bridge.state()");
+    const listing = requests.get("listing");
+    if (!listing || listing.aborted || !probe.aborted) throw new Error("Opening Files did not start an independent listing.");
+    const switched = await window.webContents.executeJavaScript(`(async () => {
+      await selectBot(bots.find((bot) => bot.id === ${JSON.stringify(originalId)}));
+      return currentBot.id === ${JSON.stringify(originalId)} && !navigationPending && !document.querySelector('#send-button').disabled;
+    })()`);
+    if (!switched || !listing.aborted) throw new Error("A pending listing blocked bot navigation.");
+  } finally {
+    folderBrowserRequest?.abort();
+    controller.activeBotId = slowId;
+    controller.revokeFolder(slowId);
+    controller = original;
+    await window.webContents.executeJavaScript(`(async () => {
+      await selectBot(bots.find((bot) => bot.id === ${JSON.stringify(originalId)}));
+      bots = bots.filter((bot) => bot.id !== ${JSON.stringify(slowId)});
+      persistSessions();
+    })()`);
+  }
+}
+
 async function verifyBotIdRecovery(window: BrowserWindow, root: string): Promise<void> {
   const originalId = await window.webContents.executeJavaScript(`(() => {
     const original = currentBot.id;
@@ -1460,7 +1550,7 @@ async function verifyBotIdRecovery(window: BrowserWindow, root: string): Promise
   await window.loadFile(rendererFile);
   await verifyRenderer(window);
   if (await window.webContents.executeJavaScript("currentBot.id") !== repaired) throw new Error("The repaired ID was not saved.");
-  controller.grantFolder(repaired, root);
+  await controller.grantFolder(repaired, root);
   const damagedId = await window.webContents.executeJavaScript(`(async () => {
     const copy = createBot({ title: 'Second recovered bot', instructions: '' });
     copy.id = currentBot.id;
@@ -1474,7 +1564,7 @@ async function verifyBotIdRecovery(window: BrowserWindow, root: string): Promise
     persistSessions();
     return owner.id;
   })()`) as string;
-  controller.grantFolder(damagedId, root);
+  await controller.grantFolder(damagedId, root);
   await window.loadFile(rendererFile);
   await verifyRenderer(window);
   const recovered = await window.webContents.executeJavaScript(`(async () => {
@@ -1669,6 +1759,7 @@ app.whenReady().then(async () => {
     await verifyApplicationMenu(window);
     await verifyBotNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
+    await verifyPendingFolderChat(window, smokeRoot!);
     await verifyBotIdRecovery(window, smokeRoot!);
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);

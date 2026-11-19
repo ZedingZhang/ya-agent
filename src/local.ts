@@ -4,9 +4,6 @@ import {
   closeSync,
   constants,
   existsSync,
-  fchmodSync,
-  fchownSync,
-  fsyncSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -20,7 +17,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import {
   basename,
@@ -35,6 +31,7 @@ import { createTwoFilesPatch } from "diff";
 import { BOT_PERMISSIONS_DIR, dataHome } from "./config";
 import { abortable } from "./cancellation";
 import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
+import { publishEdit } from "./publish-edit";
 import { createFileChange, type FileChange } from "./file-diff";
 import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_LINES, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
@@ -64,11 +61,23 @@ export interface LocalActivity {
 export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boolean>;
 export type LocalActivityObserver = (activity: LocalActivity) => void;
 
+export interface EditResult {
+  approved: boolean;
+  previous: string;
+  content: string;
+  count: number;
+}
+
+export type ConfirmEdit = (previous: string, content: string, count: number, path: string) => Promise<boolean>;
+
 export interface ScopedFolderIO {
-  list(directory: string): string;
-  read(file: string): string;
+  list(directory: string, signal?: AbortSignal): Promise<string>;
+  read(file: string, signal?: AbortSignal): Promise<string>;
   search(directory: string, query: string, signal?: AbortSignal): Promise<string>;
-  write(file: string, content: string, confirm: (previous?: string) => Promise<boolean>, signal?: AbortSignal): Promise<{ approved: boolean; previous?: string }>;
+  write(file: string, content: string, confirm: (previous: string | undefined, path: string) => Promise<boolean>, signal?: AbortSignal): Promise<{ approved: boolean; previous?: string }>;
+  mkdir(path: string, confirm: (path: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean>;
+  edit(path: string, revision: string, edits: unknown, confirm: ConfirmEdit, signal?: AbortSignal): Promise<EditResult>;
+  move(source: string, destination: string, confirm: (source: string, destination: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean>;
 }
 
 export interface LocalWorkspaceOptions<Scope extends ScopedFolderIO | undefined = undefined> {
@@ -396,6 +405,25 @@ export function listDirectory(path: string, displayPath: string): string {
   return JSON.stringify({ path: displayPath, entries, limited: allEntries.length > MAX_LIST_ENTRIES });
 }
 
+export function physicalWorkspacePath(root: string, input: string): string {
+  const candidate = resolve(root, input);
+  let ancestor = candidate;
+  // lstat sees dangling links; realpath below must reject them rather than
+  // treating the link itself as a new file inside the workspace.
+  while (!lstatSync(ancestor, { throwIfNoEntry: false })) {
+    const parent = dirname(ancestor);
+    if (parent === ancestor) break;
+    ancestor = parent;
+  }
+  const physicalAncestor = realpathSync(ancestor);
+  const physical = resolve(physicalAncestor, relative(ancestor, candidate));
+  const fromRoot = relative(root, physical);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    throw new Error("Path must remain inside the authorized workspace.");
+  }
+  return physical;
+}
+
 // Task runners accept both the synchronous CLI workspace and desktop folder tools.
 export type TaskWorkspace = LocalWorkspace<ScopedFolderIO | undefined>;
 
@@ -407,10 +435,14 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   constructor(root: string, confirm: LocalConfirmation, onActivity?: LocalActivityObserver, private readonly options: LocalWorkspaceOptions<Scope> = {}) {
     const expanded = resolve(expandHome(root));
-    if (!existsSync(expanded)) throw new Error(`Workspace does not exist: ${expanded}`);
-    const resolved = realpathSync(expanded);
-    if (!statSync(resolved).isDirectory()) throw new Error(`Workspace is not a directory: ${resolved}`);
-    this.root = resolved;
+    if (options.scopedFolder) {
+      // Desktop workers verify the picker’s canonical root before touching it.
+      this.root = expanded;
+    } else {
+      if (!existsSync(expanded)) throw new Error(`Workspace does not exist: ${expanded}`);
+      this.root = realpathSync(expanded);
+      if (!statSync(this.root).isDirectory()) throw new Error(`Workspace is not a directory: ${this.root}`);
+    }
     this.confirm = confirm;
     this.onActivity = onActivity;
   }
@@ -430,8 +462,8 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   get toolHandlers(): Record<string, ToolHandler> {
     return {
-      local_list: (arguments_) => this.list(arguments_),
-      local_read: (arguments_) => this.read(arguments_),
+      local_list: (arguments_, signal) => this.list(arguments_, signal),
+      local_read: (arguments_, signal) => this.read(arguments_, signal),
       local_search: (arguments_, signal) => this.search(arguments_, signal),
       local_mkdir: (arguments_) => this.mkdir(arguments_),
       local_write: (arguments_) => this.write(arguments_),
@@ -467,25 +499,20 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     if (typeof value !== "string" || !value.trim()) throw new Error("A non-empty path is required.");
     const expanded = expandHome(value);
     const candidate = resolve(isAbsolute(expanded) ? expanded : join(this.root, expanded));
-    let ancestor = candidate;
-    // lstat sees dangling links; realpath below must reject them rather than
-    // treating the link itself as a new file inside the workspace.
-    while (!lstatSync(ancestor, { throwIfNoEntry: false })) {
-      const parent = dirname(ancestor);
-      if (parent === ancestor) break;
-      ancestor = parent;
-    }
-    const physicalAncestor = realpathSync(ancestor);
-    const physical = resolve(physicalAncestor, relative(ancestor, candidate));
-    const fromRoot = relative(this.root, physical);
+    if (!this.options.scopedFolder) return physicalWorkspacePath(this.root, candidate);
+    const fromRoot = relative(this.root, candidate);
     if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
       throw new Error("Path must remain inside the authorized workspace.");
     }
-    return physical;
+    return candidate;
   }
 
   private relativePath(path: string): string {
     return relative(this.root, path) || ".";
+  }
+
+  private approvalPath(resolved: string): string {
+    return this.resolveInput(resolve(this.root, resolved));
   }
 
   private audit(operation: string, paths: string[], status: string, error?: string, metadata: Record<string, unknown> = {}): void {
@@ -503,6 +530,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   private async confirmed(action: LocalAction): Promise<boolean> {
     this.options.signal?.throwIfAborted();
+    this.options.assertAccess?.();
     const approved = await abortable(Promise.resolve(this.confirm(action)), this.options.signal);
     this.options.signal?.throwIfAborted();
     this.options.assertAccess?.();
@@ -552,24 +580,39 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     }
   }
 
-  list(arguments_: ToolArguments): string {
-    const path = this.resolveInput(arguments_.path ?? ".");
-    if (isSensitive(path)) throw new Error("Listing sensitive directories is blocked in local mode.");
-    if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
-    const relative = this.relativePath(path);
-    const result = this.options.scopedFolder ? this.options.scopedFolder.list(relative) : listDirectory(path, relative);
-    this.activity("list", [path], "success");
-    this.options.assertAccess?.();
-    return result;
+  private operationSignal(signal?: AbortSignal): AbortSignal | undefined {
+    return this.options.signal && signal ? AbortSignal.any([this.options.signal, signal]) : this.options.signal ?? signal;
   }
 
-  read(arguments_: ToolArguments): string {
+  list(this: LocalWorkspace<undefined>, arguments_: ToolArguments, signal?: AbortSignal): string;
+  list(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string>;
+  list(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string> {
+    const path = this.resolveInput(arguments_.path ?? ".");
+    if (isSensitive(path)) throw new Error("Listing sensitive directories is blocked in local mode.");
+    const relative = this.relativePath(path);
+    const finish = (result: string): string => {
+      this.activity("list", [path], "success");
+      this.options.assertAccess?.();
+      return result;
+    };
+    if (this.options.scopedFolder) return this.options.scopedFolder.list(relative, this.operationSignal(signal)).then(finish);
+    if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
+    return finish(listDirectory(path, relative));
+  }
+
+  read(this: LocalWorkspace<undefined>, arguments_: ToolArguments, signal?: AbortSignal): string;
+  read(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string>;
+  read(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string> {
     const path = this.resolveInput(arguments_.path);
     if (isSensitive(path)) throw new Error("Reading sensitive files is blocked in local mode.");
-    const content = this.options.scopedFolder ? this.options.scopedFolder.read(this.relativePath(path)) : readText(path);
-    this.activity("read", [path], "success");
-    this.options.assertAccess?.();
-    return JSON.stringify({ path: this.relativePath(path), content, revision: textRevision(content) });
+    const finish = (content: string): string => {
+      this.activity("read", [path], "success");
+      this.options.assertAccess?.();
+      return JSON.stringify({ path: this.relativePath(path), content, revision: textRevision(content) });
+    };
+    return this.options.scopedFolder
+      ? this.options.scopedFolder.read(this.relativePath(path), this.operationSignal(signal)).then(finish)
+      : finish(readText(path));
   }
 
   search(this: LocalWorkspace<undefined>, arguments_: ToolArguments, signal?: AbortSignal): string;
@@ -579,14 +622,14 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     if (typeof query !== "string" || !query.trim()) throw new Error("A non-empty search query is required.");
     const root = this.resolveInput(arguments_.path ?? ".");
     if (isSensitive(root)) throw new Error("Searching sensitive directories is blocked in local mode.");
-    if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`);
     if (this.options.scopedFolder) {
-      const active = this.options.signal && signal ? AbortSignal.any([this.options.signal, signal]) : this.options.signal ?? signal;
+      const active = this.operationSignal(signal);
       return this.options.scopedFolder.search(this.relativePath(root), query, active).then((result) => {
         active?.throwIfAborted();
         return this.finishSearch(root, result);
       });
     }
+    if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`);
     const result = this.options.searchFolder
       ? this.options.searchFolder(this.relativePath(root), query)
       : searchFiles(root, query, (path) => this.relativePath(path), this.options.assertAccess);
@@ -600,17 +643,17 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
   }
 
   async mkdir(arguments_: ToolArguments): Promise<string> {
-    const path = this.resolveInput(arguments_.path);
-    const action: LocalAction = { operation: "mkdir", paths: [path], summary: `Create directory: ${path}` };
+    let path = this.resolveInput(arguments_.path);
     try {
       if (isSensitive(path)) throw new Error("Creating sensitive directories is blocked in local mode.");
-      if (existsSync(path)) throw new Error(`Path already exists: ${path}`);
-      if (!existsSync(dirname(path)) || !statSync(dirname(path)).isDirectory()) throw new Error("Parent directory does not exist; create it first.");
-      if (!(await this.confirmed(action))) {
-        return JSON.stringify({ status: "denied", operation: "mkdir", path: this.relativePath(path), reason: "User declined this action." });
-      }
-      if (this.resolveInput(path) !== path) throw new Error("Folder changed during approval.");
-      mkdirSync(path);
+      const confirm = (resolved?: string): Promise<boolean> => {
+        if (resolved !== undefined) path = this.approvalPath(resolved);
+        return this.confirmed({ operation: "mkdir", paths: [path], summary: `Create directory: ${path}` });
+      };
+      const approved = this.options.scopedFolder
+        ? await this.options.scopedFolder.mkdir(this.relativePath(path), confirm, this.options.signal)
+        : await this.mkdirUnscoped(path, confirm);
+      if (!approved) return JSON.stringify({ status: "denied", operation: "mkdir", path: this.relativePath(path), reason: "User declined this action." });
       this.audit("mkdir", [path], "success");
       this.activity("mkdir", [path], "success");
       return JSON.stringify({ status: "ok", operation: "mkdir", path: this.relativePath(path) });
@@ -621,20 +664,29 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     }
   }
 
+  private async mkdirUnscoped(path: string, confirm: () => Promise<boolean>): Promise<boolean> {
+    if (existsSync(path)) throw new Error(`Path already exists: ${path}`);
+    if (!existsSync(dirname(path)) || !statSync(dirname(path)).isDirectory()) throw new Error("Parent directory does not exist; create it first.");
+    if (!await confirm()) return false;
+    if (this.resolveInput(path) !== path) throw new Error("Folder changed during approval.");
+    mkdirSync(path);
+    return true;
+  }
+
   async write(arguments_: ToolArguments): Promise<string> {
-    const path = this.resolveInput(arguments_.path);
+    let path = this.resolveInput(arguments_.path);
     const content = arguments_.content;
     if (typeof content !== "string") throw new Error("Text content is required.");
     try {
       if (isSensitive(path)) throw new Error("Writing sensitive files is blocked in local mode.");
       if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) throw new Error("Text content larger than 1 MiB cannot be written.");
-      const confirm = async (previous?: string): Promise<boolean> => {
-        this.options.assertAccess?.();
+      const confirm = async (previous?: string, resolved?: string): Promise<boolean> => {
+        if (resolved !== undefined) path = this.approvalPath(resolved);
         const action: LocalAction = previous === undefined
           ? { operation: "write", paths: [path], summary: `Create text file: ${path}` }
           : { operation: "write", paths: [path], summary: `Replace text file: ${path}`, diff: limitedDiff(path, previous, content) };
         const approved = await this.confirmed(action);
-        if (approved && (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path)) {
+        if (approved && !this.options.scopedFolder && (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path)) {
           throw new Error("File changed during approval. Read again before writing.");
         }
         return approved;
@@ -669,66 +721,24 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
   }
 
   async edit(arguments_: ToolArguments): Promise<string> {
-    const path = this.resolveInput(arguments_.path);
+    let path = this.resolveInput(arguments_.path);
     try {
       const revision = arguments_.expected_revision;
       if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) {
         throw new Error("expected_revision must be the revision returned by local_read.");
       }
-      const previous = readText(path);
-      const identity = statSync(path);
-      if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
-      // Publishing replaces the file, and a rename needs only directory write permission, so without
-      // this check Ya would silently rewrite files the user marked read-only.
-      try {
-        accessSync(path, constants.W_OK);
-      } catch {
-        throw new Error(`Read-only files cannot be edited: ${path}. Ask the user to change its permissions.`);
-      }
-      const { content, count } = applyTextEdits(previous, arguments_.edits, MAX_TEXT_BYTES);
-      const action: LocalAction = {
-        operation: "edit", paths: [path], summary: `Edit text file: ${path} (${count} replacements)`,
-        diff: limitedDiff(path, previous, content),
+      const confirm: ConfirmEdit = (previous, content, count, resolved) => {
+        path = this.approvalPath(resolved);
+        return this.confirmed({
+          operation: "edit", paths: [path], summary: `Edit text file: ${path} (${count} replacements)`,
+          diff: limitedDiff(path, previous, content),
+        });
       };
-      if (!(await this.confirmed(action))) {
+      const { approved, previous, content, count } = this.options.scopedFolder
+        ? await this.options.scopedFolder.edit(this.relativePath(path), revision, arguments_.edits, confirm, this.options.signal)
+        : await this.editUnscoped(path, arguments_.path, revision, arguments_.edits, confirm);
+      if (!approved) {
         return JSON.stringify({ status: "denied", operation: "edit", path: this.relativePath(path), reason: "User declined this action." });
-      }
-      const checkUnchanged = (): void => {
-        if (this.resolveInput(arguments_.path) !== path || this.resolveInput(path) !== path) {
-          throw new Error("File path changed during approval. Read again before editing.");
-        }
-        const current = statSync(path);
-        if (current.dev !== identity.dev || current.ino !== identity.ino || current.mode !== identity.mode || readText(path) !== previous) {
-          throw new Error("File changed during approval. Read again before editing.");
-        }
-      };
-      checkUnchanged();
-      // A same-directory rename publishes the whole batch without partially rewriting the file.
-      const temporary = join(dirname(path), `.ya-edit-${randomUUID()}.tmp`);
-      let descriptor: number | undefined;
-      try {
-        descriptor = openSync(temporary, "wx", 0o600);
-        writeFileSync(descriptor, content, "utf8");
-        // The rename publishes a new inode, so the owner and group have to be restored explicitly.
-        // Only chown when they differ: an unnecessary call can fail on an unchanged group, and on
-        // Windows both fchown and the uid/gid fields are inert.
-        const staged = fstatSync(descriptor);
-        if (staged.uid !== identity.uid || staged.gid !== identity.gid) {
-          try {
-            fchownSync(descriptor, identity.uid, identity.gid);
-          } catch {
-            throw new Error(`Cannot preserve the owner of ${path}. The edit was not applied; ask the user to change its owner.`);
-          }
-        }
-        fchmodSync(descriptor, identity.mode & 0o777);
-        fsyncSync(descriptor);
-        closeSync(descriptor);
-        descriptor = undefined;
-        checkUnchanged();
-        renameSync(temporary, path);
-      } finally {
-        if (descriptor !== undefined) closeSync(descriptor);
-        if (existsSync(temporary)) unlinkSync(temporary);
       }
       this.fileChanged(path, previous, content, "edit");
       this.audit("edit", [path], "success", undefined, { replacements: count });
@@ -741,41 +751,54 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     }
   }
 
+  private async editUnscoped(path: string, input: unknown, revision: string, edits: unknown, confirm: ConfirmEdit): Promise<EditResult> {
+    const previous = readText(path);
+    const identity = statSync(path);
+    if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
+    // Publishing replaces the file, and a rename needs only directory write permission, so without
+    // this check Ya would silently rewrite files the user marked read-only.
+    try {
+      accessSync(path, constants.W_OK);
+    } catch {
+      throw new Error(`Read-only files cannot be edited: ${path}. Ask the user to change its permissions.`);
+    }
+    const { content, count } = applyTextEdits(previous, edits, MAX_TEXT_BYTES);
+    const approved = await confirm(previous, content, count, path);
+    if (!approved) return { approved, previous, content, count };
+    const checkUnchanged = (): void => {
+      if (this.resolveInput(input) !== path || this.resolveInput(path) !== path) {
+        throw new Error("File path changed during approval. Read again before editing.");
+      }
+      const current = statSync(path);
+      if (current.dev !== identity.dev || current.ino !== identity.ino || current.mode !== identity.mode || readText(path) !== previous) {
+        throw new Error("File changed during approval. Read again before editing.");
+      }
+    };
+    checkUnchanged();
+    publishEdit(path, content, identity, checkUnchanged);
+    return { approved, previous, content, count };
+  }
+
   async move(arguments_: ToolArguments): Promise<string> {
-    const source = this.resolveInput(arguments_.source);
-    const destination = this.resolveInput(arguments_.destination);
-    const action: LocalAction = { operation: "move", paths: [source, destination], summary: `Move: ${source} -> ${destination}` };
+    let source = this.resolveInput(arguments_.source);
+    let destination = this.resolveInput(arguments_.destination);
     try {
       if (isSensitive(source) || isSensitive(destination)) {
         throw new Error("Moving sensitive files or directories is blocked in local mode.");
       }
-      if (source === this.root || !existsSync(source)) throw new Error(`Source does not exist: ${source}`);
-      // Moving a parent of the grant store would also move the authority for future tasks.
-      if (existsSync(join(dataHome(), BOT_PERMISSIONS_DIR))) {
-        const grants = realpathSync(join(dataHome(), BOT_PERMISSIONS_DIR));
-        const fromSource = relative(source, grants);
-        if (fromSource !== ".." && !fromSource.startsWith(`..${sep}`) && !isAbsolute(fromSource)) {
-          throw new Error("Moving a directory containing bot folder permissions is blocked.");
+      const confirm = (resolvedSource?: string, resolvedDestination?: string): Promise<boolean> => {
+        if (resolvedSource !== undefined && resolvedDestination !== undefined) {
+          source = this.approvalPath(resolvedSource);
+          destination = this.approvalPath(resolvedDestination);
         }
-      }
-      if (existsSync(destination)) throw new Error(`Destination already exists: ${destination}`);
-      if (!existsSync(dirname(destination)) || !statSync(dirname(destination)).isDirectory()) {
-        throw new Error("Destination parent directory does not exist.");
-      }
-      if (lstatSync(source).isDirectory()) {
-        const fromSource = relative(source, destination);
-        if (fromSource === "" || (!fromSource.startsWith(`..${sep}`) && fromSource !== ".." && !isAbsolute(fromSource))) {
-          throw new Error("Cannot move a directory into itself.");
-        }
-      }
-      if (!(await this.confirmed(action))) {
+        return this.confirmed({ operation: "move", paths: [source, destination], summary: `Move: ${source} -> ${destination}` });
+      };
+      const approved = this.options.scopedFolder
+        ? await this.options.scopedFolder.move(this.relativePath(source), this.relativePath(destination), confirm, this.options.signal)
+        : await this.moveUnscoped(arguments_, source, destination, confirm);
+      if (!approved) {
         return JSON.stringify({ status: "denied", operation: "move", path: this.relativePath(source), reason: "User declined this action." });
       }
-      if (this.resolveInput(arguments_.source) !== source || this.resolveInput(arguments_.destination) !== destination
-        || this.resolveInput(source) !== source || this.resolveInput(destination) !== destination) {
-        throw new Error("Move paths changed during approval. Request approval again.");
-      }
-      renameSync(source, destination);
       this.audit("move", [source, destination], "success");
       this.activity("move", [source, destination], "success");
       return JSON.stringify({
@@ -789,6 +812,35 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       this.activity("move", [source, destination], "error");
       throw error;
     }
+  }
+
+  private async moveUnscoped(arguments_: ToolArguments, source: string, destination: string, confirm: () => Promise<boolean>): Promise<boolean> {
+    if (source === this.root || !existsSync(source)) throw new Error(`Source does not exist: ${source}`);
+    // Moving a parent of the grant store would also move the authority for future tasks.
+    if (existsSync(join(dataHome(), BOT_PERMISSIONS_DIR))) {
+      const grants = realpathSync(join(dataHome(), BOT_PERMISSIONS_DIR));
+      const fromSource = relative(source, grants);
+      if (fromSource !== ".." && !fromSource.startsWith(`..${sep}`) && !isAbsolute(fromSource)) {
+        throw new Error("Moving a directory containing bot folder permissions is blocked.");
+      }
+    }
+    if (existsSync(destination)) throw new Error(`Destination already exists: ${destination}`);
+    if (!existsSync(dirname(destination)) || !statSync(dirname(destination)).isDirectory()) {
+      throw new Error("Destination parent directory does not exist.");
+    }
+    if (lstatSync(source).isDirectory()) {
+      const fromSource = relative(source, destination);
+      if (fromSource === "" || (!fromSource.startsWith(`..${sep}`) && fromSource !== ".." && !isAbsolute(fromSource))) {
+        throw new Error("Cannot move a directory into itself.");
+      }
+    }
+    if (!await confirm()) return false;
+    if (this.resolveInput(arguments_.source) !== source || this.resolveInput(arguments_.destination) !== destination
+      || this.resolveInput(source) !== source || this.resolveInput(destination) !== destination) {
+      throw new Error("Move paths changed during approval. Request approval again.");
+    }
+    renameSync(source, destination);
+    return true;
   }
 }
 
