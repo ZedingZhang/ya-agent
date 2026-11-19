@@ -90,7 +90,6 @@ function appState(): AppState {
     language: controller.language,
     ...(controller.workspace ? { workspace: controller.workspace } : {}),
     ...(validWorkspace ? { validWorkspace } : {}),
-    workspaces: controller.workspaces,
     stream: controller.stream,
     hasApiKey: Boolean(credential),
     accountSignedIn: typeof credential === "object" && credential.kind === "account",
@@ -238,18 +237,18 @@ function registerIpc(): void {
 
   ipcMain.handle("workspace:choose", async (event) => {
     assertTrustedSender(event);
-    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
+    if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     if (!mainWindow) return undefined;
     const selection = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory", "createDirectory"] });
     const path = selection.filePaths[0];
-    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
+    if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
     return selection.canceled || !path ? undefined : controller.setWorkspace(path);
   });
 
   ipcMain.handle("workspace:activate", (event, workspace: unknown) => {
     assertTrustedSender(event);
-    if (taskRunning) throw new Error("Projects cannot be changed while a task is running.");
-    if (workspace !== undefined && typeof workspace !== "string") throw new Error("Invalid project selection.");
+    if (taskRunning) throw new Error("Folders cannot be changed while a task is running.");
+    if (workspace !== undefined && typeof workspace !== "string") throw new Error("Invalid folder selection.");
     controller.activateWorkspace(workspace);
     return appState();
   });
@@ -573,7 +572,7 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
       && sidebar.getBoundingClientRect().bottom - settingsButton.getBoundingClientRect().bottom < 32;
     const rightComposer = composer instanceof HTMLElement && timeline instanceof HTMLElement
       && composer.getBoundingClientRect().top + 1 >= timeline.getBoundingClientRect().bottom;
-    // A long project path must stay inside the header instead of widening the page.
+    // A long folder path must stay inside the header instead of widening the page.
     const pathLabel = document.querySelector('#workspace-path');
     const main = document.querySelector('main');
     const probeText = 'C:\\\\' + 'workspace-folder\\\\'.repeat(24) + 'final-folder';
@@ -745,44 +744,63 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
   const second = join(root, "notes");
   mkdirSync(first);
   mkdirSync(second);
-  controller.setWorkspace(first);
-  controller.setWorkspace(second);
+  const secondFolder = controller.setWorkspace(second);
+  const originalPicker = dialog.showOpenDialog;
+  try {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [first] });
+    const attached = await window.webContents.executeJavaScript(`(async () => {
+      const reviewer = createBot({ title: 'Desktop reviewer', instructions: '' });
+      await selectBot(reviewer);
+      const count = bots.length;
+      const input = document.querySelector('#task-input');
+      input.value = 'A draft for the first bot';
+      input.dispatchEvent(new Event('input'));
+      document.querySelector('#toggle-files').click();
+      document.querySelector('#drawer-files #choose-workspace').click();
+      const deadline = Date.now() + 3000;
+      while (navigationPending && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      return !navigationPending && currentBot === reviewer && bots.length === count && reviewer.workspace
+        && reviewer.workspace === (await bridge.state()).validWorkspace && input.value === reviewer.draft;
+    })()`);
+    if (!attached) throw new Error("Choosing a local folder lost the bot or its draft.");
+  } finally {
+    dialog.showOpenDialog = originalPicker;
+  }
   const historyChange = createFileChange("src/gui/layout.ts", "const width = 860;\n", "const width = 920;\n", "edit");
   const navigation = await window.webContents.executeJavaScript(`(async () => {
     state = await bridge.state();
-    const [second, first] = state.workspaces;
-    await selectBot(undefined, first);
+    const first = currentBot.workspace;
     const firstId = currentBot.id;
+    const writer = createBot({ title: 'Writer', instructions: '' });
+    writer.workspace = ${JSON.stringify(secondFolder)};
     const input = document.querySelector('#task-input');
-    input.value = 'A draft for the first project';
-    input.dispatchEvent(new Event('input'));
-    await selectBot(undefined, second);
+    await selectBot(writer);
     const draftsIsolated = input.value === '';
     await selectBot(bots.find((session) => session.id === firstId));
-    const draftRestored = input.value === 'A draft for the first project';
-    const projectRestored = (await bridge.state()).validWorkspace === first;
+    const draftRestored = input.value === 'A draft for the first bot';
+    const folderRestored = (await bridge.state()).validWorkspace === first;
     const attachmentsAvailable = !document.querySelector('#choose-images').disabled;
-    await selectBot(createBot(first));
-    const newBot = currentBot.id !== firstId && input.value === '';
+    await selectBot(createBot({ title: 'Research', instructions: '' }));
+    const newBot = currentBot.id !== firstId && input.value === '' && !(await bridge.state()).validWorkspace;
+    const flatList = document.querySelectorAll('#bot-list > .bot-button').length === bots.length;
     const source = bots.find((session) => session.id === firstId);
     source.turns.push({ task: 'Summarize the YA desktop layout', images: [],
-      answer: '## Desktop workspace\\nProject and bot navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
+      answer: '## Desktop workspace\\nBot navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
       status: 'complete', changes: [${JSON.stringify(historyChange)}], commands: [{ id: 'history-command', command: 'npm run check', cwd: first,
         stdout: 'Checks passed', stderr: '', result: { status: 'success', exitCode: 0, durationMs: 500,
           stdout: 'Checks passed', stderr: '', stdoutTruncated: false, stderrTruncated: false } }] });
-    source.title = 'Desktop reviewer';
     delete source.instructions; // Legacy v1 records have no bot profile instructions.
     source.draft = '';
     source.activities = [{ operation: 'read', paths: ['src/gui/index.html'], status: 'success' }];
     await selectBot(source);
-    const transcriptRestored = document.querySelector('#timeline').textContent.includes('Project and bot navigation')
+    const transcriptRestored = document.querySelector('#timeline').textContent.includes('Bot navigation')
       && document.querySelector('#timeline .command-run').textContent.includes('Checks passed')
       && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'const width = 920;';
     setRunning(true);
     const locked = document.querySelector('#new-bot').disabled && document.querySelector('#choose-workspace').disabled
       && Array.from(document.querySelectorAll('.bot-button')).every((button) => button.disabled);
     const runningId = currentBot.id;
-    await selectBot(undefined, second);
+    await selectBot(writer);
     const runningSessionStable = currentBot.id === runningId;
     setRunning(false);
     pendingAction = { id: 'approval-preview', action: { operation: 'edit', paths: ['README.md'], summary: 'Update desktop documentation', diff: '+ New desktop layout' } };
@@ -801,7 +819,7 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
     input.value = 'A draft that survives reload';
     input.dispatchEvent(new Event('input'));
     persistSessions();
-    return { draftsIsolated, draftRestored, projectRestored, attachmentsAvailable, newBot, transcriptRestored,
+    return { draftsIsolated, draftRestored, folderRestored, attachmentsAvailable, newBot, flatList, transcriptRestored,
       locked, runningSessionStable, approvalVisible, collapsed, activeId: currentBot.id };
   })()`) as Record<string, boolean | string>;
   for (const [name, value] of Object.entries(navigation)) {
@@ -812,7 +830,7 @@ async function verifyBotNavigation(window: BrowserWindow, root: string): Promise
   const restored = await window.webContents.executeJavaScript(`(() => ({
     id: currentBot.id, draft: document.querySelector('#task-input').value,
     transcript: currentBot.title === 'Desktop reviewer' && currentBot.instructions === ''
-      && document.querySelector('#timeline').textContent.includes('Project and bot navigation'),
+      && document.querySelector('#timeline').textContent.includes('Bot navigation'),
     commands: document.querySelector('#timeline .command-run').textContent.includes('Checks passed'),
     changes: document.querySelector('#timeline .file-change .addition .diff-code')?.textContent === 'const width = 920;'
       && currentBot.turns[0].changes[0].hunks[0].lines.includes('-const width = 860;')
@@ -908,7 +926,9 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       try {
       const originalSession = currentBot;
       state = await bridge.state();
-      await selectBot(createBot(state.workspace));
+      const fixtureBot = createBot();
+      fixtureBot.workspace = state.workspace;
+      await selectBot(fixtureBot);
       const testSession = currentBot;
       const input = document.querySelector('#task-input');
       document.querySelector('#local-enabled').checked = false;
@@ -932,16 +952,16 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       }
       const automaticApproval = !document.querySelector('#details-drawer').hidden && drawerPage === 'activity'
         && !document.querySelector('#action-content').hidden;
-      const originalProject = state.workspace;
-      let projectLocked = false;
-      try { await bridge.activateWorkspace(); } catch (error) { projectLocked = errorText(error).includes('running'); }
+      const originalFolder = state.workspace;
+      let folderLocked = false;
+      try { await bridge.activateWorkspace(); } catch (error) { folderLocked = errorText(error).includes('running'); }
       const navigationLocked = document.querySelector('#new-bot').disabled
         && document.querySelector('#choose-workspace').disabled;
       document.querySelector('#action-approve').click();
       await running;
       const approvalCompleted = currentBot.turns.at(-1).status === 'complete'
         && currentBot.activities.some((activity) => activity.operation === 'write' && activity.status === 'success')
-        && state.workspace === originalProject;
+        && state.workspace === originalFolder;
       const changeDelivered = currentBot.turns.at(-1).changes.length === 1
         && currentBot.turns.at(-1).changes[0].operation === 'create'
         && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
@@ -969,7 +989,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
         && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
       bots = bots.filter((session) => session.id !== testSession.id);
       await selectBot(originalSession);
-      return { streamed, automaticApproval, projectLocked, navigationLocked, approvalCompleted, changeDelivered,
+      return { streamed, automaticApproval, folderLocked, navigationLocked, approvalCompleted, changeDelivered,
         changesPanel, deniedChanges, failureSaved, historyRestored };
       } catch (error) { return { failure: errorText(error) }; }
     })()`) as Record<string, boolean | string>;
@@ -1050,7 +1070,7 @@ async function verifyIcmHistory(window: BrowserWindow): Promise<void> {
     fixture = await window.webContents.executeJavaScript(`(async () => {
       const originalId = currentBot.id;
       state = await bridge.state();
-      const session = createBot(state.workspace); await selectBot(session);
+      const session = createBot(); await selectBot(session);
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#toa-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off'; syncWorkspaceControls();
@@ -1104,13 +1124,13 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
       document.querySelector('#cancel-bot').click();
       await cancelled;
       if (bots.length !== count || currentBot.id !== originalId) throw new Error('Cancel created a bot.');
-      const create = showBotEditor(state.workspace);
+      const create = showBotEditor();
       document.querySelector('#bot-name').value = 'Reviewer';
       document.querySelector('#bot-instructions').value = 'Review patches.';
       document.querySelector('#save-bot').click();
       await create;
       const source = currentBot;
-      const edit = showBotEditor(source.workspace, source);
+      const edit = showBotEditor(source);
       document.querySelector('#bot-name').value = 'Code reviewer';
       document.querySelector('#save-bot').click();
       await edit;
@@ -1136,7 +1156,7 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
       await runTask();
       currentBot.turns.push({ task: 'Interrupted request', answer: 'Incomplete reply that must not be replayed',
         status: 'interrupted', images: [], commands: [], changes: [] });
-      const other = createBot(undefined, { title: 'Research', instructions: '' });
+      const other = createBot({ title: 'Research', instructions: '' });
       await selectBot(other);
       document.querySelector('#task-input').value = 'Unrelated session';
       await runTask();
@@ -1205,11 +1225,11 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
   const fixture = await window.webContents.executeJavaScript(`(async () => {
     const originalId = currentBot.id;
     state = await bridge.state();
-    await selectBot(createBot(state.workspace));
+    await selectBot(createBot());
     const source = currentBot;
     document.querySelector('#task-input').value = 'smoke-reload';
     document.querySelector('#task-input').dispatchEvent(new Event('input'));
-    await selectBot(createBot(source.workspace));
+    await selectBot(createBot());
     const nextId = currentBot.id;
     await selectBot(source);
     document.querySelector('#local-enabled').checked = false;
@@ -1267,15 +1287,16 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
 }
 
 async function verifyUnavailableHistory(window: BrowserWindow, root: string): Promise<void> {
-  const directory = join(root, "archived-project");
+  const directory = join(root, "archived-folder");
   const originalWorkspace = controller.workspace;
   mkdirSync(directory);
   const unavailable = controller.setWorkspace(directory);
   const fixture = await window.webContents.executeJavaScript(`(async () => {
     const originalId = currentBot.id;
     state = await bridge.state();
-    await selectBot(createBot(state.workspace));
-    currentBot.title = 'Archived history';
+    const archived = createBot({ title: 'Archived history', instructions: '' });
+    archived.workspace = state.workspace;
+    await selectBot(archived);
     currentBot.turns.push({ task: 'Saved task', images: [], answer: 'Saved answer', status: 'complete', commands: [] });
     renderBot();
     document.querySelector('#task-input').value = 'Saved draft';
@@ -1290,7 +1311,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     const startup = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
       && document.querySelector('#timeline').textContent.includes('Saved answer')
       && document.querySelector('#task-input').value === 'Saved draft'`) as boolean;
-    if (!startup) throw new Error("Unavailable-project history did not restore at startup.");
+    if (!startup) throw new Error("Unavailable-folder history did not restore at startup.");
     const restored = await window.webContents.executeJavaScript(`(async () => {
       const archived = bots.find((session) => session.id === '${fixture.archivedId}');
       await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
@@ -1303,12 +1324,12 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
         && !document.querySelector('#commands-enabled').checked && document.querySelector('#commands-enabled').disabled
         && document.querySelectorAll('#file-list .file-row').length === 0;
     })()`) as boolean;
-    if (!restored) throw new Error("Unavailable-project history cannot open independently of the previous project's files.");
+    if (!restored) throw new Error("Unavailable-folder history cannot open independently of the previous bot's files.");
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
     const reopened = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
       && currentBot.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
-    if (!reopened) throw new Error("Unavailable-project selection or draft was lost after reload.");
+    if (!reopened) throw new Error("Unavailable-folder selection or draft was lost after reload.");
   } finally {
     controller.workspaces = controller.workspaces.filter((path) => path !== unavailable);
     controller.activateWorkspace(originalWorkspace);

@@ -159,7 +159,7 @@ export class GuiController {
       this.persistPreferences();
       return;
     }
-    if (!this.workspaces.includes(value)) throw new Error("Choose this project through the directory picker first.");
+    if (!this.workspaces.includes(value)) throw new Error("Choose this folder through the directory picker first.");
     this.setWorkspace(value);
   }
 

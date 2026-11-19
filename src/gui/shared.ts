@@ -21,7 +21,6 @@ export interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
-  workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;

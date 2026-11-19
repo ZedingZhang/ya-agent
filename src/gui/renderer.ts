@@ -26,7 +26,6 @@ interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
-  workspaces: string[];
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -117,14 +116,13 @@ const bridge = (window as typeof window & { ya: YaRendererBridge }).ya;
 
 const TEXT = {
   en: {
-    projects: "Projects", addProject: "Add project", newBot: "New bot", conversations: "Bots",
+    newBot: "New bot", conversations: "Bots",
     editBot: "Edit bot", botName: "Name", botNameRequired: "Enter a bot name.", botInstructions: "Instructions (optional)",
     createBot: "Create bot", saveBot: "Save changes", cancel: "Cancel",
-    generalChats: "Without a project", noProject: "No project selected", addProjectHint: "Add a folder to start a project.",
-    welcome: "What would you like to work on?", welcomeHint: "Start a conversation, or choose a project to work with local files.",
+    welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
-    workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", choose: "Choose…", refresh: "Refresh",
+    workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", chooseFolder: "Choose folder…", choose: "Choose…", refresh: "Refresh",
     changes: "Changes", noChanges: "File changes made by Ya will appear here after approval.",
     changesSummary: "{files} files · {changes} changes", createdFile: "Created", editedFile: "Edited", replacedFile: "Replaced",
     noTextChanges: "No text changes.", emptyFileCreated: "Created an empty file.",
@@ -161,14 +159,13 @@ const TEXT = {
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
-    projects: "项目", addProject: "添加项目", newBot: "新建 Bot", conversations: "Bot",
+    newBot: "新建 Bot", conversations: "Bot",
     editBot: "编辑 Bot", botName: "名称", botNameRequired: "请输入 Bot 名称。", botInstructions: "职责说明（可选）",
     createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
-    generalChats: "未关联项目", noProject: "尚未选择项目", addProjectHint: "添加文件夹，开始一个项目。",
-    welcome: "今天想做些什么？", welcomeHint: "开始一段对话，或选择项目来处理本地文件。",
+    welcome: "今天想做些什么？", welcomeHint: "发条消息，开始对话。",
     toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
     interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存 Bot 记录，本地存储空间可能已满。",
-    workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
+    workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", chooseFolder: "选择文件夹…", choose: "选择…", refresh: "刷新",
     changes: "变更", noChanges: "Ya 经批准完成的文件变更将显示在这里。",
     changesSummary: "{files} 个文件 · {changes} 次变更", createdFile: "新建", editedFile: "编辑", replacedFile: "替换",
     noTextChanges: "文本没有变化。", emptyFileCreated: "已创建空文件。",
@@ -337,18 +334,10 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
 }
 
 function renderWorkspaceLabel(): void {
-  const path = currentBot?.workspace ?? state.workspace;
   const label = element<HTMLDivElement>("workspace-path");
-  label.textContent = path ?? t("noProject");
-  label.title = path ?? "";
-  label.classList.toggle("missing", !state.validWorkspace);
-  const hint = element<HTMLSpanElement>("project-hint");
-  hint.textContent = path ? projectName(path) : t("noProject");
-  hint.title = path ?? "";
-}
-
-function projectName(path: string): string {
-  return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
+  label.textContent = state.validWorkspace ?? "";
+  label.title = label.textContent;
+  label.hidden = !state.validWorkspace;
 }
 
 function renderPageTitle(): void {
@@ -452,76 +441,36 @@ function loadSessionHistory(): string | undefined {
 
 type BotFields = Pick<DesktopBot, "title" | "instructions">;
 
-function createBot(workspace: string | undefined, profile: BotFields = { title: "Ya", instructions: "" }): DesktopBot {
-  const bot: DesktopBot = { id: crypto.randomUUID(), ...(workspace ? { workspace } : {}),
-    ...profile, updatedAt: Date.now(), draft: "", turns: [], activities: [] };
+function createBot(profile: BotFields = { title: "Ya", instructions: "" }): DesktopBot {
+  const bot: DesktopBot = { id: crypto.randomUUID(), ...profile, updatedAt: Date.now(), draft: "", turns: [], activities: [] };
   bots.unshift(bot);
   return bot;
 }
 
 function renderNavigation(): void {
-  const list = element<HTMLDivElement>("project-list");
+  const list = element<HTMLDivElement>("bot-list");
   list.replaceChildren();
   const disabled = navigationPending || document.body.classList.contains("task-running");
-  const projects: Array<string | undefined> = [...state.workspaces];
-  if (bots.some((bot) => !bot.workspace)) projects.push(undefined);
-  for (const workspace of projects) {
-    const group = document.createElement("section");
-    group.className = "project-group";
-    const row = document.createElement("div");
-    row.className = "project-row";
-    const project = document.createElement("button");
-    project.type = "button";
-    project.className = "project-button";
-    project.classList.toggle("active", workspace === currentBot?.workspace);
-    project.dataset.workspace = workspace ?? "";
-    project.disabled = disabled;
-    project.title = workspace ?? t("generalChats");
-    project.innerHTML = '<svg class="project-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
-    const name = document.createElement("span");
-    name.textContent = workspace ? projectName(workspace) : t("generalChats");
-    project.append(name);
-    project.addEventListener("click", () => void selectBot(undefined, workspace));
-    const add = document.createElement("button");
-    add.type = "button";
-    add.className = "icon-button";
-    add.textContent = "+";
-    add.title = `${t("newBot")} · ${name.textContent}`;
-    add.setAttribute("aria-label", add.title);
-    add.disabled = disabled;
-    add.addEventListener("click", () => void showBotEditor(workspace));
-    row.append(project, add);
-    const children = document.createElement("div");
-    children.className = "bot-list";
-    for (const bot of bots.filter((item) => item.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "bot-button";
-      button.classList.toggle("active", bot.id === currentBot?.id);
-      if (bot.id === currentBot?.id) button.setAttribute("aria-current", "true");
-      button.dataset.botId = bot.id;
-      button.disabled = disabled;
-      button.title = bot.title;
-      const title = document.createElement("span");
-      title.textContent = bot.title;
-      button.append(title);
-      if (bot.turns.length > 0) {
-        const count = document.createElement("span");
-        count.className = "bot-count";
-        count.textContent = String(bot.turns.length);
-        button.append(count);
-      }
-      button.addEventListener("click", () => void selectBot(bot));
-      children.append(button);
+  for (const bot of [...bots].sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "bot-button";
+    button.classList.toggle("active", bot.id === currentBot?.id);
+    if (bot.id === currentBot?.id) button.setAttribute("aria-current", "true");
+    button.dataset.botId = bot.id;
+    button.disabled = disabled;
+    button.title = bot.title;
+    const title = document.createElement("span");
+    title.textContent = bot.title;
+    button.append(title);
+    if (bot.turns.length > 0) {
+      const count = document.createElement("span");
+      count.className = "bot-count";
+      count.textContent = String(bot.turns.length);
+      button.append(count);
     }
-    group.append(row, children);
-    list.append(group);
-  }
-  if (state.workspaces.length === 0) {
-    const hint = document.createElement("p");
-    hint.className = "sidebar-empty";
-    hint.textContent = t("addProjectHint");
-    list.prepend(hint);
+    button.addEventListener("click", () => void selectBot(bot));
+    list.append(button);
   }
   element<HTMLButtonElement>("edit-bot").disabled = disabled;
   element<HTMLButtonElement>("new-bot").disabled = disabled;
@@ -593,33 +542,23 @@ function setNavigationPending(pending: boolean): void {
   renderImages();
 }
 
-async function openBot(bot: DesktopBot): Promise<void> {
-  await clearImages();
-  currentBot = bot;
-  currentDirectory = ".";
-  switchPage("workspace");
-  renderBot();
-  setDrawer(undefined);
-  await renderFiles();
-  setStatus(t("ready"));
-  persistSessions();
-  element<HTMLTextAreaElement>("task-input").focus();
-}
-
-function latestBot(workspace?: string): DesktopBot {
-  return bots.filter((bot) => bot.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? createBot(workspace);
-}
-
-async function selectBot(bot?: DesktopBot, workspace?: string, profile?: BotFields): Promise<void> {
+async function selectBot(bot: DesktopBot): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
   currentBot.draft = element<HTMLTextAreaElement>("task-input").value;
   persistSessions();
   setNavigationPending(true);
   try {
-    const targetWorkspace = bot ? bot.workspace : workspace;
-    await activateBotWorkspace(targetWorkspace);
-    const selected = profile ? createBot(targetWorkspace, profile) : bot ?? latestBot(targetWorkspace);
-    await openBot(selected);
+    await clearImages();
+    await activateBotWorkspace(bot.workspace);
+    currentBot = bot;
+    currentDirectory = ".";
+    switchPage("workspace");
+    renderBot();
+    setDrawer(undefined);
+    await renderFiles();
+    setStatus(t("ready"));
+    persistSessions();
+    element<HTMLTextAreaElement>("task-input").focus();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
@@ -627,7 +566,7 @@ async function selectBot(bot?: DesktopBot, workspace?: string, profile?: BotFiel
   }
 }
 
-async function showBotEditor(workspace: string | undefined, bot?: DesktopBot): Promise<void> {
+async function showBotEditor(bot?: DesktopBot): Promise<void> {
   const dialog = element<HTMLDialogElement>("bot-editor");
   if (dialog.open || navigationPending || document.body.classList.contains("task-running")) return;
   const name = element<HTMLInputElement>("bot-name");
@@ -650,17 +589,17 @@ async function showBotEditor(workspace: string | undefined, bot?: DesktopBot): P
     renderNavigation();
     persistSessions();
   } else {
-    await selectBot(undefined, workspace, profile);
+    await selectBot(createBot(profile));
   }
 }
 
 async function activateBotWorkspace(workspace?: string): Promise<void> {
-  if (state.workspace === workspace) return;
+  if (state.workspace === workspace && state.validWorkspace === workspace) return;
   try {
     state = await bridge.activateWorkspace(workspace);
   } catch (error) {
-    if (!workspace || !state.workspaces.includes(workspace)) throw error;
-    // History is independent of the folder, but must never inherit another project's tools.
+    if (!workspace) throw error;
+    // History is independent of the folder, but must never inherit another bot's folder.
     state = await bridge.activateWorkspace();
   }
 }
@@ -683,14 +622,19 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
 
 async function chooseWorkspace(): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
-  currentBot.draft = element<HTMLTextAreaElement>("task-input").value;
-  persistSessions();
   setNavigationPending(true);
   try {
     const selected = await bridge.chooseWorkspace();
     if (!selected) return;
-    state = await bridge.state();
-    await openBot(latestBot(state.workspace));
+    currentBot.workspace = selected;
+    state.workspace = selected;
+    state.validWorkspace = selected;
+    currentDirectory = ".";
+    element<HTMLInputElement>("local-enabled").checked = !element<HTMLInputElement>("toa-enabled").checked;
+    element<HTMLInputElement>("commands-enabled").checked = false;
+    renderWorkspaceLabel();
+    persistSessions();
+    await renderFiles();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
@@ -1647,7 +1591,7 @@ function registerEvents(): void {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
   element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
-  element<HTMLButtonElement>("edit-bot").addEventListener("click", () => void showBotEditor(currentBot.workspace, currentBot));
+  element<HTMLButtonElement>("edit-bot").addEventListener("click", () => void showBotEditor(currentBot));
   element<HTMLButtonElement>("cancel-bot").addEventListener("click", () => element<HTMLDialogElement>("bot-editor").close());
   const name = element<HTMLInputElement>("bot-name");
   name.addEventListener("input", () => name.setCustomValidity(""));
@@ -1658,7 +1602,7 @@ function registerEvents(): void {
       name.reportValidity();
     }
   });
-  element<HTMLButtonElement>("new-bot").addEventListener("click", () => void showBotEditor(currentBot.workspace));
+  element<HTMLButtonElement>("new-bot").addEventListener("click", () => void showBotEditor());
   element<HTMLButtonElement>("sidebar-toggle").addEventListener("click", () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
@@ -1697,7 +1641,7 @@ function registerEvents(): void {
     if (element<HTMLDialogElement>("bot-editor").open || event.isComposing) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
-      void showBotEditor(currentBot.workspace);
+      void showBotEditor();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
       event.preventDefault();
       element<HTMLButtonElement>("sidebar-toggle").click();
@@ -1778,8 +1722,7 @@ async function initialize(): Promise<void> {
   document.body.inert = true;
   state = await bridge.state();
   const activeId = loadSessionHistory();
-  currentBot = bots.find((bot) => bot.id === activeId && (!bot.workspace || state.workspaces.includes(bot.workspace)))
-    ?? latestBot(state.workspace);
+  currentBot = bots.find((bot) => bot.id === activeId) ?? bots[0] ?? createBot();
   await activateBotWorkspace(currentBot.workspace);
   registerEvents();
   applyLanguage();

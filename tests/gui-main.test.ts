@@ -50,7 +50,7 @@ vi.mock("../src/gui/controller", () => ({
       mocks.saveWorkspaceModelSelection(model, reasoningEffort);
       this.config = { model, reasoningEffort };
     }
-    workspaces = [];
+
     auditLogs() { return []; }
     auditLogTotalBytes() { return 0; }
     validWorkspace() { return undefined; }
@@ -311,7 +311,7 @@ describe("GUI pending action lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
     finish();
     await expect(task).resolves.toBe("cancelled");
-    await expect(state).resolves.toMatchObject({ workspaces: [], hasApiKey: true });
+    await expect(state).resolves.toMatchObject({ hasApiKey: true });
     expect(stateReady).toBe(true);
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task-after-exit.txt"], status: "success" });
     callbacks.onFileChange({ id: "late-change-after-exit", path: "old-task.txt", operation: "write", additions: 1, deletions: 0, hunks: [], truncated: false });
@@ -328,7 +328,7 @@ describe("GUI pending action lifecycle", () => {
     await expect(nextTask).resolves.toBe("done");
   });
 
-  it("rejects project switching and directory picking while an approval is pending", async () => {
+  it("rejects folder switching and directory picking while an approval is pending", async () => {
     const task = start();
     expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
     await expect(mocks.handlers.get("workspace:choose")!(event)).rejects.toThrow(/running/);
@@ -336,10 +336,10 @@ describe("GUI pending action lifecycle", () => {
     await expect(task).resolves.toBe("done");
   });
 
-  it("rejects untrusted project activation before changing workspace", () => {
+  it("rejects untrusted folder activation before changing workspace", () => {
     const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
     expect(() => mocks.handlers.get("workspace:activate")!(untrusted)).toThrow("Untrusted");
-    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid project");
+    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid folder");
   });
 
   it("validates execution opt-in at the IPC boundary", async () => {

@@ -25,14 +25,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z"/></svg>
           <span class="nav-label" data-i18n="conversations">Bots</span>
         </button>
-        <div class="sidebar-scroll">
-          <div class="sidebar-section-heading"><span data-i18n="projects">Projects</span>
-            <button id="choose-workspace" class="icon-button" type="button" data-i18n-label="addProject">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-            </button>
-          </div>
-          <div id="project-list" class="project-list"></div>
-        </div>
+        <div id="bot-list" class="sidebar-scroll" role="group" aria-labelledby="workspace-tab"></div>
         <div class="sidebar-footer">
           <button id="memory-tab" class="nav-button tab" type="button" data-page="memory" aria-controls="page-memory">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5a3 3 0 0 0-5 2 4 4 0 0 0-1 7 4 4 0 0 0 6 5M15 4.5a3 3 0 0 1 5 2 4 4 0 0 1 1 7 4 4 0 0 1-6 5M9 4v16M15 4v16M9 8H6M15 15h3"/></svg>
@@ -48,7 +41,7 @@
 
     <main class="app-main">
       <header class="app-header">
-        <div class="header-titles"><h1 id="page-title">Ya</h1><div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div></div>
+        <div class="header-titles"><h1 id="page-title">Ya</h1><div id="workspace-path" class="workspace-path" hidden></div></div>
         <div id="app-status" class="app-status" role="status">Ready</div>
         <div id="workspace-actions" class="header-actions">
           <button id="edit-bot" class="icon-button" type="button" data-i18n-label="editBot">
@@ -70,7 +63,7 @@
         <div class="workbench">
           <section class="center-panel">
             <div id="timeline" class="timeline" role="log" aria-label="Conversation">
-              <div id="timeline-empty" class="timeline-empty"><div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div><h2 data-i18n="welcome">What would you like to work on?</h2><p id="welcome-hint">Start a conversation, or choose a project to work with local files.</p></div>
+              <div id="timeline-empty" class="timeline-empty"><div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div><h2 data-i18n="welcome">What would you like to work on?</h2><p id="welcome-hint">Send a message to get started.</p></div>
             </div>
             <div class="composer-area">
               <div class="composer">
@@ -99,13 +92,13 @@
                   <button id="send-button" class="primary send-button" type="button" data-i18n-label="send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 6-6 6 6M12 6v13"/></svg></button>
                 </div>
               </div>
-              <div class="composer-hint"><span id="project-hint" data-i18n="noProject">No project selected</span><span data-i18n="sendShortcut">Ctrl / ⌘ Enter to send</span></div>
+              <div class="composer-hint"><span data-i18n="sendShortcut">Ctrl / ⌘ Enter to send</span></div>
             </div>
           </section>
 
           <aside id="details-drawer" class="details-drawer" hidden aria-label="Workspace details">
             <div class="drawer-heading"><div class="drawer-tabs"><button id="drawer-files-tab" class="drawer-tab active" type="button" data-i18n="files">Files</button><button id="drawer-changes-tab" class="drawer-tab" type="button" data-i18n="changes">Changes</button><button id="drawer-activity-tab" class="drawer-tab" type="button" data-i18n="activity">Activity</button></div><button id="close-drawer" class="icon-button" type="button" data-i18n-label="closePanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
-            <section id="drawer-files" class="files-panel"><div class="panel-heading"><span id="file-location" class="muted">.</span><button id="refresh-files" class="icon-button" type="button" data-i18n-label="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div><div id="file-list" class="file-list"></div></section>
+            <section id="drawer-files" class="files-panel"><div class="panel-heading"><span id="file-location" class="muted">.</span><button id="choose-workspace" class="secondary" type="button" data-i18n="chooseFolder">Choose folder…</button><button id="refresh-files" class="icon-button" type="button" data-i18n-label="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 3M4 16l2 3a7 7 0 0 0 12-2"/></svg></button></div><div id="file-list" class="file-list"></div></section>
             <section id="drawer-changes" class="changes-panel" hidden aria-labelledby="drawer-changes-tab"><div id="changes-summary" class="panel-heading muted"></div><div id="change-list" class="change-list"></div></section>
             <div id="drawer-activity" class="context-panel" hidden>
               <section class="context-section action-panel" id="approval-panel"><h2 data-i18n="pendingAction">Pending action</h2><p id="action-empty" class="empty" data-i18n="noAction">No action is waiting for approval.</p><div id="action-content" hidden><div id="action-summary" class="action-summary"></div><div id="action-paths" class="action-paths"></div><pre id="action-diff" class="action-diff"></pre><div class="button-row"><button id="action-deny" class="secondary" type="button" data-i18n="deny">Deny</button><button id="action-approve" class="primary" type="button" data-i18n="approve">Approve</button></div></div></section>

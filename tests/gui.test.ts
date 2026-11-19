@@ -54,7 +54,7 @@ describe("GUI controller", () => {
     expect(new GuiController().validWorkspace()).toBeUndefined();
   });
 
-  it("remembers chosen projects and validates activation without changing the current project on failure", () => {
+  it("remembers approved folders and validates activation without changing the current folder on failure", () => {
     const first = join(home.path, "first");
     const second = join(home.path, "second");
     const unchosen = join(home.path, "unchosen");
@@ -77,7 +77,7 @@ describe("GUI controller", () => {
     expect(new GuiController().workspaces).toEqual([realpathSync(first), physicalSecond]);
   });
 
-  it("keeps the existing project when loading preferences from the previous desktop layout", () => {
+  it("keeps the approved folder when loading preferences from the previous desktop layout", () => {
     const workspace = join(home.path, "legacy");
     mkdirSync(workspace);
     const physical = realpathSync(workspace);
