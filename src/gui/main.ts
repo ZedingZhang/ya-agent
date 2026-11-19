@@ -1071,6 +1071,10 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
   const fetcher: FetchLike = async (_input, init) => {
     const payload = JSON.parse(String(init?.body)) as { messages: ChatMessage[]; stream: boolean };
     requests.push(payload.messages);
+    if (payload.messages.at(-1)?.content === "Truncated stream request") {
+      if (!payload.stream) throw new Error("The truncated conversation fixture needs streaming.");
+      return new Response('data: {"choices":[{"delta":{"content":"Truncated reply"},"finish_reason":null}]}\n\n');
+    }
     return new Response(payload.stream
       ? `data: ${JSON.stringify({ choices: [{ delta: { content: "Context smoke reply" } }] })}\n\ndata: [DONE]\n\n`
       : JSON.stringify({ choices: [{ message: { role: "assistant", content: "Context smoke reply" } }] }));
@@ -1102,10 +1106,16 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
     })()`) as { originalId: string; sourceId: string };
     controller.apiKey = originalApiKey;
     otherId = await window.webContents.executeJavaScript(`(async () => {
-      state = await bridge.saveSettings({ ...state.config, language: state.language, stream: state.stream,
+      state = await bridge.saveSettings({ ...state.config, language: state.language, stream: true,
         apiKey: 'smoke-only-key', keyStorage: 'session' });
       document.querySelector('#task-input').value = '继续';
       await runTask();
+      document.querySelector('#task-input').value = 'Truncated stream request';
+      await runTask();
+      const failed = currentSession.turns.at(-1);
+      if (failed.status !== 'error' || !failed.answer.includes('ended before completion')) {
+        throw new Error('The truncated conversation fixture did not report an incomplete response.');
+      }
       currentSession.turns.push({ task: 'Interrupted request', answer: 'Incomplete reply that must not be replayed',
         status: 'interrupted', images: [], commands: [], changes: [] });
       const other = createSession();
@@ -1120,6 +1130,7 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
     await verifyRenderer(window);
     const restored = await window.webContents.executeJavaScript(`(async () => {
       if (currentSession.id !== '${fixture.sourceId}') return false;
+      if (currentSession.turns.find(turn => turn.task === 'Truncated stream request')?.status !== 'error') return false;
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off';
       document.querySelector('#task-input').value = '接着写';
@@ -1128,14 +1139,17 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
     })()`) as boolean;
     const originalRequest = { role: "user", content: "新建一个 md 文件，内容是 Ya 的介绍" };
     const followUp = { role: "user", content: "继续" };
+    const answer = { role: "assistant", content: "Context smoke reply" };
+    const truncated = { role: "user", content: "Truncated stream request" };
     const expected = [
       [originalRequest, followUp],
+      [originalRequest, followUp, answer, truncated],
       [{ role: "user", content: "Unrelated session" }],
-      [originalRequest, followUp, { role: "assistant", content: "Context smoke reply" },
+      [originalRequest, followUp, answer, truncated,
         { role: "user", content: "Interrupted request" }, { role: "user", content: "接着写" }],
     ];
     if (!restored || JSON.stringify(requests.map((messages) => messages.slice(1))) !== JSON.stringify(expected)) {
-      throw new Error("Model requests lost conversation context after a key failure, session switch, or reload.");
+      throw new Error("Model requests lost conversation context after a task failure, session switch, or reload.");
     }
   } finally {
     controller = originalController;

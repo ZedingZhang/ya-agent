@@ -270,6 +270,7 @@ export class DeepSeekClient {
       const reasoning: string[] = [];
       const usage: TokenUsage = {};
       const accountBlocks: Record<string, unknown>[] = [];
+      let receivedFinishReason = false;
       const done = await readServerSentEvents(response, (data) => {
         if (data === "[DONE]") return true;
         let chunk: unknown;
@@ -323,14 +324,21 @@ export class DeepSeekClient {
         const first = isRecord(choices[0]) ? choices[0] : undefined;
         const delta = first && isRecord(first.delta) ? first.delta : undefined;
         if (delta && typeof delta.reasoning_content === "string") reasoning.push(delta.reasoning_content);
-        if (delta && typeof delta.content === "string") {
+        if (delta && typeof delta.content === "string" && delta.content) {
           content.push(delta.content);
           markDelivered();
           onContent(delta.content);
         }
+        // The API can send usage in a separate chunk after the final choice.
+        if (typeof first?.finish_reason === "string" && first.finish_reason.trim()) {
+          receivedFinishReason = true;
+        }
         return false;
       }, signal, onActivity);
-      if (typeof this.apiKey !== "string" && !done) throw new NetworkError("DeepSeek account stream ended before completion.");
+      if (!done && !receivedFinishReason) {
+        const source = typeof this.apiKey === "string" ? "API" : "account";
+        throw new NetworkError(`DeepSeek ${source} stream ended before completion.`);
+      }
       const joinedContent = content.join("");
       const joinedReasoning = reasoning.join("");
       return {

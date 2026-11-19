@@ -110,6 +110,25 @@ describe("durable task identity and lifecycle records", () => {
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
+  it("records a prematurely closed API stream as a failed task", async () => {
+    const fetcher = vi.fn<FetchLike>(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"Partial answer"},"finish_reason":null}]}\n\n',
+    ));
+    const onContent = vi.fn();
+    const taskStore = new TaskStore();
+    await expect(runTask("test-key", "Stream an answer", new ModelConfig(), {
+      taskStore,
+      webMode: "off",
+      onContent,
+      clientFactory: (key) => new DeepSeekClient(key, fetcher),
+    })).rejects.toThrow("DeepSeek API stream ended before completion.");
+
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Partial answer");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(taskStore.list()).toMatchObject([{ status: "failed", revision: 2 }]);
+    expect(taskStore.list({ status: "completed" })).toEqual([]);
+  });
+
   it("creates one stable task ID and readable record across running and terminal states", async () => {
     const workspaceDir = join(home.path, "workspace");
     mkdirSync(workspaceDir);
