@@ -31,7 +31,7 @@ import {
   type RunTaskOptions,
   type TaskRecord,
 } from "../service";
-import type { ConversationMessage, UserImageContentPart, WebMode } from "../types";
+import type { BotProfile, ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
 import { loadAccountCredential, type DeepSeekCredential } from "../credentials";
@@ -48,6 +48,7 @@ export interface GuiPreferences {
 
 export interface GuiTaskOptions {
   sessionId?: string;
+  botProfile?: BotProfile;
   task: string;
   history?: ConversationMessage[];
   webMode?: WebMode;
@@ -234,6 +235,7 @@ export class GuiController {
     }
     return this.taskRunner(apiKey, options.task, this.config, {
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      botProfile: options.botProfile,
       history: options.history,
       webMode: options.webMode ?? "auto",
       toa: options.toa ?? false,

@@ -8,9 +8,9 @@ Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash-1017` by default, with the option
 
 ## Desktop preview
 
-Navigate projects and sessions on the left, chat with Ya on the right, and open Settings from the bottom of the sidebar. Files, applied diffs, relevant memory, tool activity, and approvals are available in an optional details panel.
+Start with the Ya bot, or create a named bot for a recurring job. Choose a bot in the project sidebar to resume its conversation. Files, applied diffs, relevant memory, tool activity, and approvals are available in an optional details panel.
 
-![Ya desktop workspace: project and session navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
+![Ya desktop workspace: project and bot navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
 ## Architecture
 
@@ -306,17 +306,19 @@ Concurrent processes serialize Octop schema initialization using `memory.init.lo
 
 The desktop application uses a two-column workspace inspired by the [official DeepSeek Harness desktop and sidebar sources](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop):
 
-- Project and session navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
-- Conversation history and a compact composer on the right. Each session keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that session's earlier user messages and completed replies, including requests that failed before an answer, so you can configure an API key and then ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
+- Project and bot navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
+- Conversation history and a compact composer on the right. Each bot keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that bot's earlier user messages and completed replies, including requests that failed before an answer, so you can configure an API key and then ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
 - An optional Files/Changes/Activity panel for file navigation, applied diffs, relevant memory, and approvals. Pending approvals open the panel automatically.
 
-After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current session's file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching sessions or restarting preserves the diff at the time of each operation, without requiring Git.
+After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current bot’s file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching bots or restarting preserves the diff at the time of each operation, without requiring Git.
 
-Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive-path writes are rejected before approval; non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
+Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive-path writes are rejected before approval; non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net diff for the conversation. Action audits and model-facing tool results continue to contain metadata only.
 
-Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
+Use **New bot** (Ctrl/⌘+N) to choose a name and optional standing instructions, such as “Review patches and suggest a regression test.” The bot receives this profile with every request. Use **Edit bot** in the chat header to change it. Existing sessions appear as individual bots with their original titles and history. Untitled sessions open as **Ya**.
 
-Saved transcripts and drafts remain accessible if a project's folder is moved or deleted. Opening that history disables local tools and clears access to the previously selected project's folder. Reloading the desktop during a task cancels it and waits for it to stop before enabling session navigation.
+Add projects with the sidebar’s **+** button. Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
+
+Saved transcripts and drafts remain accessible if a project's folder is moved or deleted. Opening that history disables local tools and clears access to the previously selected project's folder. Reloading the desktop during a task cancels it and waits for it to stop before enabling bot navigation.
 
 It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 

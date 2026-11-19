@@ -22,7 +22,7 @@ import {
   type TaskStoreOptions,
   type TransitionTaskInput,
 } from "./tasks";
-import type { ConversationMessage, ToolHandler, UserImageContentPart, WebMode } from "./types";
+import type { BotProfile, ConversationMessage, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search } from "./web";
 import type { DeepSeekCredential } from "./credentials";
 
@@ -50,6 +50,7 @@ export type {
 
 export interface RunTaskOptions {
   sessionId?: string;
+  botProfile?: BotProfile;
   history?: ConversationMessage[];
   webMode?: WebMode;
   toa?: boolean;
@@ -149,8 +150,11 @@ export async function runTask(
     options.signal?.throwIfAborted();
     const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
     const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
+    const context: ConversationMessage[] = options.botProfile
+      ? [{ role: "user", content: `Use this bot name and standing instructions for my requests: ${JSON.stringify(options.botProfile)}` }, ...history]
+      : history;
     result = toa
-      ? await toaAgent(client, task, config, toaWorkers, webSearch, images, history, options.signal)
+      ? await toaAgent(client, task, config, toaWorkers, webSearch, images, context, options.signal)
       : await singleAgent(
           client,
           task,
@@ -160,7 +164,7 @@ export async function runTask(
           localWorkspace,
           webSearch,
           images,
-          history,
+          context,
         );
     options.signal?.throwIfAborted();
   } catch (error) {

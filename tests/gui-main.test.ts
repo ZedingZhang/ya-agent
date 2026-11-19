@@ -371,6 +371,18 @@ describe("GUI pending action lifecycle", () => {
     expect(mocks.run).not.toHaveBeenCalled();
   });
 
+  it("forwards only a named bot's bounded profile at the IPC boundary", async () => {
+    mocks.run.mockResolvedValue("done");
+    const botProfile = { name: " Reviewer ", instructions: " Review patches. ", exec: true };
+    await mocks.handlers.get("task:run")!(event, { ...options, botProfile });
+    expect(mocks.run.mock.calls[0]?.[0].botProfile).toEqual({ name: "Reviewer", instructions: "Review patches." });
+    for (const invalid of [null, { ...botProfile, name: " " }, { ...botProfile, name: "x".repeat(65) },
+      { name: "Reviewer" }, { ...botProfile, instructions: "x".repeat(4001) }]) {
+      await expect(mocks.handlers.get("task:run")!(event, { ...options, botProfile: invalid }))
+        .rejects.toThrow("Invalid bot profile.");
+    }
+  });
+
   it("validates and forwards an originating session ID at the task IPC boundary", async () => {
     mocks.run.mockResolvedValue("done");
     await mocks.handlers.get("task:run")!(event, { ...options, sessionId: " session-123 " });

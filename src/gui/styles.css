@@ -52,8 +52,8 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-button:hover { color: var(--text); background: var(--hover); }
 .nav-button.active { color: var(--active-text); background: var(--active-bg); font-weight: 500; }
-.new-session { margin-bottom: 4px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm); font-weight: 500; }
-.new-session:hover { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong)); }
+.new-bot { margin-bottom: 4px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-sm); font-weight: 500; }
+.new-bot:hover { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong)); }
 .shortcut { margin-left: auto; padding: 1px 5px; color: var(--muted); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; white-space: nowrap; }
 .sidebar-scroll { min-height: 0; flex: 1; margin-top: 14px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .sidebar-scroll:hover { scrollbar-color: var(--border-strong) transparent; }
@@ -69,13 +69,20 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .project-button.active .project-icon { color: var(--active-text); }
 .project-row .icon-button { width: 24px; height: 24px; padding: 4px; opacity: 0; transition: opacity 120ms ease; }
 .project-row:hover .icon-button, .project-row .icon-button:focus-visible { opacity: 1; }
-.session-list { margin: 2px 0 2px 16px; padding: 1px 0 2px 8px; border-left: 1px solid var(--border); }
-.session-button { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; color: var(--muted); text-align: left; background: transparent; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
-.session-button span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-button.active { color: var(--active-text); background: var(--active-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 500; }
-.session-button:hover:not(.active) { color: var(--text); background: var(--hover); }
-.session-time { padding: 1px 6px; color: var(--muted); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 999px; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.session-button.active .session-time { color: var(--active-text); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
+.bot-list { margin: 2px 0 2px 16px; padding: 1px 0 2px 8px; border-left: 1px solid var(--border); }
+.bot-button { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; color: var(--muted); text-align: left; background: transparent; border-radius: 7px; cursor: pointer; font-size: 12.5px; }
+.bot-button span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-button.active { color: var(--active-text); background: var(--active-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 500; }
+.bot-button:hover:not(.active) { color: var(--text); background: var(--hover); }
+.bot-count { padding: 1px 6px; color: var(--muted); background: var(--surface-muted); border: 1px solid var(--border); border-radius: 999px; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bot-button.active .bot-count { color: var(--active-text); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
+#bot-editor { width: min(380px, 90vw); padding: 20px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-lg); }
+#bot-editor::backdrop { background: rgb(15 23 42 / 30%); }
+#bot-form, #bot-form label { display: grid; gap: 6px; }
+#bot-form { gap: 14px; }
+#bot-form h2 { margin: 0; font-size: 17px; }
+#bot-form .button-row { margin: 0; }
+#welcome-hint { max-width: 100%; overflow-wrap: anywhere; overflow: auto; white-space: pre-wrap; }
 .sidebar-empty { margin: 4px 10px 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 .sidebar-footer { flex: 0 0 auto; padding: 8px 0 10px; border-top: 1px solid var(--border); }
 .sidebar-version { margin-left: auto; color: var(--muted); font-size: 10px; }

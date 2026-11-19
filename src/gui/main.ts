@@ -156,6 +156,13 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     }
     sessionId = value.sessionId.trim();
   }
+  let botProfile: RendererTaskOptions["botProfile"];
+  if (value.botProfile !== undefined) {
+    const profile = value.botProfile;
+    if (!isRecord(profile) || typeof profile.name !== "string" || !profile.name.trim() || profile.name.length > 64
+      || typeof profile.instructions !== "string" || profile.instructions.length > 4000) throw new Error("Invalid bot profile.");
+    botProfile = { name: profile.name.trim(), instructions: profile.instructions.trim() };
+  }
   const webMode = value.webMode;
   if (webMode !== "auto" && webMode !== "on" && webMode !== "off") throw new Error("Invalid web mode.");
   const workers = value.toaWorkers;
@@ -179,6 +186,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   });
   return {
     ...(sessionId ? { sessionId } : {}),
+    ...(botProfile ? { botProfile } : {}),
     task: value.task.trim(),
     history: messages,
     webMode,
@@ -657,12 +665,12 @@ async function verifyFileDiffRendering(window: BrowserWindow): Promise<void> {
   const checks = await window.webContents.executeJavaScript(`(async () => {
     const change = ${JSON.stringify(change)};
     const limited = ${JSON.stringify(limited)};
-    const priorTurns = currentSession.turns;
+    const priorTurns = currentBot.turns;
     const language = state.language;
     try {
-      currentSession.turns = [{ task: 'Review file changes', images: [], answer: 'Updated two lines.',
+      currentBot.turns = [{ task: 'Review file changes', images: [], answer: 'Updated two lines.',
         status: 'complete', commands: [], changes: [change] }];
-      renderSession();
+      renderBot();
       setDrawer('changes');
       const card = document.querySelector('#timeline .file-change');
       const expand = card.querySelector('.diff-expand');
@@ -721,8 +729,8 @@ async function verifyFileDiffRendering(window: BrowserWindow): Promise<void> {
       return { collapsed, expanded, recollapsed, lineNumbers, context, safeText, copiedText, copyAction, scrollable, drawer, truncated, compatible, localized };
     } finally {
       state.language = language;
-      currentSession.turns = priorTurns;
-      renderSession();
+      currentBot.turns = priorTurns;
+      renderBot();
       applyLanguage();
       setDrawer(undefined);
     }
@@ -732,7 +740,7 @@ async function verifyFileDiffRendering(window: BrowserWindow): Promise<void> {
   }
 }
 
-async function verifySessionNavigation(window: BrowserWindow, root: string): Promise<void> {
+async function verifyBotNavigation(window: BrowserWindow, root: string): Promise<void> {
   const first = join(root, "ya-agent");
   const second = join(root, "notes");
   mkdirSync(first);
@@ -743,38 +751,39 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
   const navigation = await window.webContents.executeJavaScript(`(async () => {
     state = await bridge.state();
     const [second, first] = state.workspaces;
-    await selectSession(undefined, first);
-    const firstId = currentSession.id;
+    await selectBot(undefined, first);
+    const firstId = currentBot.id;
     const input = document.querySelector('#task-input');
     input.value = 'A draft for the first project';
     input.dispatchEvent(new Event('input'));
-    await selectSession(undefined, second);
+    await selectBot(undefined, second);
     const draftsIsolated = input.value === '';
-    await selectSession(sessions.find((session) => session.id === firstId));
+    await selectBot(bots.find((session) => session.id === firstId));
     const draftRestored = input.value === 'A draft for the first project';
     const projectRestored = (await bridge.state()).validWorkspace === first;
     const attachmentsAvailable = !document.querySelector('#choose-images').disabled;
-    await selectSession(undefined, first, true);
-    const newSession = currentSession.id !== firstId && input.value === '';
-    const source = sessions.find((session) => session.id === firstId);
+    await selectBot(createBot(first));
+    const newBot = currentBot.id !== firstId && input.value === '';
+    const source = bots.find((session) => session.id === firstId);
     source.turns.push({ task: 'Summarize the YA desktop layout', images: [],
-      answer: '## Desktop workspace\\nProject and session navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
+      answer: '## Desktop workspace\\nProject and bot navigation stays on the left.\\n\\n- Conversations and the composer fill the right side.\\n- Settings stays at the bottom of the sidebar.',
       status: 'complete', changes: [${JSON.stringify(historyChange)}], commands: [{ id: 'history-command', command: 'npm run check', cwd: first,
         stdout: 'Checks passed', stderr: '', result: { status: 'success', exitCode: 0, durationMs: 500,
           stdout: 'Checks passed', stderr: '', stdoutTruncated: false, stderrTruncated: false } }] });
-    source.title = 'Desktop layout';
+    source.title = 'Desktop reviewer';
+    delete source.instructions; // Legacy v1 records have no bot profile instructions.
     source.draft = '';
     source.activities = [{ operation: 'read', paths: ['src/gui/index.html'], status: 'success' }];
-    await selectSession(source);
-    const transcriptRestored = document.querySelector('#timeline').textContent.includes('Project and session navigation')
+    await selectBot(source);
+    const transcriptRestored = document.querySelector('#timeline').textContent.includes('Project and bot navigation')
       && document.querySelector('#timeline .command-run').textContent.includes('Checks passed')
       && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'const width = 920;';
     setRunning(true);
-    const locked = document.querySelector('#new-session').disabled && document.querySelector('#choose-workspace').disabled
-      && Array.from(document.querySelectorAll('.session-button')).every((button) => button.disabled);
-    const runningId = currentSession.id;
-    await selectSession(undefined, second);
-    const runningSessionStable = currentSession.id === runningId;
+    const locked = document.querySelector('#new-bot').disabled && document.querySelector('#choose-workspace').disabled
+      && Array.from(document.querySelectorAll('.bot-button')).every((button) => button.disabled);
+    const runningId = currentBot.id;
+    await selectBot(undefined, second);
+    const runningSessionStable = currentBot.id === runningId;
     setRunning(false);
     pendingAction = { id: 'approval-preview', action: { operation: 'edit', paths: ['README.md'], summary: 'Update desktop documentation', diff: '+ New desktop layout' } };
     renderPendingAction();
@@ -792,8 +801,8 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
     input.value = 'A draft that survives reload';
     input.dispatchEvent(new Event('input'));
     persistSessions();
-    return { draftsIsolated, draftRestored, projectRestored, attachmentsAvailable, newSession, transcriptRestored,
-      locked, runningSessionStable, approvalVisible, collapsed, activeId: currentSession.id };
+    return { draftsIsolated, draftRestored, projectRestored, attachmentsAvailable, newBot, transcriptRestored,
+      locked, runningSessionStable, approvalVisible, collapsed, activeId: currentBot.id };
   })()`) as Record<string, boolean | string>;
   for (const [name, value] of Object.entries(navigation)) {
     if (name !== "activeId" && value !== true) throw new Error(`Desktop navigation check failed: ${name}.`);
@@ -801,17 +810,18 @@ async function verifySessionNavigation(window: BrowserWindow, root: string): Pro
   await window.loadFile(rendererFile);
   await verifyRenderer(window);
   const restored = await window.webContents.executeJavaScript(`(() => ({
-    id: currentSession.id, draft: document.querySelector('#task-input').value,
-    transcript: document.querySelector('#timeline').textContent.includes('Project and session navigation'),
+    id: currentBot.id, draft: document.querySelector('#task-input').value,
+    transcript: currentBot.title === 'Desktop reviewer' && currentBot.instructions === ''
+      && document.querySelector('#timeline').textContent.includes('Project and bot navigation'),
     commands: document.querySelector('#timeline .command-run').textContent.includes('Checks passed'),
     changes: document.querySelector('#timeline .file-change .addition .diff-code')?.textContent === 'const width = 920;'
-      && currentSession.turns[0].changes[0].hunks[0].lines.includes('-const width = 860;')
+      && currentBot.turns[0].changes[0].hunks[0].lines.includes('-const width = 860;')
       && document.querySelector('#changes-count').textContent === '1',
   }))()`) as { id: string; draft: string; transcript: boolean; commands: boolean; changes: boolean };
   if (restored.id !== navigation.activeId || restored.draft !== "A draft that survives reload" || !restored.transcript || !restored.commands || !restored.changes) {
     throw new Error("Session transcripts, commands, file changes or drafts did not survive renderer reload.");
   }
-  await window.webContents.executeJavaScript("document.querySelector('#task-input').value = ''; currentSession.draft = ''; persistSessions(); setStatus(t('ready'));");
+  await window.webContents.executeJavaScript("document.querySelector('#task-input').value = ''; currentBot.draft = ''; persistSessions(); setStatus(t('ready'));");
 }
 
 async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
@@ -896,18 +906,18 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   try {
     const results = await window.webContents.executeJavaScript(`(async () => {
       try {
-      const originalSession = currentSession;
+      const originalSession = currentBot;
       state = await bridge.state();
-      await selectSession(undefined, state.workspace, true);
-      const testSession = currentSession;
+      await selectBot(createBot(state.workspace));
+      const testSession = currentBot;
       const input = document.querySelector('#task-input');
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off';
       syncWorkspaceControls();
       input.value = 'smoke-stream';
       await runTask();
-      const streamed = currentSession.turns[0].answer === 'A streamed reply.'
-        && currentSession.turns[0].status === 'complete'
+      const streamed = currentBot.turns[0].answer === 'A streamed reply.'
+        && currentBot.turns[0].status === 'complete'
         && document.querySelector('#timeline').textContent.includes('A streamed reply.');
       document.querySelector('#local-enabled').checked = true;
       syncWorkspaceControls();
@@ -925,15 +935,15 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       const originalProject = state.workspace;
       let projectLocked = false;
       try { await bridge.activateWorkspace(); } catch (error) { projectLocked = errorText(error).includes('running'); }
-      const navigationLocked = document.querySelector('#new-session').disabled
+      const navigationLocked = document.querySelector('#new-bot').disabled
         && document.querySelector('#choose-workspace').disabled;
       document.querySelector('#action-approve').click();
       await running;
-      const approvalCompleted = currentSession.turns.at(-1).status === 'complete'
-        && currentSession.activities.some((activity) => activity.operation === 'write' && activity.status === 'success')
+      const approvalCompleted = currentBot.turns.at(-1).status === 'complete'
+        && currentBot.activities.some((activity) => activity.operation === 'write' && activity.status === 'success')
         && state.workspace === originalProject;
-      const changeDelivered = currentSession.turns.at(-1).changes.length === 1
-        && currentSession.turns.at(-1).changes[0].operation === 'create'
+      const changeDelivered = currentBot.turns.at(-1).changes.length === 1
+        && currentBot.turns.at(-1).changes[0].operation === 'create'
         && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
       document.querySelector('#toggle-changes').click();
       const changesPanel = drawerPage === 'changes' && !document.querySelector('#drawer-changes').hidden
@@ -945,20 +955,20 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       if (!pendingAction) { await bridge.cancelTask(); await deniedRun; throw new Error('Denied task did not request approval.'); }
       document.querySelector('#action-deny').click();
       await deniedRun;
-      const deniedChanges = currentSession.turns.at(-1).changes.length === 0
-        && sessionChanges().length === 1 && document.querySelectorAll('#timeline .file-change').length === 1;
+      const deniedChanges = currentBot.turns.at(-1).changes.length === 0
+        && botChanges().length === 1 && document.querySelectorAll('#timeline .file-change').length === 1;
       input.value = 'smoke-error';
       await runTask();
-      const failureSaved = currentSession.turns.at(-1).status === 'error'
-        && currentSession.turns.at(-1).answer.includes('Expected smoke failure')
+      const failureSaved = currentBot.turns.at(-1).status === 'error'
+        && currentBot.turns.at(-1).answer.includes('Expected smoke failure')
         && !document.body.classList.contains('task-running') && !document.querySelector('#send-button').disabled;
-      await selectSession(originalSession);
-      await selectSession(testSession);
+      await selectBot(originalSession);
+      await selectBot(testSession);
       const historyRestored = document.querySelector('#timeline').textContent.includes('A streamed reply.')
         && document.querySelector('#timeline').textContent.includes('Expected smoke failure')
         && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
-      sessions = sessions.filter((session) => session.id !== testSession.id);
-      await selectSession(originalSession);
+      bots = bots.filter((session) => session.id !== testSession.id);
+      await selectBot(originalSession);
       return { streamed, automaticApproval, projectLocked, navigationLocked, approvalCompleted, changeDelivered,
         changesPanel, deniedChanges, failureSaved, historyRestored };
       } catch (error) { return { failure: errorText(error) }; }
@@ -1038,29 +1048,29 @@ async function verifyIcmHistory(window: BrowserWindow): Promise<void> {
   let fixture: { id: string; originalId: string; clean: boolean } | undefined;
   try {
     fixture = await window.webContents.executeJavaScript(`(async () => {
-      const originalId = currentSession.id;
+      const originalId = currentBot.id;
       state = await bridge.state();
-      const session = createSession(); await selectSession(session);
+      const session = createBot(state.workspace); await selectBot(session);
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#toa-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off'; syncWorkspaceControls();
       document.querySelector('#task-input').value = 'Check answer cleanup'; await runTask();
-      const answer = currentSession.turns.at(-1).answer;
+      const answer = currentBot.turns.at(-1).answer;
       return { id: session.id, originalId, clean: answer.includes('Evidence supplement:') && !answer.toLowerCase().includes('[icm_gap]') };
     })()`) as typeof fixture;
     if (!fixture?.clean || requests !== 2) throw new Error("ICM result cleanup or single follow-up failed in the GUI.");
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
-    const restored = await window.webContents.executeJavaScript(`currentSession.id === ${JSON.stringify(fixture.id)}
-      && !JSON.stringify(currentSession.turns).toLowerCase().includes('[icm_gap]')
+    const restored = await window.webContents.executeJavaScript(`currentBot.id === ${JSON.stringify(fixture.id)}
+      && !JSON.stringify(currentBot.turns).toLowerCase().includes('[icm_gap]')
       && !document.querySelector('#timeline').textContent.toLowerCase().includes('[icm_gap]')`) as boolean;
     if (!restored) throw new Error("ICM markers leaked into saved GUI history.");
   } finally {
     controller = originalController;
     if (fixture) await window.webContents.executeJavaScript(`(async () => {
-      sessions = sessions.filter((session) => session.id !== ${JSON.stringify(fixture.id)});
+      bots = bots.filter((session) => session.id !== ${JSON.stringify(fixture.id)});
       state = await bridge.state();
-      await selectSession(sessions.find((session) => session.id === ${JSON.stringify(fixture.originalId)}));
+      await selectBot(bots.find((session) => session.id === ${JSON.stringify(fixture.originalId)}));
     })()`);
   }
 }
@@ -1085,10 +1095,28 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
   let otherId: string | undefined;
   try {
     fixture = await window.webContents.executeJavaScript(`(async () => {
-      const originalId = currentSession.id;
+      const originalId = currentBot.id;
       state = await bridge.state();
-      const source = createSession();
-      await selectSession(source);
+      const count = bots.length;
+      document.querySelector('#new-bot').click();
+      const editor = document.querySelector('#bot-editor');
+      const cancelled = new Promise((resolve) => editor.addEventListener('close', resolve, { once: true }));
+      document.querySelector('#cancel-bot').click();
+      await cancelled;
+      if (bots.length !== count || currentBot.id !== originalId) throw new Error('Cancel created a bot.');
+      const create = showBotEditor(state.workspace);
+      document.querySelector('#bot-name').value = 'Reviewer';
+      document.querySelector('#bot-instructions').value = 'Review patches.';
+      document.querySelector('#save-bot').click();
+      await create;
+      const source = currentBot;
+      const edit = showBotEditor(source.workspace, source);
+      document.querySelector('#bot-name').value = 'Code reviewer';
+      document.querySelector('#save-bot').click();
+      await edit;
+      if (bots.length !== count + 1 || source.title !== 'Code reviewer' || source.id === originalId) {
+        throw new Error('Creating or renaming a bot did not preserve its identity.');
+      }
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off';
       document.querySelector('#toa-enabled').checked = false;
@@ -1106,32 +1134,35 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
         apiKey: 'smoke-only-key', keyStorage: 'session' });
       document.querySelector('#task-input').value = '继续';
       await runTask();
-      currentSession.turns.push({ task: 'Interrupted request', answer: 'Incomplete reply that must not be replayed',
+      currentBot.turns.push({ task: 'Interrupted request', answer: 'Incomplete reply that must not be replayed',
         status: 'interrupted', images: [], commands: [], changes: [] });
-      const other = createSession();
-      delete other.workspace;
-      await selectSession(other);
+      const other = createBot(undefined, { title: 'Research', instructions: '' });
+      await selectBot(other);
       document.querySelector('#task-input').value = 'Unrelated session';
       await runTask();
-      await selectSession(sessions.find((session) => session.id === '${fixture.sourceId}'));
+      await selectBot(bots.find((session) => session.id === '${fixture.sourceId}'));
       return other.id;
     })()`) as string;
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
     const restored = await window.webContents.executeJavaScript(`(async () => {
-      if (currentSession.id !== '${fixture.sourceId}') return false;
+      if (currentBot.id !== '${fixture.sourceId}') return false;
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off';
       document.querySelector('#task-input').value = '接着写';
       await runTask();
-      return currentSession.turns.at(-1).status === 'complete';
+      return currentBot.turns.at(-1).status === 'complete';
     })()`) as boolean;
     const originalRequest = { role: "user", content: "新建一个 md 文件，内容是 Ya 的介绍" };
     const followUp = { role: "user", content: "继续" };
+    const profileMessage = (name: string, instructions: string) => ({
+      role: "user", content: `Use this bot name and standing instructions for my requests: ${JSON.stringify({ name, instructions })}`,
+    });
+    const reviewer = profileMessage("Code reviewer", "Review patches.");
     const expected = [
-      [originalRequest, followUp],
-      [{ role: "user", content: "Unrelated session" }],
-      [originalRequest, followUp, { role: "assistant", content: "Context smoke reply" },
+      [reviewer, originalRequest, followUp],
+      [profileMessage("Research", ""), { role: "user", content: "Unrelated session" }],
+      [reviewer, originalRequest, followUp, { role: "assistant", content: "Context smoke reply" },
         { role: "user", content: "Interrupted request" }, { role: "user", content: "接着写" }],
     ];
     if (!restored || JSON.stringify(requests.map((messages) => messages.slice(1))) !== JSON.stringify(expected)) {
@@ -1141,8 +1172,8 @@ async function verifyConversationContext(window: BrowserWindow): Promise<void> {
     controller = originalController;
     if (fixture) await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
-      sessions = sessions.filter((session) => !['${fixture.sourceId}', '${otherId ?? ""}'].includes(session.id));
-      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+      bots = bots.filter((session) => !['${fixture.sourceId}', '${otherId ?? ""}'].includes(session.id));
+      await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
     })()`);
   }
 }
@@ -1172,15 +1203,15 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
   });
   controller.setSessionApiKey("smoke-only-key");
   const fixture = await window.webContents.executeJavaScript(`(async () => {
-    const originalId = currentSession.id;
+    const originalId = currentBot.id;
     state = await bridge.state();
-    await selectSession(undefined, state.workspace, true);
-    const source = currentSession;
+    await selectBot(createBot(state.workspace));
+    const source = currentBot;
     document.querySelector('#task-input').value = 'smoke-reload';
     document.querySelector('#task-input').dispatchEvent(new Event('input'));
-    await selectSession(undefined, source.workspace, true);
-    const nextId = currentSession.id;
-    await selectSession(source);
+    await selectBot(createBot(source.workspace));
+    const nextId = currentBot.id;
+    await selectBot(source);
     document.querySelector('#local-enabled').checked = false;
     document.querySelector('#web-mode').value = 'off';
     syncWorkspaceControls();
@@ -1191,7 +1222,7 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
     const live = await window.webContents.executeJavaScript(`(async () => {
       const deadline = Date.now() + 3000;
       while (Date.now() < deadline) {
-        if (activeTurn?.answer === 'Reply before reload' && document.querySelector('#new-session').disabled) return true;
+        if (activeTurn?.answer === 'Reply before reload' && document.querySelector('#new-bot').disabled) return true;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       return false;
@@ -1210,17 +1241,17 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
     await stopped;
     await verifyRenderer(window);
     const recovered = await window.webContents.executeJavaScript(`(async () => {
-      const source = sessions.find((session) => session.id === '${fixture.sourceId}');
-      const interrupted = currentSession.id === source.id && source.turns.at(-1).status === 'interrupted'
+      const source = bots.find((session) => session.id === '${fixture.sourceId}');
+      const interrupted = currentBot.id === source.id && source.turns.at(-1).status === 'interrupted'
         && source.turns.at(-1).answer === 'Reply before reload';
-      await selectSession(sessions.find((session) => session.id === '${fixture.nextId}'));
-      const isolated = currentSession.id === '${fixture.nextId}' && currentSession.activities.length === 0
-        && currentSession.turns.length === 0 && pendingAction === undefined && document.querySelector('#stop-button').hidden;
+      await selectBot(bots.find((session) => session.id === '${fixture.nextId}'));
+      const isolated = currentBot.id === '${fixture.nextId}' && currentBot.activities.length === 0
+        && currentBot.turns.length === 0 && pendingAction === undefined && document.querySelector('#stop-button').hidden;
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#task-input').value = 'smoke-reload-next';
       await runTask();
-      return interrupted && isolated && currentSession.turns.at(-1).status === 'complete'
-        && currentSession.turns.at(-1).answer === 'Reply after reload';
+      return interrupted && isolated && currentBot.turns.at(-1).status === 'complete'
+        && currentBot.turns.at(-1).answer === 'Reply after reload';
     })()`) as boolean;
     if (!recovered) throw new Error("Reload lost task ownership, mixed session history, or blocked the next task.");
   } finally {
@@ -1229,8 +1260,8 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
     controller = originalController;
     await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
-      sessions = sessions.filter((session) => !['${fixture.sourceId}', '${fixture.nextId}'].includes(session.id));
-      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+      bots = bots.filter((session) => !['${fixture.sourceId}', '${fixture.nextId}'].includes(session.id));
+      await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
     })()`);
   }
 }
@@ -1241,31 +1272,31 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
   mkdirSync(directory);
   const unavailable = controller.setWorkspace(directory);
   const fixture = await window.webContents.executeJavaScript(`(async () => {
-    const originalId = currentSession.id;
+    const originalId = currentBot.id;
     state = await bridge.state();
-    await selectSession(undefined, state.workspace, true);
-    currentSession.title = 'Archived history';
-    currentSession.turns.push({ task: 'Saved task', images: [], answer: 'Saved answer', status: 'complete', commands: [] });
-    renderSession();
+    await selectBot(createBot(state.workspace));
+    currentBot.title = 'Archived history';
+    currentBot.turns.push({ task: 'Saved task', images: [], answer: 'Saved answer', status: 'complete', commands: [] });
+    renderBot();
     document.querySelector('#task-input').value = 'Saved draft';
     document.querySelector('#task-input').dispatchEvent(new Event('input'));
     persistSessions();
-    return { originalId, archivedId: currentSession.id };
+    return { originalId, archivedId: currentBot.id };
   })()`) as { originalId: string; archivedId: string };
   rmdirSync(directory);
   try {
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
-    const startup = await window.webContents.executeJavaScript(`currentSession.id === '${fixture.archivedId}'
+    const startup = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
       && document.querySelector('#timeline').textContent.includes('Saved answer')
       && document.querySelector('#task-input').value === 'Saved draft'`) as boolean;
     if (!startup) throw new Error("Unavailable-project history did not restore at startup.");
     const restored = await window.webContents.executeJavaScript(`(async () => {
-      const archived = sessions.find((session) => session.id === '${fixture.archivedId}');
-      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
-      await selectSession(archived);
+      const archived = bots.find((session) => session.id === '${fixture.archivedId}');
+      await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
+      await selectBot(archived);
       const main = await bridge.state();
-      return currentSession.id === archived.id && document.querySelector('#timeline').textContent.includes('Saved answer')
+      return currentBot.id === archived.id && document.querySelector('#timeline').textContent.includes('Saved answer')
         && document.querySelector('#task-input').value === 'Saved draft'
         && main.workspace === undefined && main.validWorkspace === undefined
         && !document.querySelector('#local-enabled').checked && document.querySelector('#local-enabled').disabled
@@ -1275,16 +1306,16 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     if (!restored) throw new Error("Unavailable-project history cannot open independently of the previous project's files.");
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
-    const reopened = await window.webContents.executeJavaScript(`currentSession.id === '${fixture.archivedId}'
-      && currentSession.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
+    const reopened = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
+      && currentBot.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
     if (!reopened) throw new Error("Unavailable-project selection or draft was lost after reload.");
   } finally {
     controller.workspaces = controller.workspaces.filter((path) => path !== unavailable);
     controller.activateWorkspace(originalWorkspace);
     await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
-      sessions = sessions.filter((session) => session.id !== '${fixture.archivedId}');
-      await selectSession(sessions.find((session) => session.id === '${fixture.originalId}'));
+      bots = bots.filter((session) => session.id !== '${fixture.archivedId}');
+      await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
     })()`);
   }
 }
@@ -1382,7 +1413,7 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   }
   const language = process.env.YA_SMOKE_LANGUAGE;
   if (language && LANGUAGES.includes(language as Language)) {
-    await window.webContents.executeJavaScript(`state.language = '${language}'; applyLanguage(); fillSettings(); renderSession();`);
+    await window.webContents.executeJavaScript(`state.language = '${language}'; applyLanguage(); fillSettings(); renderBot();`);
   }
   const theme = process.env.YA_SMOKE_THEME;
   if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
@@ -1461,7 +1492,7 @@ app.whenReady().then(async () => {
     await verifyRenderer(window);
     await verifyFileDiffRendering(window);
     await verifyApplicationMenu(window);
-    await verifySessionNavigation(window, smokeRoot!);
+    await verifyBotNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);

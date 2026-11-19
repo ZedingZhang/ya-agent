@@ -117,11 +117,13 @@ const bridge = (window as typeof window & { ya: YaRendererBridge }).ya;
 
 const TEXT = {
   en: {
-    projects: "Projects", addProject: "Add project", newSession: "New session", conversations: "Conversations",
+    projects: "Projects", addProject: "Add project", newBot: "New bot", conversations: "Bots",
+    editBot: "Edit bot", botName: "Name", botNameRequired: "Enter a bot name.", botInstructions: "Instructions (optional)",
+    createBot: "Create bot", saveBot: "Save changes", cancel: "Cancel",
     generalChats: "Without a project", noProject: "No project selected", addProjectHint: "Add a folder to start a project.",
     welcome: "What would you like to work on?", welcomeHint: "Start a conversation, or choose a project to work with local files.",
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
-    interrupted: "This task was interrupted. You can send it again.", historySaveError: "Session history could not be saved. Local storage may be full.",
+    interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", choose: "Choose…", refresh: "Refresh",
     changes: "Changes", noChanges: "File changes made by Ya will appear here after approval.",
     changesSummary: "{files} files · {changes} changes", createdFile: "Created", editedFile: "Edited", replacedFile: "Replaced",
@@ -129,9 +131,9 @@ const TEXT = {
     diffTruncated: "Preview shortened for this large change. Counts cover the complete change.",
     diffUnavailable: "This change is too large to preview.", showDiffLines: "Show {count} more lines", collapseDiff: "Show fewer lines",
     copyDiff: "Copy diff", copiedDiff: "Copied", copyDiffFailed: "Could not copy diff", noNewline: "No newline at end of file",
-    local: "Enable local tools", task: "Task", taskPlaceholder: "Ask Ya a question or describe a workspace task…", send: "Send",
+    local: "Enable local tools", task: "Task", taskPlaceholder: "Message {name}…", send: "Send",
     model: "Model", thinking: "Thinking", web: "Web", toa: "Tree of Agents", workers: "Workers", auto: "Auto", on: "On", off: "Off",
-    ready: "Ready", working: "Ya is working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
+    ready: "Ready", working: "Working…", waiting: "Waiting for action approval…", done: "Done", relevant: "Relevant memory",
     commands: "Allow command execution", stop: "Stop", stopping: "Stopping…", success: "Succeeded", failed: "Failed",
     timed_out: "Timed out", cancelled: "Cancelled", error: "Error", truncated: "Output truncated; showing the tail.",
     noRelevant: "No relevant approved memory found.", activity: "Activity", noActivity: "No local activity for this task.",
@@ -159,11 +161,13 @@ const TEXT = {
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
-    projects: "项目", addProject: "添加项目", newSession: "新建会话", conversations: "对话",
+    projects: "项目", addProject: "添加项目", newBot: "新建 Bot", conversations: "Bot",
+    editBot: "编辑 Bot", botName: "名称", botNameRequired: "请输入 Bot 名称。", botInstructions: "职责说明（可选）",
+    createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
     generalChats: "未关联项目", noProject: "尚未选择项目", addProjectHint: "添加文件夹，开始一个项目。",
     welcome: "今天想做些什么？", welcomeHint: "开始一段对话，或选择项目来处理本地文件。",
     toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
-    interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存会话记录，本地存储空间可能已满。",
+    interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存 Bot 记录，本地存储空间可能已满。",
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", choose: "选择…", refresh: "刷新",
     changes: "变更", noChanges: "Ya 经批准完成的文件变更将显示在这里。",
     changesSummary: "{files} 个文件 · {changes} 次变更", createdFile: "新建", editedFile: "编辑", replacedFile: "替换",
@@ -171,9 +175,9 @@ const TEXT = {
     diffTruncated: "变更较大，预览已截断；行数统计包含完整变更。",
     diffUnavailable: "此变更过大，无法预览。", showDiffLines: "展开其余 {count} 行", collapseDiff: "收起差异",
     copyDiff: "复制 diff", copiedDiff: "已复制", copyDiffFailed: "无法复制 diff", noNewline: "文件末尾没有换行符",
-    local: "启用本地工具", task: "任务", taskPlaceholder: "向 Ya 提问，或描述一个工作区任务…", send: "发送",
+    local: "启用本地工具", task: "任务", taskPlaceholder: "给 {name} 发消息…", send: "发送",
     model: "模型", thinking: "思考", web: "网页", toa: "Tree of Agents", workers: "工作 Agent", auto: "自动", on: "开启", off: "关闭",
-    ready: "就绪", working: "Ya 正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
+    ready: "就绪", working: "正在处理…", waiting: "等待操作批准…", done: "完成", relevant: "相关记忆",
     commands: "允许命令执行", stop: "停止", stopping: "正在停止…", success: "成功", failed: "失败",
     timed_out: "超时", cancelled: "已取消", error: "错误", truncated: "输出已截断，显示末尾内容。",
     noRelevant: "没有找到相关的已批准记忆。", activity: "活动", noActivity: "本次任务还没有本地活动。",
@@ -233,18 +237,20 @@ interface ConversationTurn {
   commands: ConversationCommand[];
   changes: FileChange[];
 }
-interface ConversationSession {
+interface DesktopBot {
   id: string;
   workspace?: string;
   title: string;
+  instructions: string;
   updatedAt: number;
   draft: string;
   turns: ConversationTurn[];
   activities: LocalActivity[];
 }
+// Keep the original key, IDs and session envelope so upgrades work in place, even near the storage quota.
 const SESSION_STORAGE_KEY = "ya.desktop.sessions.v1";
-let sessions: ConversationSession[] = [];
-let currentSession: ConversationSession;
+let bots: DesktopBot[] = [];
+let currentBot: DesktopBot;
 let activeTurn: ConversationTurn | undefined;
 let navigationPending = false;
 let sessionSaveTimer: number | undefined;
@@ -305,7 +311,7 @@ function applyLanguage(): void {
   renderActivities();
   renderChanges();
   // Existing cards are snapshots too; switching language must keep their expanded state.
-  const changes = new Map(sessionChanges().map((change) => [change.id, change]));
+  const changes = new Map(botChanges().map((change) => [change.id, change]));
   document.querySelectorAll<HTMLDetailsElement>(".turn .file-change").forEach((card) => {
     const change = changes.get(card.dataset.changeId ?? "");
     if (change) card.replaceWith(fileChangeCard(change, card.open));
@@ -331,7 +337,7 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
 }
 
 function renderWorkspaceLabel(): void {
-  const path = currentSession?.workspace ?? state.workspace;
+  const path = currentBot?.workspace ?? state.workspace;
   const label = element<HTMLDivElement>("workspace-path");
   label.textContent = path ?? t("noProject");
   label.title = path ?? "";
@@ -345,21 +351,19 @@ function projectName(path: string): string {
   return path.split(/[\\/]/u).filter(Boolean).at(-1) ?? path;
 }
 
-function sessionTitle(session: ConversationSession): string {
-  return session.title || t("newSession");
-}
-
 function renderPageTitle(): void {
   const page = document.querySelector<HTMLButtonElement>(".tab.active")?.dataset.page;
+  element<HTMLTextAreaElement>("task-input").placeholder = interpolate(t("taskPlaceholder"), { name: currentBot?.title ?? "Ya" });
+  element<HTMLElement>("welcome-hint").textContent = currentBot?.instructions || t("welcomeHint");
   element<HTMLHeadingElement>("page-title").textContent = page === "settings" ? t("settings")
-    : page === "memory" ? t("memory") : currentSession ? sessionTitle(currentSession) : t("newSession");
+    : page === "memory" ? t("memory") : currentBot?.title ?? "Ya";
 }
 
 function persistSessions(): void {
   if (sessionSaveTimer !== undefined) window.clearTimeout(sessionSaveTimer);
   sessionSaveTimer = undefined;
   try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentSession.id, sessions,
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentBot.id, sessions: bots,
       sidebarCollapsed: document.body.classList.contains("sidebar-collapsed") }));
   } catch {
     setStatus(t("historySaveError"), "error");
@@ -435,7 +439,8 @@ function loadSessionHistory(): string | undefined {
       const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
         isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
         && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
-      sessions.push({ id: value.id, title: value.title, updatedAt: value.updatedAt, draft: value.draft,
+      bots.push({ id: value.id, title: value.title.trim() || "Ya",
+        instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
         ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}), turns, activities: savedActivities });
       ids.add(value.id);
     }
@@ -445,11 +450,13 @@ function loadSessionHistory(): string | undefined {
   }
 }
 
-function createSession(workspace = state.workspace): ConversationSession {
-  const session: ConversationSession = { id: crypto.randomUUID(), ...(workspace ? { workspace } : {}),
-    title: "", updatedAt: Date.now(), draft: "", turns: [], activities: [] };
-  sessions.unshift(session);
-  return session;
+type BotFields = Pick<DesktopBot, "title" | "instructions">;
+
+function createBot(workspace: string | undefined, profile: BotFields = { title: "Ya", instructions: "" }): DesktopBot {
+  const bot: DesktopBot = { id: crypto.randomUUID(), ...(workspace ? { workspace } : {}),
+    ...profile, updatedAt: Date.now(), draft: "", turns: [], activities: [] };
+  bots.unshift(bot);
+  return bot;
 }
 
 function renderNavigation(): void {
@@ -457,7 +464,7 @@ function renderNavigation(): void {
   list.replaceChildren();
   const disabled = navigationPending || document.body.classList.contains("task-running");
   const projects: Array<string | undefined> = [...state.workspaces];
-  if (sessions.some((session) => !session.workspace)) projects.push(undefined);
+  if (bots.some((bot) => !bot.workspace)) projects.push(undefined);
   for (const workspace of projects) {
     const group = document.createElement("section");
     group.className = "project-group";
@@ -466,7 +473,7 @@ function renderNavigation(): void {
     const project = document.createElement("button");
     project.type = "button";
     project.className = "project-button";
-    project.classList.toggle("active", workspace === currentSession?.workspace);
+    project.classList.toggle("active", workspace === currentBot?.workspace);
     project.dataset.workspace = workspace ?? "";
     project.disabled = disabled;
     project.title = workspace ?? t("generalChats");
@@ -474,37 +481,37 @@ function renderNavigation(): void {
     const name = document.createElement("span");
     name.textContent = workspace ? projectName(workspace) : t("generalChats");
     project.append(name);
-    project.addEventListener("click", () => void selectSession(undefined, workspace));
+    project.addEventListener("click", () => void selectBot(undefined, workspace));
     const add = document.createElement("button");
     add.type = "button";
     add.className = "icon-button";
     add.textContent = "+";
-    add.title = `${t("newSession")} · ${name.textContent}`;
+    add.title = `${t("newBot")} · ${name.textContent}`;
     add.setAttribute("aria-label", add.title);
     add.disabled = disabled;
-    add.addEventListener("click", () => void selectSession(undefined, workspace, true));
+    add.addEventListener("click", () => void showBotEditor(workspace));
     row.append(project, add);
     const children = document.createElement("div");
-    children.className = "session-list";
-    for (const session of sessions.filter((item) => item.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)) {
+    children.className = "bot-list";
+    for (const bot of bots.filter((item) => item.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "session-button";
-      button.classList.toggle("active", session.id === currentSession?.id);
-      if (session.id === currentSession?.id) button.setAttribute("aria-current", "true");
-      button.dataset.sessionId = session.id;
+      button.className = "bot-button";
+      button.classList.toggle("active", bot.id === currentBot?.id);
+      if (bot.id === currentBot?.id) button.setAttribute("aria-current", "true");
+      button.dataset.botId = bot.id;
       button.disabled = disabled;
-      button.title = sessionTitle(session);
+      button.title = bot.title;
       const title = document.createElement("span");
-      title.textContent = sessionTitle(session);
+      title.textContent = bot.title;
       button.append(title);
-      if (session.turns.length > 0) {
+      if (bot.turns.length > 0) {
         const count = document.createElement("span");
-        count.className = "session-time";
-        count.textContent = String(session.turns.length);
+        count.className = "bot-count";
+        count.textContent = String(bot.turns.length);
         button.append(count);
       }
-      button.addEventListener("click", () => void selectSession(session));
+      button.addEventListener("click", () => void selectBot(bot));
       children.append(button);
     }
     group.append(row, children);
@@ -516,16 +523,17 @@ function renderNavigation(): void {
     hint.textContent = t("addProjectHint");
     list.prepend(hint);
   }
-  element<HTMLButtonElement>("new-session").disabled = disabled;
+  element<HTMLButtonElement>("edit-bot").disabled = disabled;
+  element<HTMLButtonElement>("new-bot").disabled = disabled;
   element<HTMLButtonElement>("choose-workspace").disabled = disabled;
 }
 
-function renderSession(): void {
+function renderBot(): void {
   const timeline = element<HTMLDivElement>("timeline");
   timeline.querySelectorAll(".turn").forEach((turn) => turn.remove());
   commandLogs.clear();
   lastAnswer = "";
-  for (const turn of currentSession.turns) {
+  for (const turn of currentBot.turns) {
     const answer = appendTask(turn.task, turn.images);
     answer.classList.remove("busy-answer");
     if (turn.status === "error") {
@@ -553,13 +561,13 @@ function renderSession(): void {
     for (const change of turn.changes ?? []) answer.parentElement?.append(fileChangeCard(change, true));
     activeAnswer = undefined;
   }
-  element<HTMLDivElement>("timeline-empty").hidden = currentSession.turns.length > 0;
-  element<HTMLTextAreaElement>("task-input").value = currentSession.draft;
+  element<HTMLDivElement>("timeline-empty").hidden = currentBot.turns.length > 0;
+  element<HTMLTextAreaElement>("task-input").value = currentBot.draft;
   resizeTaskInput();
   element<HTMLButtonElement>("learn-button").disabled = !lastAnswer;
   element<HTMLInputElement>("local-enabled").checked = Boolean(state.validWorkspace);
   element<HTMLInputElement>("commands-enabled").checked = false;
-  activities = currentSession.activities;
+  activities = currentBot.activities;
   pendingAction = undefined;
   renderActivities();
   renderChanges();
@@ -567,7 +575,7 @@ function renderSession(): void {
   renderWorkspaceLabel();
   renderPageTitle();
   syncWorkspaceControls();
-  const lastTask = currentSession.turns.at(-1)?.task;
+  const lastTask = currentBot.turns.at(-1)?.task;
   if (lastTask) void renderRelevant(lastTask);
   else element<HTMLDivElement>("relevant-list").textContent = t("noRelevant");
 }
@@ -585,12 +593,12 @@ function setNavigationPending(pending: boolean): void {
   renderImages();
 }
 
-async function openSession(session: ConversationSession): Promise<void> {
+async function openBot(bot: DesktopBot): Promise<void> {
   await clearImages();
-  currentSession = session;
+  currentBot = bot;
   currentDirectory = ".";
   switchPage("workspace");
-  renderSession();
+  renderBot();
   setDrawer(undefined);
   await renderFiles();
   setStatus(t("ready"));
@@ -598,18 +606,20 @@ async function openSession(session: ConversationSession): Promise<void> {
   element<HTMLTextAreaElement>("task-input").focus();
 }
 
-async function selectSession(session?: ConversationSession, workspace?: string, fresh = false): Promise<void> {
+function latestBot(workspace?: string): DesktopBot {
+  return bots.filter((bot) => bot.workspace === workspace).sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? createBot(workspace);
+}
+
+async function selectBot(bot?: DesktopBot, workspace?: string, profile?: BotFields): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
-  currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+  currentBot.draft = element<HTMLTextAreaElement>("task-input").value;
   persistSessions();
   setNavigationPending(true);
   try {
-    const targetWorkspace = session ? session.workspace : workspace;
-    await activateSessionWorkspace(targetWorkspace);
-    const candidates = sessions.filter((item) => item.workspace === targetWorkspace).sort((a, b) => b.updatedAt - a.updatedAt);
-    const selected = session ?? (fresh ? candidates.find((item) => item.turns.length === 0 && !item.draft) : candidates[0])
-      ?? createSession(targetWorkspace);
-    await openSession(selected);
+    const targetWorkspace = bot ? bot.workspace : workspace;
+    await activateBotWorkspace(targetWorkspace);
+    const selected = profile ? createBot(targetWorkspace, profile) : bot ?? latestBot(targetWorkspace);
+    await openBot(selected);
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
@@ -617,7 +627,34 @@ async function selectSession(session?: ConversationSession, workspace?: string, 
   }
 }
 
-async function activateSessionWorkspace(workspace?: string): Promise<void> {
+async function showBotEditor(workspace: string | undefined, bot?: DesktopBot): Promise<void> {
+  const dialog = element<HTMLDialogElement>("bot-editor");
+  if (dialog.open || navigationPending || document.body.classList.contains("task-running")) return;
+  const name = element<HTMLInputElement>("bot-name");
+  const instructions = element<HTMLTextAreaElement>("bot-instructions");
+  element<HTMLElement>("bot-editor-title").textContent = t(bot ? "editBot" : "newBot");
+  element<HTMLButtonElement>("save-bot").textContent = t(bot ? "saveBot" : "createBot");
+  name.value = bot?.title ?? "";
+  instructions.value = bot?.instructions ?? "";
+  name.setCustomValidity("");
+  dialog.returnValue = "";
+  const closed = new Promise<void>((resolve) => dialog.addEventListener("close", () => resolve(), { once: true }));
+  dialog.showModal();
+  name.focus();
+  await closed;
+  if (dialog.returnValue !== "save") return;
+  const profile = { title: name.value.trim(), instructions: instructions.value.trim() };
+  if (bot) {
+    Object.assign(bot, profile);
+    renderPageTitle();
+    renderNavigation();
+    persistSessions();
+  } else {
+    await selectBot(undefined, workspace, profile);
+  }
+}
+
+async function activateBotWorkspace(workspace?: string): Promise<void> {
   if (state.workspace === workspace) return;
   try {
     state = await bridge.activateWorkspace(workspace);
@@ -646,16 +683,14 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
 
 async function chooseWorkspace(): Promise<void> {
   if (navigationPending || document.body.classList.contains("task-running")) return;
-  currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+  currentBot.draft = element<HTMLTextAreaElement>("task-input").value;
   persistSessions();
   setNavigationPending(true);
   try {
     const selected = await bridge.chooseWorkspace();
     if (!selected) return;
     state = await bridge.state();
-    const session = sessions.filter((session) => session.workspace === state.workspace)
-      .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? createSession();
-    await openSession(session);
+    await openBot(latestBot(state.workspace));
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   } finally {
@@ -846,24 +881,23 @@ async function runTask(): Promise<void> {
     if (!window.confirm(message)) return;
   }
 
-  const history = currentSession.turns.flatMap((turn): ConversationMessage[] => {
+  const history = currentBot.turns.flatMap((turn): ConversationMessage[] => {
     const messages: ConversationMessage[] = [{ role: "user", content: turn.task }];
     if (turn.status === "complete" && turn.answer) messages.push({ role: "assistant", content: turn.answer });
     return messages;
   });
   input.value = "";
   resizeTaskInput();
-  currentSession.draft = "";
-  currentSession.updatedAt = Date.now();
-  if (!currentSession.title) currentSession.title = task.replace(/\s+/gu, " ").slice(0, 48);
+  currentBot.draft = "";
+  currentBot.updatedAt = Date.now();
   activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
-  currentSession.turns.push(activeTurn);
+  currentBot.turns.push(activeTurn);
   activeAnswer = appendTask(task, taskImages);
   activeAnswerText = "";
   lastAnswer = "";
   actionExpired = false;
   activities = [];
-  currentSession.activities = activities;
+  currentBot.activities = activities;
   commandLogs.clear();
   pendingAction = undefined;
   renderPendingAction();
@@ -876,8 +910,9 @@ async function runTask(): Promise<void> {
   setStatus(t("working"), "busy");
   try {
     const result = await bridge.runTask({
-      sessionId: currentSession.id,
+      sessionId: currentBot.id,
       task,
+      botProfile: { name: currentBot.title, instructions: currentBot.instructions },
       history,
       webMode: element<HTMLSelectElement>("web-mode").value,
       toa,
@@ -996,9 +1031,9 @@ async function renderRelevant(task: string): Promise<void> {
   const panel = element<HTMLDivElement>("relevant-list");
   panel.replaceChildren();
   try {
-    const sessionId = currentSession.id;
+    const sessionId = currentBot.id;
     const matches = await bridge.relevantCards(task);
-    if (sessionId !== currentSession.id) return;
+    if (sessionId !== currentBot.id) return;
     if (matches.length === 0) {
       panel.textContent = t("noRelevant");
       panel.className = "compact-list empty";
@@ -1016,12 +1051,12 @@ async function renderRelevant(task: string): Promise<void> {
   }
 }
 
-function sessionChanges(): FileChange[] {
-  return currentSession?.turns.flatMap((turn) => turn.changes ?? []) ?? [];
+function botChanges(): FileChange[] {
+  return currentBot?.turns.flatMap((turn) => turn.changes ?? []) ?? [];
 }
 
 function renderChanges(): void {
-  const changes = sessionChanges();
+  const changes = botChanges();
   const count = element<HTMLSpanElement>("changes-count");
   const files = new Set(changes.map((change) => change.path)).size;
   count.hidden = files === 0;
@@ -1612,7 +1647,18 @@ function registerEvents(): void {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
   element<HTMLButtonElement>("choose-workspace").addEventListener("click", () => void chooseWorkspace());
-  element<HTMLButtonElement>("new-session").addEventListener("click", () => void selectSession(undefined, currentSession.workspace, true));
+  element<HTMLButtonElement>("edit-bot").addEventListener("click", () => void showBotEditor(currentBot.workspace, currentBot));
+  element<HTMLButtonElement>("cancel-bot").addEventListener("click", () => element<HTMLDialogElement>("bot-editor").close());
+  const name = element<HTMLInputElement>("bot-name");
+  name.addEventListener("input", () => name.setCustomValidity(""));
+  element<HTMLFormElement>("bot-form").addEventListener("submit", (event) => {
+    if (!name.value.trim()) {
+      event.preventDefault();
+      name.setCustomValidity(t("botNameRequired"));
+      name.reportValidity();
+    }
+  });
+  element<HTMLButtonElement>("new-bot").addEventListener("click", () => void showBotEditor(currentBot.workspace));
   element<HTMLButtonElement>("sidebar-toggle").addEventListener("click", () => {
     const collapsed = document.body.classList.toggle("sidebar-collapsed");
     element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(!collapsed));
@@ -1643,15 +1689,15 @@ function registerEvents(): void {
   });
   element<HTMLTextAreaElement>("task-input").addEventListener("input", (event) => {
     const input = event.currentTarget as HTMLTextAreaElement;
-    currentSession.draft = input.value;
+    currentBot.draft = input.value;
     resizeTaskInput();
     scheduleSessionSave();
   });
   document.addEventListener("keydown", (event) => {
-    if (event.isComposing) return;
+    if (element<HTMLDialogElement>("bot-editor").open || event.isComposing) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
-      void selectSession(undefined, currentSession.workspace, true);
+      void showBotEditor(currentBot.workspace);
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
       event.preventDefault();
       element<HTMLButtonElement>("sidebar-toggle").click();
@@ -1668,7 +1714,7 @@ function registerEvents(): void {
     }
   });
   window.addEventListener("beforeunload", () => {
-    currentSession.draft = element<HTMLTextAreaElement>("task-input").value;
+    currentBot.draft = element<HTMLTextAreaElement>("task-input").value;
     persistSessions();
   });
   element<HTMLInputElement>("toa-enabled").addEventListener("change", (event) => {
@@ -1732,14 +1778,14 @@ async function initialize(): Promise<void> {
   document.body.inert = true;
   state = await bridge.state();
   const activeId = loadSessionHistory();
-  currentSession = sessions.find((session) => session.id === activeId && (!session.workspace || state.workspaces.includes(session.workspace)))
-    ?? sessions.find((session) => session.workspace === state.workspace) ?? createSession();
-  await activateSessionWorkspace(currentSession.workspace);
+  currentBot = bots.find((bot) => bot.id === activeId && (!bot.workspace || state.workspaces.includes(bot.workspace)))
+    ?? latestBot(state.workspace);
+  await activateBotWorkspace(currentBot.workspace);
   registerEvents();
   applyLanguage();
   fillSettings();
   renderMemory();
-  renderSession();
+  renderBot();
   persistSessions();
   await renderFiles();
   document.body.dataset.ready = "true";

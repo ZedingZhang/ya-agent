@@ -17,13 +17,13 @@
         </button>
       </div>
       <nav id="app-navigation" class="sidebar-navigation">
-        <button id="new-session" class="new-session nav-button" type="button" aria-keyshortcuts="Control+N Meta+N">
+        <button id="new-bot" class="new-bot nav-button" type="button" aria-keyshortcuts="Control+N Meta+N">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-          <span class="nav-label" data-i18n="newSession">New session</span><span class="shortcut">⌘ / Ctrl N</span>
+          <span class="nav-label" data-i18n="newBot">New bot</span><span class="shortcut">⌘ / Ctrl N</span>
         </button>
         <button id="workspace-tab" class="nav-button tab active" type="button" data-page="workspace" aria-controls="page-workspace" aria-current="page">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9H13a8.5 8.5 0 0 1 8 8v.5Z"/></svg>
-          <span class="nav-label" data-i18n="conversations">Conversations</span>
+          <span class="nav-label" data-i18n="conversations">Bots</span>
         </button>
         <div class="sidebar-scroll">
           <div class="sidebar-section-heading"><span data-i18n="projects">Projects</span>
@@ -48,9 +48,12 @@
 
     <main class="app-main">
       <header class="app-header">
-        <div class="header-titles"><h1 id="page-title">New session</h1><div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div></div>
+        <div class="header-titles"><h1 id="page-title">Ya</h1><div id="workspace-path" class="workspace-path missing">Choose a workspace folder</div></div>
         <div id="app-status" class="app-status" role="status">Ready</div>
         <div id="workspace-actions" class="header-actions">
+          <button id="edit-bot" class="icon-button" type="button" data-i18n-label="editBot">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5 4 4M4 20l4-1 12-12a2.8 2.8 0 0 0-4-4L4 15Z"/></svg>
+          </button>
           <button id="toggle-changes" class="icon-button changes-button" type="button" aria-controls="details-drawer" aria-expanded="false" data-i18n-label="changes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M7 9h4M15 13h4M17 11v4"/></svg><span id="changes-count" class="changes-count" hidden></span>
           </button>
@@ -67,12 +70,12 @@
         <div class="workbench">
           <section class="center-panel">
             <div id="timeline" class="timeline" role="log" aria-label="Conversation">
-              <div id="timeline-empty" class="timeline-empty"><div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div><h2 data-i18n="welcome">What would you like to work on?</h2><p data-i18n="welcomeHint">Start a conversation, or choose a project to work with local files.</p></div>
+              <div id="timeline-empty" class="timeline-empty"><div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div><h2 data-i18n="welcome">What would you like to work on?</h2><p id="welcome-hint">Start a conversation, or choose a project to work with local files.</p></div>
             </div>
             <div class="composer-area">
               <div class="composer">
                 <label for="task-input" class="sr-only" data-i18n="task">Task</label>
-                <textarea id="task-input" rows="3" data-i18n-placeholder="taskPlaceholder" placeholder="Ask Ya a question or describe a workspace task…"></textarea>
+                <textarea id="task-input" rows="3" placeholder="Message Ya…"></textarea>
                 <div class="image-controls" id="image-controls" hidden><div id="image-list" class="image-list muted"></div><button id="clear-images" class="secondary" type="button" disabled data-i18n="clearImages">Clear</button></div>
                 <div class="composer-toolbar">
                   <button id="choose-images" class="icon-button" type="button" data-i18n-label="attachImages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 11-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.8-2.8L15 6"/></svg></button>
@@ -181,5 +184,16 @@
         </div>
       </section>
     </main>
+    <dialog id="bot-editor" aria-labelledby="bot-editor-title">
+      <form id="bot-form" method="dialog">
+        <h2 id="bot-editor-title">New bot</h2>
+        <label><span data-i18n="botName">Name</span><input id="bot-name" maxlength="64" required></label>
+        <label><span data-i18n="botInstructions">Instructions (optional)</span><textarea id="bot-instructions" rows="4" maxlength="4000"></textarea></label>
+        <div class="button-row">
+          <button id="cancel-bot" class="secondary" type="button" data-i18n="cancel">Cancel</button>
+          <button id="save-bot" class="primary" type="submit" value="save">Create bot</button>
+        </div>
+      </form>
+    </dialog>
   </body>
 </html>

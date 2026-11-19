@@ -4,7 +4,7 @@ import type { FileChange } from "../file-diff";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
-import type { ConversationMessage, ImageDetail, WebMode } from "../types";
+import type { BotProfile, ConversationMessage, ImageDetail, WebMode } from "../types";
 import type { Language } from "./controller";
 
 export interface SerializedConfig {
@@ -49,6 +49,7 @@ export interface SettingsUpdate {
 
 export interface RendererTaskOptions {
   sessionId?: string;
+  botProfile?: BotProfile;
   task: string;
   history?: ConversationMessage[];
   webMode: WebMode;
