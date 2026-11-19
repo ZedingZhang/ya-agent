@@ -26,6 +26,7 @@ interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
+  folderSessionOnly?: boolean;
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -90,9 +91,10 @@ interface YaRendererBridge {
   chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
   revokeFolder(botId: string): Promise<FolderAccess>;
   selectBot(botId: string): Promise<FolderAccess>;
+  restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;
+  workspaceEntries(botId: string, path?: string): Promise<import("./shared").WorkspaceListing>;
   saveWorkspaceModelSelection(selection: {
     model: AppState["config"]["model"];
     reasoningEffort: AppState["config"]["reasoningEffort"];
@@ -118,7 +120,7 @@ const bridge = (window as typeof window & { ya: YaRendererBridge }).ya;
 
 const TEXT = {
   en: {
-    newBot: "New bot", conversations: "Bots",
+    newBot: "New bot", conversations: "Bots", sessionFolder: "Choose this folder again after restarting Ya.",
     editBot: "Edit bot", botName: "Name", botNameRequired: "Enter a bot name.", botInstructions: "Instructions (optional)",
     createBot: "Create bot", saveBot: "Save changes", cancel: "Cancel",
     welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
@@ -161,7 +163,7 @@ const TEXT = {
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
-    newBot: "新建 Bot", conversations: "Bot",
+    newBot: "新建 Bot", conversations: "Bot", sessionFolder: "重启 Ya 后需要重新选择此文件夹。",
     editBot: "编辑 Bot", botName: "名称", botNameRequired: "请输入 Bot 名称。", botInstructions: "职责说明（可选）",
     createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
     welcome: "今天想做些什么？", welcomeHint: "发条消息，开始对话。",
@@ -339,8 +341,9 @@ function renderWorkspaceLabel(): void {
   label.textContent = state.workspace ?? "";
   label.title = label.textContent;
   label.hidden = !state.workspace;
-  element<HTMLDivElement>("folder-scope").textContent = state.workspace ?? t("noWorkspace");
-  element<HTMLDivElement>("file-toolbar").hidden = !state.validWorkspace;
+  element<HTMLDivElement>("folder-scope").textContent = state.workspace && state.folderSessionOnly
+    ? `${state.workspace} · ${t("sessionFolder")}` : state.workspace ?? t("noWorkspace");
+  element<HTMLDivElement>("file-toolbar").hidden = !state.workspace;
   element<HTMLButtonElement>("revoke-folder").hidden = !state.workspace;
 }
 
@@ -402,15 +405,14 @@ function validSavedFileChange(value: unknown): value is FileChange {
   return lines <= 2_000 && characters <= 128 * 1_024;
 }
 
-function loadSessionHistory(): string | undefined {
+async function loadSessionHistory(): Promise<string | undefined> {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
     if (!isRecord(saved) || !Array.isArray(saved.sessions)) return undefined;
     document.body.classList.toggle("sidebar-collapsed", saved.sidebarCollapsed === true);
     element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(saved.sidebarCollapsed !== true));
-    const ids = new Set<string>();
     for (const value of saved.sessions) {
-      if (!isRecord(value) || typeof value.id !== "string" || ids.has(value.id) || typeof value.title !== "string"
+      if (!isRecord(value) || typeof value.title !== "string"
         || typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt) || typeof value.draft !== "string"
         || !Array.isArray(value.turns)) continue;
       const turns: ConversationTurn[] = [];
@@ -432,12 +434,14 @@ function loadSessionHistory(): string | undefined {
       const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
         isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
         && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
-      bots.push({ id: value.id, title: value.title.trim() || "Ya",
+      bots.push({ id: typeof value.id === "string" ? value.id : "", title: value.title.trim() || "Ya",
         instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
         turns, activities: savedActivities });
-      ids.add(value.id);
     }
-    return typeof saved.activeId === "string" ? saved.activeId : undefined;
+    const active = bots.find((bot) => bot.id === saved.activeId);
+    const ids = await bridge.restoreBotIds(bots.map((bot) => bot.id));
+    bots.forEach((bot, index) => { bot.id = ids[index]!; });
+    return active?.id;
   } catch {
     return undefined;
   }
@@ -611,6 +615,7 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
     button.classList.toggle("active", page === name);
     button.setAttribute("aria-expanded", String(page === name));
   }
+  if (page === "files") void renderFiles();
 }
 
 async function updateFolderAccess(revoke: boolean): Promise<void> {
@@ -695,25 +700,27 @@ async function clearImages(): Promise<void> {
   await bridge.clearImages();
 }
 
+let fileRequest = 0;
 async function renderFiles(): Promise<void> {
+  const request = ++fileRequest;
+  const botId = currentBot.id;
+  const directory = currentDirectory;
+  const workspace = state.validWorkspace;
   const list = element<HTMLDivElement>("file-list");
   const breadcrumb = element<HTMLDivElement>("file-location");
   list.replaceChildren();
   breadcrumb.textContent = currentDirectory;
-  if (!state.validWorkspace) {
-    if (!state.workspace) return;
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = t("folderMissing");
-    list.append(empty);
-    return;
-  }
   try {
-    const workspace = state.validWorkspace;
-    const directory = currentDirectory;
-    const botId = currentBot.id;
-    const entries = await bridge.workspaceEntries(botId, currentDirectory);
-    if (botId !== currentBot.id || workspace !== state.validWorkspace || directory !== currentDirectory) return;
+    const { access, entries } = await bridge.workspaceEntries(botId, directory);
+    if (request !== fileRequest || botId !== currentBot.id || directory !== currentDirectory) return;
+    Object.assign(state, access);
+    syncWorkspaceControls();
+    if (!access.validWorkspace) return;
+    if (workspace !== access.validWorkspace && directory !== ".") {
+      currentDirectory = ".";
+      return renderFiles();
+    }
+    list.replaceChildren();
     if (currentDirectory !== ".") {
       const up = fileRow("..", "directory");
       up.addEventListener("click", () => {
@@ -733,6 +740,7 @@ async function renderFiles(): Promise<void> {
       list.append(row);
     }
   } catch (error) {
+    if (request !== fileRequest || botId !== currentBot.id || directory !== currentDirectory) return;
     const empty = document.createElement("p");
     empty.className = "error-copy";
     empty.textContent = errorText(error);
@@ -884,6 +892,7 @@ async function runTask(): Promise<void> {
       try { state = await bridge.state(); fillSettings(); }
       catch { /* Keep the task error visible if refreshing account state also fails. */ }
     }
+    if (local) await renderFiles();
   } finally {
     pendingAction = undefined;
     renderPendingAction();
@@ -1325,6 +1334,13 @@ function syncWorkspaceControls(): void {
   element<HTMLSelectElement>("task-model").disabled = running || workspaceModelSaving || navigationPending;
   element<HTMLSelectElement>("task-reasoning").disabled = running || workspaceModelSaving || navigationPending;
   const local = element<HTMLInputElement>("local-enabled");
+  renderWorkspaceLabel();
+  if (!state.validWorkspace) {
+    local.checked = false;
+    currentDirectory = ".";
+    element<HTMLElement>("file-location").textContent = ".";
+    element<HTMLElement>("file-list").textContent = state.workspace ? t("folderMissing") : "";
+  }
   local.disabled = running || navigationPending || !state.validWorkspace;
   element<HTMLSelectElement>("web-mode").disabled = running;
   element<HTMLInputElement>("toa-enabled").disabled = running;
@@ -1709,7 +1725,7 @@ function registerEvents(): void {
 async function initialize(): Promise<void> {
   document.body.inert = true;
   state = await bridge.state();
-  const activeId = loadSessionHistory();
+  const activeId = await loadSessionHistory();
   currentBot = bots.find((bot) => bot.id === activeId) ?? bots[0] ?? createBot();
   Object.assign(state, await bridge.selectBot(currentBot.id));
   registerEvents();

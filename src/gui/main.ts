@@ -139,6 +139,11 @@ function isTrustedRendererUrl(value: string): boolean {
   }
 }
 
+function validBotId(value: unknown): value is string {
+  return typeof value === "string" && value === value.trim() && value.length > 0
+    && value.length <= 128 && !/[\x00-\x1f\x7f]/u.test(value);
+}
+
 function validateTaskOptions(value: unknown): RendererTaskOptions {
   if (!isRecord(value) || typeof value.task !== "string" || !value.task.trim()) throw new Error("Enter a task first.");
   let sessionId: string | undefined;
@@ -252,9 +257,20 @@ function registerIpc(): void {
   ipcMain.handle("bot:select", (event, botId: unknown) => {
     assertTrustedSender(event);
     if (taskRunning) throw new Error("Bots cannot be changed while a task is running.");
-    if (typeof botId !== "string" || !botId.trim() || botId.length > 128) throw new Error("Invalid bot ID.");
+    if (!validBotId(botId)) throw new Error("Invalid bot ID.");
     controller.activeBotId = botId;
     return controller.folderAccess();
+  });
+
+  ipcMain.handle("bot:restore-ids", (event, ids: unknown) => {
+    assertTrustedSender(event);
+    if (!Array.isArray(ids)) throw new Error("Invalid bot history.");
+    const seen = new Set<string>();
+    return ids.map((id: unknown) => {
+      const restored = validBotId(id) && !seen.has(id) ? id : randomUUID();
+      seen.add(restored);
+      return restored;
+    });
   });
 
   ipcMain.handle("workspace:revoke", (event, botId: unknown) => {
@@ -1318,8 +1334,30 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     return { originalId, archivedId: currentBot.id };
   })()`) as { originalId: string; archivedId: string };
   controller.grantFolder(fixture.archivedId, directory);
+  await window.webContents.executeJavaScript(`selectBot(currentBot)`);
   rmdirSync(directory);
+  const originalRun = controller.run;
   try {
+    controller.run = async (options) => {
+      if (options.local) throw new Error("The offline folder was still enabled.");
+      return { content: "Ordinary chat reply", mode: "single", usage: {} };
+    };
+    const refreshed = await window.webContents.executeJavaScript(`(async () => {
+      const local = document.querySelector('#local-enabled');
+      if (!local.checked) return false;
+      await renderFiles();
+      if (state.validWorkspace || !document.querySelector('#file-list').textContent.includes(t('folderMissing'))) return false;
+      await saveWorkspaceModelSelection();
+      if (!local.disabled || local.checked || document.querySelector('#send-button').disabled) return false;
+      const input = document.querySelector('#task-input');
+      input.value = 'Continue without files';
+      await runTask();
+      input.value = 'Saved draft';
+      input.dispatchEvent(new Event('input'));
+      return currentBot.turns.at(-1)?.answer === 'Ordinary chat reply';
+    })()`);
+    if (!refreshed) throw new Error("An offline directory blocked the ordinary chat composer.");
+    controller.run = originalRun;
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
     const startup = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
@@ -1344,6 +1382,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       && currentBot.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
     if (!reopened) throw new Error("Unavailable-folder selection or draft was lost after reload.");
   } finally {
+    controller.run = originalRun;
     controller.revokeFolder(fixture.archivedId);
     await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
@@ -1351,6 +1390,34 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       await selectBot(bots.find((session) => session.id === '${fixture.originalId}'));
     })()`);
   }
+}
+
+async function verifyBotIdRecovery(window: BrowserWindow): Promise<void> {
+  const originalId = await window.webContents.executeJavaScript(`(() => {
+    const original = currentBot.id;
+    currentBot = createBot({ title: 'Recovered bot', instructions: 'Keep the draft' });
+    currentBot.id = '';
+    document.querySelector('#task-input').value = 'Draft to recover';
+    return original;
+  })()`) as string;
+  await window.loadFile(rendererFile);
+  await verifyRenderer(window);
+  const repaired = await window.webContents.executeJavaScript(`currentBot.title === 'Recovered bot'
+    && currentBot.instructions === 'Keep the draft' && currentBot.draft === 'Draft to recover'
+    && !state.workspace && currentBot.id`) as string;
+  if (!validBotId(repaired)) throw new Error("The active bot's invalid ID prevented history recovery.");
+  await window.loadFile(rendererFile);
+  await verifyRenderer(window);
+  const stable = await window.webContents.executeJavaScript(`(async () => {
+    if (currentBot.id !== ${JSON.stringify(repaired)}) return false;
+    const original = bots.find((bot) => bot.id === ${JSON.stringify(originalId)});
+    if (!original) return false;
+    await selectBot(original);
+    bots = bots.filter((bot) => bot.id !== ${JSON.stringify(repaired)});
+    persistSessions();
+    return currentBot === original;
+  })()`);
+  if (!stable) throw new Error("Repairing a bot ID lost another bot or failed to persist the new ID.");
 }
 
 async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
@@ -1528,6 +1595,7 @@ app.whenReady().then(async () => {
     await verifyApplicationMenu(window);
     await verifyBotNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
+    await verifyBotIdRecovery(window);
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);
     await verifyConversationContext(window);

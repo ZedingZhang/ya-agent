@@ -1,5 +1,5 @@
 import { basename, join, resolve } from "node:path";
-import { linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOT_PERMISSIONS_DIR, ModelConfig, loadConfig } from "../src/config";
 import {
@@ -8,6 +8,7 @@ import {
   preferencesPath,
   type TaskRunner,
 } from "../src/gui/controller";
+import { FolderGrants } from "../src/gui/folder-grants";
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
@@ -50,16 +51,16 @@ describe("GUI controller", () => {
     const controller = new GuiController();
     controller.activeBotId = "first";
     expect(controller.folderAccess().workspace).toBeUndefined();
-    controller.grantFolder("first", folder);
+    const access = controller.grantFolder("first", folder);
     expect(controller.folderAccess().validWorkspace).toBe(realpathSync(folder));
     controller.activeBotId = "second";
-    expect(controller.workspaceEntries("second")).toEqual([]);
+    expect(controller.workspaceEntries("second").access.validWorkspace).toBeUndefined();
     expect(() => controller.workspaceEntries("first")).toThrow("Select this bot");
     expect(() => controller.grantFolder("first", folder)).toThrow("Select this bot");
     const restarted = new GuiController();
     expect(restarted.folderAccess().workspace).toBeUndefined();
     restarted.activeBotId = "first";
-    expect(restarted.folderAccess().validWorkspace).toBe(realpathSync(folder));
+    expect(restarted.folderAccess().validWorkspace).toBe(access.folderSessionOnly ? undefined : realpathSync(folder));
     restarted.revokeFolder("first");
     controller.activeBotId = "first";
     expect(controller.folderAccess().validWorkspace).toBeUndefined();
@@ -74,11 +75,11 @@ describe("GUI controller", () => {
     const controller = new GuiController();
     controller.activeBotId = "bot";
     controller.grantFolder("bot", first);
-    expect(controller.workspaceEntries("bot", "nested")).toEqual([{ path: join("nested", "notes.txt"), type: "file" }]);
+    expect(controller.workspaceEntries("bot", "nested").entries).toEqual([{ path: join("nested", "notes.txt"), type: "file" }]);
     renameSync(first, first + "-moved");
     symlinkSync(second, first, process.platform === "win32" ? "junction" : "dir");
     expect(controller.folderAccess().validWorkspace).toBeUndefined();
-    expect(controller.workspaceEntries("bot")).toEqual([]);
+    expect(controller.workspaceEntries("bot").access.validWorkspace).toBeUndefined();
     controller.grantFolder("bot", second);
     expect(() => controller.workspaceEntries("bot", first + "-moved")).toThrow("inside the authorized workspace");
   });
@@ -100,10 +101,44 @@ describe("GUI controller", () => {
     mkdirSync(folder);
     const restarted = new GuiController();
     restarted.activeBotId = "reviewer";
-    expect(restarted.folderAccess()).toEqual({ workspace: physical, validWorkspace: undefined });
+    expect(restarted.folderAccess()).toMatchObject({ workspace: physical, validWorkspace: undefined });
     expect(() => oldTools.list({ path: "." })).toThrow("Folder access has changed");
     expect(restarted.grantFolder("reviewer", folder).validWorkspace).toBe(physical);
     expect(() => oldTools.list({ path: "." })).toThrow("Folder access has changed");
+  });
+
+  it("retains the original folder when a backup restores directory timestamps", () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    const controller = new GuiController();
+    controller.activeBotId = "reviewer";
+    const access = controller.grantFolder("reviewer", folder);
+    const oldDate = new Date("2020-01-01T00:00:00Z");
+    utimesSync(folder, oldDate, oldDate);
+    expect(controller.folderAccess().validWorkspace).toBe(realpathSync(folder));
+    const restarted = new GuiController();
+    restarted.activeBotId = "reviewer";
+    expect(restarted.folderAccess().validWorkspace).toBe(access.folderSessionOnly ? undefined : realpathSync(folder));
+  });
+
+  it("pins unsupported filesystems only for the current process and requires a fresh selection after replacement", () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    const store = new FolderGrants(() => undefined);
+    const grant = store.grant("reviewer", folder);
+    try {
+      expect(store.matches("reviewer", grant)).toBe(true);
+      const restarted = new FolderGrants(() => undefined);
+      expect(restarted.matches("reviewer", restarted.read("reviewer")!)).toBe(false);
+      renameSync(folder, folder + "-previous");
+      mkdirSync(folder);
+      expect(store.matches("reviewer", grant)).toBe(false);
+      const replacement = store.grant("reviewer", folder);
+      expect(store.matches("reviewer", grant)).toBe(false);
+      expect(store.matches("reviewer", replacement)).toBe(true);
+    } finally {
+      store.revoke("reviewer");
+    }
   });
 
   it("requires the picker to renew a legacy path-only grant", () => {
@@ -318,7 +353,8 @@ describe("GUI controller", () => {
     const controller = new GuiController();
     controller.activeBotId = "bot";
     controller.grantFolder("bot", workspace);
-    const entries = controller.workspaceEntries("bot");
+    const { entries, access } = controller.workspaceEntries("bot");
+    expect(access.validWorkspace).toBe(realpathSync(workspace));
     expect(entries).toEqual([{ path: "folder", type: "directory" }, { path: "notes.txt", type: "file" }]);
     expect(JSON.stringify(entries)).not.toContain("private note");
   });

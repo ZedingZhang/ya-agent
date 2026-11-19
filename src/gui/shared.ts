@@ -21,6 +21,7 @@ export interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
+  folderSessionOnly?: boolean;
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -32,8 +33,14 @@ export interface AppState {
 }
 
 export interface FolderAccess {
+  folderSessionOnly: boolean;
   workspace: string | undefined;
   validWorkspace: string | undefined;
+}
+
+export interface WorkspaceListing {
+  access: FolderAccess;
+  entries: Array<{ path: string; type: string }>;
 }
 
 export interface WorkspaceModelSelection {
@@ -90,9 +97,10 @@ export interface YaBridge {
   chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
   revokeFolder(botId: string): Promise<FolderAccess>;
   selectBot(botId: string): Promise<FolderAccess>;
+  restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(botId: string, path?: string): Promise<Array<{ path: string; type: string }>>;
+  workspaceEntries(botId: string, path?: string): Promise<WorkspaceListing>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   loginDeepSeek(): Promise<AppState>;

@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync, renameSync, rmSync } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
-import { dirname, isAbsolute, join } from "node:path";
-import { ModelConfig, dataHome, BOT_PERMISSIONS_DIR, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { FolderGrants } from "./folder-grants";
+import { dirname, join } from "node:path";
+import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
@@ -35,7 +35,7 @@ import {
 import type { BotProfile, ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
-import type { FolderAccess } from "./shared";
+import type { FolderAccess, WorkspaceListing } from "./shared";
 import { loadAccountCredential, type DeepSeekCredential } from "../credentials";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
@@ -84,22 +84,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-interface FolderGrant {
-  path: string;
-  identity: string;
-}
-
-function directoryIdentity(path: string): string | undefined {
-  try {
-    if (realpathSync(path) !== path) return undefined;
-    const stat = statSync(path, { bigint: true });
-    if (!stat.isDirectory() || stat.ino === 0n) return undefined;
-    return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
-  } catch {
-    return undefined;
-  }
-}
-
 export function loadPreferences(): GuiPreferences {
   const path = preferencesPath();
   if (!existsSync(path)) return { language: "en", stream: true };
@@ -124,6 +108,7 @@ export function savePreferences(language: Language, stream = true): void {
 }
 
 export class GuiController {
+  private readonly grants = new FolderGrants();
   private pendingPrune?: { ids: string[]; includeCandidates: boolean };
   config: ModelConfig;
   language: Language;
@@ -151,56 +136,29 @@ export class GuiController {
     this.persistPreferences();
   }
 
-  private grantPath(botId: string): string {
-    return join(dataHome(), BOT_PERMISSIONS_DIR, createHash("sha256").update(botId).digest("hex"));
-  }
-
   assertActiveBot(botId: unknown): asserts botId is string {
     if (typeof botId !== "string" || !botId || botId !== this.activeBotId) throw new Error("Select this bot first.");
   }
 
-  private readFolderGrant(): FolderGrant | undefined {
-    if (!this.activeBotId) return undefined;
-    try {
-      const grant: unknown = JSON.parse(readFileSync(this.grantPath(this.activeBotId), "utf8"));
-      if (!isRecord(grant) || typeof grant.path !== "string" || !isAbsolute(grant.path)
-        || typeof grant.identity !== "string") return undefined;
-      return { path: grant.path, identity: grant.identity };
-    } catch {
-      return undefined;
-    }
-  }
-
   folderAccess(): FolderAccess {
-    const grant = this.readFolderGrant();
+    const grant = this.activeBotId ? this.grants.read(this.activeBotId) : undefined;
     return {
       workspace: grant?.path,
-      validWorkspace: grant && directoryIdentity(grant.path) === grant.identity ? grant.path : undefined,
+      folderSessionOnly: grant?.identity.startsWith("session:") ?? false,
+      validWorkspace: this.activeBotId && grant && this.grants.matches(this.activeBotId, grant) ? grant.path : undefined,
     };
   }
 
   grantFolder(botId: string, folder: string): FolderAccess {
     this.assertActiveBot(botId);
-    const physical = realpathSync(folder);
-    const identity = directoryIdentity(physical);
-    if (!identity) throw new Error("Choose a folder with a verifiable filesystem identity.");
-    const path = this.grantPath(botId);
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    const temp = path + "." + randomUUID();
-    try {
-      writeFileSync(temp, JSON.stringify({ path: physical, identity }), { mode: 0o600, flag: "wx" });
-      renameSync(temp, path);
-    } catch (error) {
-      rmSync(temp, { force: true });
-      throw error;
-    }
-    return { workspace: physical, validWorkspace: physical };
+    const grant = this.grants.grant(botId, folder);
+    return { workspace: grant.path, validWorkspace: grant.path, folderSessionOnly: grant.identity.startsWith("session:") };
   }
 
   revokeFolder(botId: string): FolderAccess {
     this.assertActiveBot(botId);
-    rmSync(this.grantPath(botId), { force: true });
-    return { workspace: undefined, validWorkspace: undefined };
+    this.grants.revoke(botId);
+    return { workspace: undefined, validWorkspace: undefined, folderSessionOnly: false };
   }
 
   setStream(enabled: boolean): void {
@@ -283,17 +241,16 @@ export class GuiController {
     return selectRelevantCards(task);
   }
 
-  private workspaceForBot(botId: string | undefined, callbacks: GuiRunCallbacks = {}): LocalWorkspace | undefined {
+  private workspaceForBot(botId: string | undefined, callbacks: GuiRunCallbacks = {}, grant = botId ? this.grants.read(botId) : undefined): LocalWorkspace | undefined {
     this.assertActiveBot(botId);
-    const grant = this.readFolderGrant();
-    if (!grant || directoryIdentity(grant.path) !== grant.identity) return undefined;
+    if (!grant || !this.grants.matches(botId, grant)) return undefined;
     const workspace = new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
       signal: callbacks.signal,
       onFileChange: callbacks.onFileChange,
       assertAccess: () => {
         this.assertActiveBot(botId);
-        const current = this.readFolderGrant();
-        if (current?.path !== grant.path || current.identity !== grant.identity || directoryIdentity(grant.path) !== grant.identity) {
+        const current = this.grants.read(botId);
+        if (current?.path !== grant.path || current.identity !== grant.identity || !this.grants.matches(botId, grant)) {
           throw new Error("Folder access has changed.");
         }
       },
@@ -301,12 +258,19 @@ export class GuiController {
     return workspace.root === grant.path ? workspace : undefined;
   }
 
-  workspaceEntries(botId: string, path = "."): Array<{ path: string; type: string }> {
-    const workspace = this.workspaceForBot(botId);
-    if (!workspace) return [];
-    const payload = JSON.parse(workspace.list({ path })) as unknown;
-    if (!isRecord(payload) || !Array.isArray(payload.entries)) return [];
-    return payload.entries.filter(isRecord).map((entry) => ({ path: String(entry.path), type: String(entry.type) }));
+  workspaceEntries(botId: string, path = "."): WorkspaceListing {
+    const grant = this.grants.read(botId);
+    const workspace = this.workspaceForBot(botId, {}, grant);
+    const access = { workspace: grant?.path, validWorkspace: workspace?.root, folderSessionOnly: grant?.identity.startsWith("session:") ?? false };
+    if (!workspace) return { access, entries: [] };
+    try {
+      const payload = JSON.parse(workspace.list({ path })) as { entries: Array<{ path: string; type: string }> };
+      return { access, entries: payload.entries };
+    } catch (error) {
+      const access = this.folderAccess();
+      if (!access.validWorkspace) return { access, entries: [] };
+      throw error;
+    }
   }
 
   createMemory(text: string, evidence: string, kind: MemoryKind): MemoryCard {

@@ -316,9 +316,9 @@ Each preview retains at most 2,000 lines and 128K characters. Larger previews ar
 
 Use **New bot** (Ctrl/⌘+N) to choose a name and optional standing instructions, such as “Review patches and suggest a regression test.” The bot receives this profile with every request. Use **Edit bot** in the chat header to change it. Existing sessions appear as individual bots with their original titles and history. Untitled sessions open as **Ya**.
 
-Every bot starts with no local directory access, including bots imported from older sessions. Open **Files → Choose folder…** and confirm **Grant access** to give the current bot access to one folder and its subfolders. This grant persists across restarts. Pick another folder to replace the grant or use **Revoke access** to remove it. File changes still require approval. Desktop bots use scoped file tools. Shell execution is available through the CLI. Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, web search, ToA, and image-detail controls.
+Every bot starts with no local directory access, including bots imported from older sessions. Open **Files → Choose folder…** and confirm **Grant access** to give the current bot access to one folder and its subfolders. Ya restores the grant across restarts when the filesystem supplies a persistent directory identifier. On other filesystems, the Files panel prompts you to choose the folder again after restarting. Pick another folder to replace the grant or use **Revoke access** to remove it. File changes still require approval. Desktop bots use scoped file tools. Shell execution is available through the CLI. Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, web search, ToA, and image-detail controls.
 
-Saved transcripts and drafts remain accessible if a bot’s folder is moved or deleted. If another folder or volume takes its place, choose the folder again to enable local tools. Older grants that recorded only a path also require a new selection. Reloading the desktop during a task cancels it and waits for it to stop before enabling bot navigation.
+Saved transcripts and drafts remain accessible if a bot’s folder is moved or deleted. If another folder or volume takes its place, choose the folder again to enable local tools. Older grants based on a path or creation time also require a new selection. Reloading the desktop during a task cancels it and waits for it to stop before enabling bot navigation.
 
 It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 
@@ -327,7 +327,7 @@ The application does not start a local web server. The renderer cannot access No
 ## Development
 
 The shared core, CLI, and Electron desktop application are written in TypeScript.
-Development requires Node.js 22 or later:
+Development requires Node.js 22 or later. Desktop builds and tests also use CMake 3.15+ and a C compiler to build the bundled directory-identity helper.
 
 ```sh
 npm ci

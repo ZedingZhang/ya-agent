@@ -24,6 +24,7 @@ const bridge: YaBridge = {
   chooseWorkspace: (botId) => ipcRenderer.invoke("workspace:choose", botId),
   revokeFolder: (botId) => ipcRenderer.invoke("workspace:revoke", botId),
   selectBot: (botId) => ipcRenderer.invoke("bot:select", botId),
+  restoreBotIds: (ids) => ipcRenderer.invoke("bot:restore-ids", ids),
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   clearImages: () => ipcRenderer.invoke("images:clear"),
   workspaceEntries: (botId, path = ".") => ipcRenderer.invoke("workspace:entries", botId, path),

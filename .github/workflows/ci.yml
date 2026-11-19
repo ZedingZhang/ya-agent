@@ -48,6 +48,14 @@ jobs:
       - name: Check types, tests, and production build
         run: npm run check
 
+      - name: Verify native folder identity on the runner volume
+        shell: bash
+        run: |
+          helper=./dist/gui-native/ya-folder-identity
+          id=$("$helper" grant .)
+          test -n "$id"
+          test "$id" = "$("$helper" check .)"
+
       - name: Check CLI entry point
         run: node dist/typescript/cli.js --help
 

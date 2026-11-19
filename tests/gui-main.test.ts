@@ -383,6 +383,20 @@ describe("GUI pending action lifecycle", () => {
     }
   });
 
+  it("restores invalid or duplicate history IDs with fresh selectable bot identities", () => {
+    const restore = mocks.handlers.get("bot:restore-ids")!;
+    const select = mocks.handlers.get("bot:select")!;
+    const saved = ["existing", "", "   ", " padded ", "a".repeat(129), "bad\ncontrol", "existing", null];
+    const ids = restore(event, saved) as string[];
+    expect(ids[0]).toBe("existing");
+    expect(new Set(ids).size).toBe(saved.length);
+    for (const id of ids.slice(1)) {
+      expect(id).toMatch(/^[a-f0-9-]{36}$/u);
+      expect(() => select(event, id)).not.toThrow();
+    }
+    expect(restore(event, ids)).toEqual(ids);
+  });
+
   it("validates and forwards an originating session ID at the task IPC boundary", async () => {
     mocks.run.mockResolvedValue("done");
     await mocks.handlers.get("task:run")!(event, { ...options, sessionId: " session-123 " });
