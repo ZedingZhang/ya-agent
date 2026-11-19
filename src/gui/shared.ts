@@ -22,6 +22,7 @@ export interface AppState {
   workspace?: string;
   validWorkspace?: string;
   folderSessionOnly?: boolean;
+  folderGrantVersion?: string;
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -33,6 +34,7 @@ export interface AppState {
 }
 
 export interface FolderAccess {
+  folderGrantVersion: string | undefined;
   folderSessionOnly: boolean;
   workspace: string | undefined;
   validWorkspace: string | undefined;
@@ -68,6 +70,7 @@ export interface RendererTaskOptions {
   toaWorkers: 1 | 2;
   stream: boolean;
   local: boolean;
+  folderGrantVersion?: string;
   exec?: boolean;
   imageIds: string[];
   imageDetail: ImageDetail;
@@ -81,6 +84,7 @@ export interface SelectedImage {
 }
 
 export type TaskEvent =
+  | { type: "started" }
   | { type: "content"; content: string }
   | { type: "activity"; activity: LocalActivity }
   | { type: "command"; event: CommandEvent }
@@ -100,13 +104,13 @@ export interface YaBridge {
   restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(botId: string, path?: string): Promise<WorkspaceListing>;
+  workspaceEntries(botId: string, path: string, folderGrantVersion?: string): Promise<WorkspaceListing>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   loginDeepSeek(): Promise<AppState>;
   cancelDeepSeekLogin(): Promise<void>;
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
-  runTask(options: RendererTaskOptions): Promise<RunResult>;
+  runTask(options: RendererTaskOptions): Promise<RunResult | { folderAccessChanged: FolderAccess }>;
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;

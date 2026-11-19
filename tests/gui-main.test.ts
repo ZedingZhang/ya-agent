@@ -386,9 +386,10 @@ describe("GUI pending action lifecycle", () => {
   it("restores invalid or duplicate history IDs with fresh selectable bot identities", () => {
     const restore = mocks.handlers.get("bot:restore-ids")!;
     const select = mocks.handlers.get("bot:select")!;
-    const saved = ["existing", "", "   ", " padded ", "a".repeat(129), "bad\ncontrol", "existing", null];
+    const saved = ["unique", "existing", "", "   ", " padded ", "a".repeat(129), "bad\ncontrol", "existing", null];
     const ids = restore(event, saved) as string[];
-    expect(ids[0]).toBe("existing");
+    expect(ids[0]).toBe("unique");
+    expect(ids).not.toContain("existing");
     expect(new Set(ids).size).toBe(saved.length);
     for (const id of ids.slice(1)) {
       expect(id).toMatch(/^[a-f0-9-]{36}$/u);

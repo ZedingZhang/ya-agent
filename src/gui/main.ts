@@ -34,6 +34,7 @@ import { search } from "../web";
 import { loginDeepSeek, logoutDeepSeek } from "../account";
 import { accountCredentialPath, clearAccountCredential, loadAccountCredential, type DeepSeekCredential } from "../credentials";
 import { GuiController, LANGUAGES, type Language } from "./controller";
+import { FolderAccessChangedError } from "./folder-grants";
 import { initialWindowGeometry } from "./layout";
 import { installApplicationMenu } from "./menu";
 import type {
@@ -196,6 +197,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     toaWorkers: workers,
     stream: Boolean(value.stream),
     local: Boolean(value.local),
+    folderGrantVersion: typeof value.folderGrantVersion === "string" ? value.folderGrantVersion : undefined,
     imageIds,
     imageDetail,
   };
@@ -265,12 +267,11 @@ function registerIpc(): void {
   ipcMain.handle("bot:restore-ids", (event, ids: unknown) => {
     assertTrustedSender(event);
     if (!Array.isArray(ids)) throw new Error("Invalid bot history.");
-    const seen = new Set<string>();
-    return ids.map((id: unknown) => {
-      const restored = validBotId(id) && !seen.has(id) ? id : randomUUID();
-      seen.add(restored);
-      return restored;
-    });
+    const counts = new Map<string, number>();
+    for (const id of ids) {
+      if (validBotId(id)) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    return ids.map((id: unknown) => validBotId(id) && counts.get(id) === 1 ? id : randomUUID());
   });
 
   ipcMain.handle("workspace:revoke", (event, botId: unknown) => {
@@ -280,10 +281,10 @@ function registerIpc(): void {
     return controller.revokeFolder(botId);
   });
 
-  ipcMain.handle("workspace:entries", (event, botId: unknown, path: unknown) => {
+  ipcMain.handle("workspace:entries", (event, botId: unknown, path: unknown, version: unknown) => {
     assertTrustedSender(event);
     controller.assertActiveBot(botId);
-    return controller.workspaceEntries(botId, typeof path === "string" ? path : ".");
+    return controller.workspaceEntries(botId, typeof path === "string" ? path : ".", typeof version === "string" ? version : undefined);
   });
 
   ipcMain.handle("workspace:model-selection", (event, raw: unknown) => {
@@ -376,15 +377,6 @@ function registerIpc(): void {
     if (activeLoginPromise) throw new Error("Finish or cancel DeepSeek sign-in before starting a task.");
     if (taskRunning) throw new Error("A task is already running.");
     const options = validateTaskOptions(raw);
-    if (options.imageIds.length > 0 && !isVisionModel(controller.config.model)) {
-      throw new Error(`Image input requires model ${VALID_MODELS.flash}.`);
-    }
-    const files = options.imageIds.map((id) => {
-      const file = selectedImages.get(id);
-      if (!file) throw new Error("An image selection is no longer available. Choose the image again.");
-      return file;
-    });
-    const images = imageContentPartsFromFiles(files, options.imageDetail);
     taskRunning = true;
     const taskController = new AbortController();
     activeTaskController = taskController;
@@ -392,8 +384,23 @@ function registerIpc(): void {
       if (!taskController.signal.aborted) sendTaskEvent(value);
     };
     try {
-      activeTaskPromise = controller.run({ ...options, images }, {
+      activeTaskPromise = controller.run(options, {
         signal: taskController.signal,
+        loadImages: () => {
+          if (options.imageIds.length && !isVisionModel(controller.config.model)) {
+            throw new Error(`Image input requires model ${VALID_MODELS.flash}.`);
+          }
+          const files = options.imageIds.map((id) => {
+            const file = selectedImages.get(id);
+            if (!file) throw new Error("An image selection is no longer available. Choose the image again.");
+            return file;
+          });
+          return imageContentPartsFromFiles(files, options.imageDetail);
+        },
+        onStarted: () => {
+          for (const id of options.imageIds) selectedImages.delete(id);
+          send({ type: "started" });
+        },
         onContent: (content) => send({ type: "content", content }),
         onLocalActivity: (activity) => send({ type: "activity", activity }),
         onCommandEvent: (commandEvent) => send({ type: "command", event: commandEvent }),
@@ -422,12 +429,14 @@ function registerIpc(): void {
         }),
       });
       return await activeTaskPromise;
+    } catch (error) {
+      if (error instanceof FolderAccessChangedError) return { folderAccessChanged: error.access };
+      throw error;
     } finally {
       activeTaskPromise = undefined;
       activeTaskController = undefined;
       rejectPendingActions(new Error("Task ended."));
       taskRunning = false;
-      for (const id of options.imageIds) selectedImages.delete(id);
     }
   });
 
@@ -1333,31 +1342,66 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
     persistSessions();
     return { originalId, archivedId: currentBot.id };
   })()`) as { originalId: string; archivedId: string };
-  controller.grantFolder(fixture.archivedId, directory);
-  await window.webContents.executeJavaScript(`selectBot(currentBot)`);
-  rmdirSync(directory);
-  const originalRun = controller.run;
+  const originalController = controller;
+  const originalPicker = dialog.showOpenDialog;
+  let chatCalls = 0;
+  controller = new GuiController(async (_key, _task, _config, options) => {
+    if (options?.localWorkspace || options?.images?.length !== 1) throw new Error("Expected ordinary chat with the attached image.");
+    chatCalls++;
+    return { content: "Ordinary chat reply", mode: "single", usage: {} };
+  });
+  controller.activeBotId = fixture.archivedId;
+  controller.setSessionApiKey("smoke-only-key");
+  const replacement = join(root, "replacement-folder");
+  const note = join(replacement, "new-root.txt");
+  const picture = join(root, "fixture.png");
+  writeFileSync(picture, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64"));
   try {
-    controller.run = async (options) => {
-      if (options.local) throw new Error("The offline folder was still enabled.");
-      return { content: "Ordinary chat reply", mode: "single", usage: {} };
-    };
+    mkdirSync(join(directory, "nested"));
+    mkdirSync(replacement);
+    writeFileSync(note, "new root");
+    controller.grantFolder(fixture.archivedId, directory);
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [picture] });
+    await window.webContents.executeJavaScript(`(async () => {
+      await selectBot(currentBot);
+      currentDirectory = 'nested';
+      await renderFiles();
+      await chooseImages();
+    })()`);
+    const grant = controller.grantFolder(fixture.archivedId, replacement);
+    const held = await window.webContents.executeJavaScript(`(async () => {
+      const before = currentBot.turns.length;
+      // A background state refresh can see the new grant before the folder label does.
+      state = await bridge.state();
+      await runTask();
+      return currentBot.turns.length === before && currentBot.draft === 'Saved draft'
+        && document.querySelector('#task-input').value === 'Saved draft' && selectedImages.length === 1
+        && state.validWorkspace === ${JSON.stringify(grant.validWorkspace)} && currentDirectory === '.'
+        && document.querySelector('#file-list').textContent.includes('new-root.txt');
+    })()`);
+    if (!held) throw new Error("A changed grant used the wrong folder, consumed the draft, or stranded the file browser.");
+    rmSync(note);
+    rmdirSync(replacement);
     const refreshed = await window.webContents.executeJavaScript(`(async () => {
       const local = document.querySelector('#local-enabled');
       if (!local.checked) return false;
-      await renderFiles();
+      const before = currentBot.turns.length;
+      const confirm = window.confirm;
+      let asked = false;
+      try {
+        window.confirm = (message) => { asked = message === t('chatWithoutFolder'); return asked; };
+        await runTask();
+      } finally { window.confirm = confirm; }
+      if (!asked || currentBot.turns.length !== before + 1 || currentBot.turns.at(-1)?.answer !== 'Ordinary chat reply') return false;
       if (state.validWorkspace || !document.querySelector('#file-list').textContent.includes(t('folderMissing'))) return false;
       await saveWorkspaceModelSelection();
       if (!local.disabled || local.checked || document.querySelector('#send-button').disabled) return false;
       const input = document.querySelector('#task-input');
-      input.value = 'Continue without files';
-      await runTask();
       input.value = 'Saved draft';
       input.dispatchEvent(new Event('input'));
-      return currentBot.turns.at(-1)?.answer === 'Ordinary chat reply';
+      return true;
     })()`);
-    if (!refreshed) throw new Error("An offline directory blocked the ordinary chat composer.");
-    controller.run = originalRun;
+    if (!refreshed || chatCalls !== 1) throw new Error("An offline directory blocked the ordinary chat or consumed the attachment.");
     await window.loadFile(rendererFile);
     await verifyRenderer(window);
     const startup = await window.webContents.executeJavaScript(`currentBot.id === '${fixture.archivedId}'
@@ -1382,8 +1426,9 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
       && currentBot.draft === 'Saved draft' && !state.validWorkspace`) as boolean;
     if (!reopened) throw new Error("Unavailable-folder selection or draft was lost after reload.");
   } finally {
-    controller.run = originalRun;
+    dialog.showOpenDialog = originalPicker;
     controller.revokeFolder(fixture.archivedId);
+    controller = originalController;
     await window.webContents.executeJavaScript(`(async () => {
       state = await bridge.state();
       bots = bots.filter((session) => session.id !== '${fixture.archivedId}');
@@ -1392,7 +1437,7 @@ async function verifyUnavailableHistory(window: BrowserWindow, root: string): Pr
   }
 }
 
-async function verifyBotIdRecovery(window: BrowserWindow): Promise<void> {
+async function verifyBotIdRecovery(window: BrowserWindow, root: string): Promise<void> {
   const originalId = await window.webContents.executeJavaScript(`(() => {
     const original = currentBot.id;
     currentBot = createBot({ title: 'Recovered bot', instructions: 'Keep the draft' });
@@ -1408,16 +1453,30 @@ async function verifyBotIdRecovery(window: BrowserWindow): Promise<void> {
   if (!validBotId(repaired)) throw new Error("The active bot's invalid ID prevented history recovery.");
   await window.loadFile(rendererFile);
   await verifyRenderer(window);
-  const stable = await window.webContents.executeJavaScript(`(async () => {
-    if (currentBot.id !== ${JSON.stringify(repaired)}) return false;
+  if (await window.webContents.executeJavaScript("currentBot.id") !== repaired) throw new Error("The repaired ID was not saved.");
+  controller.grantFolder(repaired, root);
+  await window.webContents.executeJavaScript(`(() => {
+    const copy = createBot({ title: 'Second recovered bot', instructions: '' });
+    copy.id = currentBot.id;
+    copy.draft = 'Second draft';
+    persistSessions();
+  })()`);
+  await window.loadFile(rendererFile);
+  await verifyRenderer(window);
+  const recovered = await window.webContents.executeJavaScript(`(async () => {
+    for (const [title, draft] of [['Recovered bot', 'Draft to recover'], ['Second recovered bot', 'Second draft']]) {
+      const bot = bots.find((entry) => entry.title === title);
+      if (!bot || bot.id === ${JSON.stringify(repaired)}) return false;
+      await selectBot(bot);
+      if (state.workspace || document.querySelector('#task-input').value !== draft) return false;
+    }
     const original = bots.find((bot) => bot.id === ${JSON.stringify(originalId)});
-    if (!original) return false;
     await selectBot(original);
-    bots = bots.filter((bot) => bot.id !== ${JSON.stringify(repaired)});
+    bots = bots.filter((bot) => !['Recovered bot', 'Second recovered bot'].includes(bot.title));
     persistSessions();
     return currentBot === original;
   })()`);
-  if (!stable) throw new Error("Repairing a bot ID lost another bot or failed to persist the new ID.");
+  if (!recovered) throw new Error("Restoring duplicate IDs lost a draft or assigned the old folder grant.");
 }
 
 async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
@@ -1595,7 +1654,7 @@ app.whenReady().then(async () => {
     await verifyApplicationMenu(window);
     await verifyBotNavigation(window, smokeRoot!);
     await verifyUnavailableHistory(window, smokeRoot!);
-    await verifyBotIdRecovery(window);
+    await verifyBotIdRecovery(window, smokeRoot!);
     await verifyTaskHistory(window);
     await verifyApprovalLifecycle(window);
     await verifyConversationContext(window);

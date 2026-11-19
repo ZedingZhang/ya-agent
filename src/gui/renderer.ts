@@ -27,6 +27,7 @@ interface AppState {
   workspace?: string;
   validWorkspace?: string;
   folderSessionOnly?: boolean;
+  folderGrantVersion?: string;
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -60,14 +61,7 @@ type FileChange = import("../file-diff").FileChange;
 type ConversationMessage = import("../types").ConversationMessage;
 type FolderAccess = import("./shared").FolderAccess;
 
-type TaskEvent =
-  | { type: "content"; content: string }
-  | { type: "activity"; activity: LocalActivity }
-  | { type: "command"; event: ShellCommandEvent }
-  | { type: "file-change"; change: FileChange }
-  | { type: "local-action"; id: string; action: LocalAction }
-  | { type: "local-action-expired"; id: string }
-  | { type: "local-action-resolved"; id: string };
+type TaskEvent = import("./shared").TaskEvent;
 
 type ShellCommandEvent =
   | { type: "start"; id: string; command: string; cwd: string }
@@ -78,14 +72,6 @@ type ShellCommandEvent =
     stdoutTruncated: boolean; stderrTruncated: boolean; error?: string;
   } };
 
-interface RunResult {
-  taskId?: string;
-  content: string;
-  mode: "single" | "toa";
-  usage: Record<string, unknown>;
-  partial?: boolean;
-}
-
 interface YaRendererBridge {
   state(): Promise<AppState>;
   chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
@@ -94,7 +80,7 @@ interface YaRendererBridge {
   restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(botId: string, path?: string): Promise<import("./shared").WorkspaceListing>;
+  workspaceEntries(botId: string, path: string, folderGrantVersion?: string): Promise<import("./shared").WorkspaceListing>;
   saveWorkspaceModelSelection(selection: {
     model: AppState["config"]["model"];
     reasoningEffort: AppState["config"]["reasoningEffort"];
@@ -103,7 +89,7 @@ interface YaRendererBridge {
   loginDeepSeek(): Promise<AppState>;
   cancelDeepSeekLogin(): Promise<void>;
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
-  runTask(options: Record<string, unknown>): Promise<RunResult>;
+  runTask: import("./shared").YaBridge["runTask"];
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number | null }>>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
@@ -124,6 +110,7 @@ const TEXT = {
     editBot: "Edit bot", botName: "Name", botNameRequired: "Enter a bot name.", botInstructions: "Instructions (optional)",
     createBot: "Create bot", saveBot: "Save changes", cancel: "Cancel",
     welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
+    folderChanged: "Folder access changed to {folder}. Review it and send again.", chatWithoutFolder: "Folder unavailable. Send this message without local tools?",
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", allowedFolder: "Allowed folder", folderMissing: "Folder unavailable", chooseFolder: "Choose folder…", revokeFolder: "Revoke access", choose: "Choose…", refresh: "Refresh",
@@ -163,6 +150,7 @@ const TEXT = {
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
   },
   "zh-CN": {
+    folderChanged: "授权目录已变更为 {folder}。请核对后重新发送。", chatWithoutFolder: "目录不可用。要关闭本地工具并发送这条消息吗？",
     newBot: "新建 Bot", conversations: "Bot", sessionFolder: "重启 Ya 后需要重新选择此文件夹。",
     editBot: "编辑 Bot", botName: "名称", botNameRequired: "请输入 Bot 名称。", botInstructions: "职责说明（可选）",
     createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
@@ -209,7 +197,10 @@ const TEXT = {
 
 type TextKey = keyof typeof TEXT.en;
 let state: AppState;
+let displayedGrantVersion: string | undefined;
 let currentDirectory = ".";
+let directoryGrantVersion: string | undefined;
+let onTaskStarted: (() => void) | undefined;
 let activeAnswer: HTMLElement | undefined;
 let activeAnswerText = "";
 let pendingAction: { id: string; action: LocalAction; responding?: boolean } | undefined;
@@ -337,6 +328,7 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
 }
 
 function renderWorkspaceLabel(): void {
+  displayedGrantVersion = state.folderGrantVersion;
   const label = element<HTMLDivElement>("workspace-path");
   label.textContent = state.workspace ?? "";
   label.title = label.textContent;
@@ -705,18 +697,19 @@ async function renderFiles(): Promise<void> {
   const request = ++fileRequest;
   const botId = currentBot.id;
   const directory = currentDirectory;
-  const workspace = state.validWorkspace;
+  const expectedVersion = directory === "." ? state.folderGrantVersion : directoryGrantVersion;
   const list = element<HTMLDivElement>("file-list");
   const breadcrumb = element<HTMLDivElement>("file-location");
   list.replaceChildren();
   breadcrumb.textContent = currentDirectory;
   try {
-    const { access, entries } = await bridge.workspaceEntries(botId, directory);
+    const { access, entries } = await bridge.workspaceEntries(botId, directory, expectedVersion);
     if (request !== fileRequest || botId !== currentBot.id || directory !== currentDirectory) return;
     Object.assign(state, access);
     syncWorkspaceControls();
     if (!access.validWorkspace) return;
-    if (workspace !== access.validWorkspace && directory !== ".") {
+    directoryGrantVersion = access.folderGrantVersion;
+    if (expectedVersion !== access.folderGrantVersion) {
       currentDirectory = ".";
       return renderFiles();
     }
@@ -803,11 +796,8 @@ async function runTask(): Promise<void> {
     return;
   }
   const local = element<HTMLInputElement>("local-enabled").checked;
+  const folderGrantVersion = local ? displayedGrantVersion : undefined;
   const toa = element<HTMLInputElement>("toa-enabled").checked;
-  if (local && !state.validWorkspace) {
-    setStatus(t("noWorkspace"), "error");
-    return;
-  }
   if (local && toa) {
     setStatus(`${t("taskError")}: Local workspace mode cannot be used with Tree of Agents.`, "error");
     return;
@@ -829,64 +819,94 @@ async function runTask(): Promise<void> {
     if (turn.status === "complete" && turn.answer) messages.push({ role: "assistant", content: turn.answer });
     return messages;
   });
-  input.value = "";
-  resizeTaskInput();
-  currentBot.draft = "";
-  currentBot.updatedAt = Date.now();
-  activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
-  currentBot.turns.push(activeTurn);
-  activeAnswer = appendTask(task, taskImages);
-  activeAnswerText = "";
-  lastAnswer = "";
-  actionExpired = false;
-  activities = [];
-  currentBot.activities = activities;
-  commandLogs.clear();
-  pendingAction = undefined;
-  renderPendingAction();
-  renderActivities();
+  // Commit the draft and its attachments only after the main process accepts the task.
+  const beginTurn = () => {
+    if (activeTurn && activeAnswer) return { turn: activeTurn, answer: activeAnswer };
+    input.value = "";
+    resizeTaskInput();
+    currentBot.draft = "";
+    currentBot.updatedAt = Date.now();
+    activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
+    currentBot.turns.push(activeTurn);
+    activeAnswer = appendTask(task, taskImages);
+    activeAnswerText = "";
+    lastAnswer = "";
+    actionExpired = false;
+    activities = [];
+    currentBot.activities = activities;
+    commandLogs.clear();
+    pendingAction = undefined;
+    renderPendingAction();
+    renderActivities();
+    renderPageTitle();
+    persistSessions();
+    element<HTMLDetailsElement>("task-options").open = false;
+    void renderRelevant(task);
+    setStatus(t("working"), "busy");
+    return { turn: activeTurn, answer: activeAnswer };
+  };
+  onTaskStarted = beginTurn;
   setRunning(true);
-  renderPageTitle();
-  persistSessions();
-  element<HTMLDetailsElement>("task-options").open = false;
-  void renderRelevant(task);
-  setStatus(t("working"), "busy");
   try {
-    const result = await bridge.runTask({
+    const options: import("./shared").RendererTaskOptions = {
       sessionId: currentBot.id,
       task,
       botProfile: { name: currentBot.title, instructions: currentBot.instructions },
       history,
-      webMode: element<HTMLSelectElement>("web-mode").value,
+      webMode: element<HTMLSelectElement>("web-mode").value as import("../types").WebMode,
       toa,
-      toaWorkers: Number(element<HTMLSelectElement>("toa-workers").value),
+      toaWorkers: element<HTMLSelectElement>("toa-workers").value === "1" ? 1 : 2,
       stream: state.stream,
       local,
       imageIds: taskImages.map((image) => image.id),
       imageDetail: element<HTMLSelectElement>("image-detail").value as ImageDetail,
-    });
-    if (result.taskId) activeTurn.taskId = result.taskId;
+      folderGrantVersion,
+    };
+    let result = await bridge.runTask(options);
+    if ("folderAccessChanged" in result) {
+      Object.assign(state, result.folderAccessChanged);
+      syncWorkspaceControls();
+      await renderFiles();
+      if (state.validWorkspace) {
+        setStatus(interpolate(t("folderChanged"), { folder: state.validWorkspace }));
+        return;
+      }
+      if (!window.confirm(t("chatWithoutFolder"))) {
+        setStatus(t("folderMissing"));
+        return;
+      }
+      result = await bridge.runTask({ ...options, local: false, folderGrantVersion: undefined });
+      if ("folderAccessChanged" in result) throw new Error("Unexpected folder check for an ordinary chat.");
+    }
+    const { turn, answer } = beginTurn();
+    if (result.taskId) turn.taskId = result.taskId;
     activeAnswerText = result.content;
-    activeTurn.answer = result.content;
-    activeTurn.status = "complete";
-    activeTurn.partial = result.partial;
+    turn.answer = result.content;
+    turn.status = "complete";
+    turn.partial = result.partial;
     lastAnswer = result.content;
-    activeAnswer.classList.remove("busy-answer");
-    renderMarkdown(activeAnswer, result.content);
+    answer.classList.remove("busy-answer");
+    renderMarkdown(answer, result.content);
     if (result.partial) {
       const warning = document.createElement("p");
       warning.className = "warning";
       warning.textContent = t("partial");
-      activeAnswer.append(warning);
+      answer.append(warning);
     }
     element<HTMLButtonElement>("learn-button").disabled = false;
     setStatus(t("done"));
   } catch (error) {
-    activeAnswer.classList.remove("busy-answer");
-    activeAnswer.classList.add("error-copy");
-    activeAnswer.textContent = `${t("taskError")}: ${errorText(error)}`;
-    activeTurn.answer = activeAnswer.textContent;
-    activeTurn.status = "error";
+    if (!activeTurn || !activeAnswer) {
+      setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+      return;
+    }
+    const turn = activeTurn;
+    const answer = activeAnswer;
+    answer.classList.remove("busy-answer");
+    answer.classList.add("error-copy");
+    answer.textContent = `${t("taskError")}: ${errorText(error)}`;
+    turn.answer = answer.textContent;
+    turn.status = "error";
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
     if (state.accountSignedIn) {
       try { state = await bridge.state(); fillSettings(); }
@@ -896,10 +916,13 @@ async function runTask(): Promise<void> {
   } finally {
     pendingAction = undefined;
     renderPendingAction();
+    onTaskStarted = undefined;
+    if (activeTurn) {
+      selectedImages = [];
+      void bridge.clearImages().catch(() => undefined);
+    }
     activeAnswer = undefined;
     activeTurn = undefined;
-    selectedImages = [];
-    void bridge.clearImages().catch(() => undefined);
     setRunning(false);
     persistSessions();
   }
@@ -1682,7 +1705,9 @@ function registerEvents(): void {
   element<HTMLButtonElement>("learn-button").addEventListener("click", learnFromAnswer);
 
   bridge.onTaskEvent((event) => {
-    if (event.type === "content" && activeAnswer) {
+    if (event.type === "started") {
+      onTaskStarted?.();
+    } else if (event.type === "content" && activeAnswer) {
       activeAnswerText += event.content;
       if (activeTurn) activeTurn.answer = activeAnswerText;
       activeAnswer.classList.remove("busy-answer");

@@ -27,7 +27,7 @@ const bridge: YaBridge = {
   restoreBotIds: (ids) => ipcRenderer.invoke("bot:restore-ids", ids),
   chooseImages: () => ipcRenderer.invoke("images:choose"),
   clearImages: () => ipcRenderer.invoke("images:clear"),
-  workspaceEntries: (botId, path = ".") => ipcRenderer.invoke("workspace:entries", botId, path),
+  workspaceEntries: (botId, path, folderGrantVersion) => ipcRenderer.invoke("workspace:entries", botId, path, folderGrantVersion),
   saveWorkspaceModelSelection: (selection: WorkspaceModelSelection) => ipcRenderer.invoke("workspace:model-selection", selection),
   saveSettings: (settings: SettingsUpdate) => ipcRenderer.invoke("settings:save", settings),
   loginDeepSeek: () => ipcRenderer.invoke("account:login"),

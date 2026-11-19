@@ -2,9 +2,17 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
+import type { FolderAccess } from "./shared";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
 
-interface FolderGrant {
+export class FolderAccessChangedError extends Error {
+  constructor(readonly access: FolderAccess) {
+    super("Folder access has changed.");
+  }
+}
+
+export interface FolderGrant {
+  version: string;
   path: string;
   identity: string;
 }
@@ -38,7 +46,10 @@ export class FolderGrants {
       const grant: unknown = JSON.parse(readFileSync(this.recordPath(botId), "utf8"));
       if (typeof grant === "object" && grant !== null && "path" in grant && "identity" in grant
         && typeof grant.path === "string" && isAbsolute(grant.path) && typeof grant.identity === "string") {
-        record = { path: grant.path, identity: grant.identity };
+        // Existing identity-bound grants predate per-selection versions.
+        const version = "version" in grant ? grant.version
+          : createHash("sha256").update(JSON.stringify([grant.path, grant.identity])).digest("hex");
+        if (typeof version === "string" && version) record = { path: grant.path, identity: grant.identity, version };
       }
     } catch {
       // Missing, malformed and legacy path-only records carry no authority.
@@ -80,12 +91,13 @@ export class FolderGrants {
         }
         identity = "session:" + randomUUID();
       }
+      const grant = { path, identity, version: randomUUID() };
       mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
-      writeFileSync(temp, JSON.stringify({ path, identity }), { mode: 0o600, flag: "wx" });
+      writeFileSync(temp, JSON.stringify(grant), { mode: 0o600, flag: "wx" });
       renameSync(temp, record);
       this.release(botId);
       if (fd !== undefined) this.pins.set(botId, { fd, identity });
-      return { path, identity };
+      return grant;
     } catch (error) {
       if (fd !== undefined) closeSync(fd);
       rmSync(temp, { force: true });
