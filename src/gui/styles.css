@@ -118,9 +118,11 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
   pointer-events: none;
   color: var(--success);
   stroke: none;
+  opacity: 0;
   animation: sprout-visit 5.7s ease-in-out both;
 }
 .sprout-shoot { fill: url(#sprout-dots); transform-origin: 274px 297px; animation: sprout-rise 2.8s ease-out both; }
+.home-sprout.code-fill { --sprout-opacity: .38; }
 .home-sprout.code-fill .sprout-shoot { fill: url(#sprout-code); }
 .home-sprout text { fill: currentColor; font: 9px ui-monospace, monospace; }
 .sprout-leaf-left { transform-origin: 260px 207px; animation: sprout-unfold-left 2.2s .35s ease-out both; }
@@ -128,7 +130,7 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 .sprout-ground { opacity: .55; }
 @keyframes sprout-visit {
   0%, 100% { opacity: 0; }
-  22%, 72% { opacity: .24; }
+  22%, 72% { opacity: var(--sprout-opacity, .24); }
 }
 @keyframes sprout-rise {
   from { transform: scale(.65, .08); }

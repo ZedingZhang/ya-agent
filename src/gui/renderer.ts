@@ -520,9 +520,14 @@ function renderNavigation(): void {
   element<HTMLButtonElement>("choose-workspace").disabled = disabled;
 }
 
+function setTimelineEmpty(empty: boolean): void {
+  const home = element<HTMLDivElement>("timeline-empty");
+  home.querySelector(".home-sprout")?.remove();
+  home.hidden = !empty;
+}
+
 function renderSession(): void {
   const timeline = element<HTMLDivElement>("timeline");
-  timeline.querySelector(".home-sprout")?.remove();
   timeline.querySelectorAll(".turn").forEach((turn) => turn.remove());
   commandLogs.clear();
   lastAnswer = "";
@@ -554,7 +559,7 @@ function renderSession(): void {
     for (const change of turn.changes ?? []) answer.parentElement?.append(fileChangeCard(change, true));
     activeAnswer = undefined;
   }
-  element<HTMLDivElement>("timeline-empty").hidden = currentSession.turns.length > 0;
+  setTimelineEmpty(currentSession.turns.length === 0);
   element<HTMLTextAreaElement>("task-input").value = currentSession.draft;
   resizeTaskInput();
   element<HTMLButtonElement>("learn-button").disabled = !lastAnswer;
@@ -787,7 +792,7 @@ function fileRow(name: string, type: string): HTMLButtonElement {
 
 function appendTask(task: string, images: SelectedImage[]): HTMLElement {
   const timeline = element<HTMLDivElement>("timeline");
-  element<HTMLDivElement>("timeline-empty").hidden = true;
+  setTimelineEmpty(false);
   const turn = document.createElement("article");
   turn.className = "turn";
   const prompt = document.createElement("div");
