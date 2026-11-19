@@ -405,7 +405,7 @@ export function listDirectory(path: string, displayPath: string): string {
   return JSON.stringify({ path: displayPath, entries, limited: allEntries.length > MAX_LIST_ENTRIES });
 }
 
-export function physicalWorkspacePath(root: string, input: string): string {
+export function physicalWorkspacePath(root: string, input: string, resolveAncestor: (path: string) => string = realpathSync): string {
   const candidate = resolve(root, input);
   let ancestor = candidate;
   // lstat sees dangling links; realpath below must reject them rather than
@@ -415,7 +415,7 @@ export function physicalWorkspacePath(root: string, input: string): string {
     if (parent === ancestor) break;
     ancestor = parent;
   }
-  const physicalAncestor = realpathSync(ancestor);
+  const physicalAncestor = resolveAncestor(ancestor);
   const physical = resolve(physicalAncestor, relative(ancestor, candidate));
   const fromRoot = relative(root, physical);
   if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {

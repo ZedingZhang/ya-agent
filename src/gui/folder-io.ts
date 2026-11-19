@@ -222,7 +222,7 @@ async function mutate(operation: Mutation, root: string, identityExecutable: str
   // path used for approval. Mutations can never operate on the granted root.
   const resolvePath = (submitted: string): string => {
     if (!submitted || parse(submitted).root || normalize(submitted).split(sep).includes("..")) throw new Error("Invalid workspace path.");
-    const physical = physicalWorkspacePath(root, submitted);
+    const physical = physicalWorkspacePath(root, submitted, realpathSync.native);
     if (isSensitive(join(root, submitted)) || isSensitive(physical)) throw new Error("Access to sensitive paths is blocked.");
     const path = relative(root, physical);
     if (!path) throw new Error("Cannot change the granted root directory.");
@@ -264,7 +264,8 @@ async function mutate(operation: Mutation, root: string, identityExecutable: str
 
 async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise<string> {
   const { botId, grant, operation, sessionDirectoryId, identityExecutable } = request;
-  let path = normalize(operation.path);
+  const displayPath = normalize(operation.path);
+  let path = displayPath;
   if (!operation.path || parse(path).root || path.split(sep).includes("..")) throw new Error("Invalid workspace path.");
 
   process.chdir(grant.path);
@@ -292,7 +293,7 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     }
     const root = realpathSync.native(".");
     if (operation.kind === "list" || operation.kind === "read" || operation.kind === "search") {
-      path = relative(root, physicalWorkspacePath(root, path)) || ".";
+      path = relative(root, physicalWorkspacePath(root, path, realpathSync.native)) || ".";
     }
     const verifyCwd = (directory: string): void => {
       const actual = realpathSync.native(".");
@@ -325,9 +326,9 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     check();
     if (isSensitive(file ? join(realpathSync.native("."), basename(path)) : realpathSync.native("."))) throw new Error("Access to sensitive paths is blocked.");
     switch (operation.kind) {
-      case "search": return searchFiles(path, operation.query, (entry) => entry, checkAccess, verifyCwd);
+      case "search": return searchFiles(path, operation.query, (entry) => join(displayPath, relative(path, entry)), checkAccess, verifyCwd);
       default: {
-        const result = file ? readRegularText(basename(path)) : listDirectory(".", path);
+        const result = file ? readRegularText(basename(path)) : listDirectory(".", displayPath);
         check();
         return result;
       }

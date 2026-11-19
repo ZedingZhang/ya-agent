@@ -1,11 +1,14 @@
 import { execFile, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { open, realpath, stat, type FileHandle } from "node:fs/promises";
+import { constants, mkdirSync, readFileSync, realpath, renameSync, rmSync, writeFileSync } from "node:fs";
+import { open, stat, type FileHandle } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
 import type { FolderAccess } from "./shared";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
+
+// Keep the spelling used by existing grants, including Windows short paths.
+const resolveGrantPath = promisify(realpath);
 
 export class FolderAccessChangedError extends Error {
   constructor(readonly access: FolderAccess) {
@@ -82,7 +85,7 @@ export class FolderGrants {
   }
 
   async grant(botId: string, folder: string, checkSelection?: () => void): Promise<FolderGrant> {
-    const path = await realpath(folder);
+    const path = await resolveGrantPath(folder);
     const record = this.recordPath(botId);
     const temp = record + "." + randomUUID();
     let handle: FileHandle | undefined;
@@ -93,7 +96,7 @@ export class FolderGrants {
         handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0));
         const held = await handle.stat({ bigint: true });
         const current = await stat(path, { bigint: true });
-        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await realpath(path) !== path) {
+        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await resolveGrantPath(path) !== path) {
           throw new Error("Choose a folder with a verifiable filesystem identity.");
         }
         identity = "session:" + randomUUID();
