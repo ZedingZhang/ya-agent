@@ -27,7 +27,6 @@ export interface AppState {
   accountSignedIn: boolean;
   accountError: boolean;
   config: SerializedConfig;
-  cards: MemoryCard[];
   auditLogCount: number;
   auditLogBytes: number;
 }
@@ -94,6 +93,7 @@ export interface YaBridge {
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask(options: RendererTaskOptions): Promise<RunResult>;
   cancelTask(): Promise<void>;
+  memoryCards(): Promise<MemoryCard[]>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;

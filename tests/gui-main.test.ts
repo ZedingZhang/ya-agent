@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   logout: vi.fn(),
   accountCredential: vi.fn(),
+  cards: vi.fn(),
   saveWorkspaceModelSelection: vi.fn(),
 }));
 
@@ -55,7 +56,7 @@ vi.mock("../src/gui/controller", () => ({
     auditLogTotalBytes() { return 0; }
     validWorkspace() { return undefined; }
     apiKey() { return mocks.accountCredential() ?? "test-key"; }
-    cards() { return []; }
+    cards = mocks.cards;
     run = mocks.run;
   },
 }));
@@ -79,6 +80,7 @@ describe("GUI pending action lifecycle", () => {
     mocks.login.mockReset().mockResolvedValue(undefined);
     mocks.logout.mockReset().mockResolvedValue(true);
     mocks.accountCredential.mockReset().mockReturnValue(undefined);
+    mocks.cards.mockReset().mockReturnValue([]);
     mocks.saveWorkspaceModelSelection.mockReset();
     mocks.run.mockReset().mockImplementation(async (_options, callbacks) => {
       await callbacks.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });
@@ -114,6 +116,25 @@ describe("GUI pending action lifecycle", () => {
     const state = await mocks.handlers.get("state:get")!(event);
     expect(state).toMatchObject({ accountSignedIn: false, accountError: true });
     expect(JSON.stringify(state)).not.toContain("private-credential-record");
+  });
+
+  it("keeps startup state independent of memory and retries card reads on demand", async () => {
+    mocks.cards.mockImplementation(() => { throw new Error("Octop Memory failed"); });
+    expect(await mocks.handlers.get("state:get")!(event)).toMatchObject({ config: { model: "deepseek-v4-pro" } });
+    expect(mocks.cards).not.toHaveBeenCalled();
+    const listCards = mocks.handlers.get("memory:cards")!;
+    expect(() => listCards(event)).toThrow("Octop Memory failed");
+
+    const card = { id: "saved-memory", status: "candidate" };
+    mocks.cards.mockReturnValue([card]);
+    expect(await listCards(event)).toEqual([card]);
+    expect(mocks.cards).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects memory card reads from an untrusted renderer", () => {
+    const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
+    expect(() => mocks.handlers.get("memory:cards")!(untrusted)).toThrow("Untrusted renderer request");
+    expect(mocks.cards).not.toHaveBeenCalled();
   });
 
   it.each(["login", "logout"])("can recover invalid account state through %s", async (action) => {

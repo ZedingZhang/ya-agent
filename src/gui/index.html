@@ -130,7 +130,9 @@
               <label class="check"><input id="include-candidates" type="checkbox"><span data-i18n="includeCandidates">Include candidates</span></label>
               <button id="memory-prune" class="danger" type="button" data-i18n="prune">Prune</button>
             </div>
-            <div id="memory-empty" class="empty">No local memory cards.</div>
+            <div id="memory-status" class="empty" role="status" hidden></div>
+            <button id="memory-retry" class="small-button" type="button" data-i18n="retryMemory" hidden>Retry memory</button>
+            <div id="memory-empty" class="empty" hidden>No local memory cards.</div>
             <div class="table-scroll">
               <table>
                 <thead><tr><th>ID</th><th data-i18n="status">Status</th><th data-i18n="kind">Kind</th><th data-i18n="text">Text</th><th data-i18n="evidence">Evidence</th><th data-i18n="actions">Actions</th></tr></thead>
