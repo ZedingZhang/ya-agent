@@ -253,6 +253,33 @@ describe("GUI pending action lifecycle", () => {
     await expect(task).resolves.toBe("cancelled");
   });
 
+  it.each([false, true])("keeps committed changes after Stop only in the originating document (reload=%s)", async (reload) => {
+    let finish!: () => void;
+    const committing = new Promise<void>((resolve) => { finish = resolve; });
+    const activity = { operation: "edit", paths: ["notes.txt"], status: "success" };
+    const change = { id: "edit", path: "notes.txt", operation: "edit", additions: 1, deletions: 1, hunks: [], truncated: false };
+    mocks.run.mockImplementation(async (_options, cb) => {
+      cb.onStarted();
+      await committing;
+      cb.onFileChange(change);
+      cb.onLocalActivity(activity);
+      cb.onContent("discard after stop");
+      cb.signal.throwIfAborted();
+    });
+    const task = start();
+    await mocks.handlers.get("task:cancel")!(event);
+    if (reload) sender.emit("did-start-loading");
+    finish();
+    await expect(task).rejects.toThrow("cancelled");
+    await mocks.handlers.get("task:flush")!(event, "done");
+    const events = sender.send.mock.calls.map((call: any[]) => call[1]);
+    expect(events).toEqual([
+      { type: "started" },
+      ...(reload ? [] : [{ type: "file-change", change }, { type: "activity", activity }]),
+      { type: "flush", id: "done" },
+    ]);
+  });
+
   it("rejects untrusted cancellation requests", async () => {
     const task = start();
     const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };

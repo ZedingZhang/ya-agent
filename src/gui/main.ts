@@ -52,6 +52,7 @@ app.setName("Ya");
 let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 let activeTaskController: AbortController | undefined;
+let rendererGeneration = 0;
 let folderBrowserRequest: AbortController | undefined;
 let folderSelectionRevision = 0;
 let activeTaskPromise: Promise<RunResult> | undefined;
@@ -125,6 +126,11 @@ function rejectPendingActions(error: Error): void {
 function cancelTask(error: Error): void {
   activeTaskController?.abort(error);
   rejectPendingActions(error);
+}
+
+function detachTaskRenderer(error: Error): void {
+  ++rendererGeneration;
+  cancelTask(error);
 }
 
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
@@ -406,8 +412,13 @@ function registerIpc(): void {
     taskRunning = true;
     const taskController = new AbortController();
     activeTaskController = taskController;
+    const taskRendererGeneration = rendererGeneration;
     const send = (value: TaskEvent): void => {
-      if (!taskController.signal.aborted) sendTaskEvent(value);
+      if (activeTaskController !== taskController || rendererGeneration !== taskRendererGeneration) return;
+      // Stop lets an already approved mutation finish. Its outcome still belongs to this turn.
+      const committed = value.type === "file-change" || (value.type === "activity"
+        && value.activity.status === "success" && ["write", "edit", "mkdir", "move"].includes(value.activity.operation));
+      if (!taskController.signal.aborted || committed) sendTaskEvent(value);
     };
     try {
       activeTaskPromise = controller.run(options, {
@@ -565,24 +576,24 @@ async function createWindow(show = true): Promise<BrowserWindow> {
     ++folderSelectionRevision;
     folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window reload."));
-    cancelTask(new Error("The renderer was reloaded while running a task."));
+    detachTaskRenderer(new Error("The renderer was reloaded while running a task."));
   });
   mainWindow.webContents.on("destroyed", () => {
     ++folderSelectionRevision;
     folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window close."));
-    cancelTask(new Error("The renderer was destroyed while running a task."));
+    detachTaskRenderer(new Error("The renderer was destroyed while running a task."));
   });
   mainWindow.webContents.on("render-process-gone", () => {
     ++folderSelectionRevision;
     folderBrowserRequest?.abort();
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by renderer exit."));
-    cancelTask(new Error("The renderer exited while running a task."));
+    detachTaskRenderer(new Error("The renderer exited while running a task."));
   });
   mainWindow.on("closed", () => {
     activeLoginController?.abort(new Error("DeepSeek sign-in cancelled by window close."));
     mainWindow = undefined;
-    cancelTask(new Error("The window was closed while running a task."));
+    detachTaskRenderer(new Error("The window was closed while running a task."));
     selectedImages.clear();
   });
   await mainWindow.loadFile(rendererFile);

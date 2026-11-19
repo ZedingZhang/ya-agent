@@ -1,7 +1,8 @@
-import { fork } from "node:child_process";
+import { ChildProcess, fork } from "node:child_process";
 import { once } from "node:events";
 import { basename, join, resolve } from "node:path";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { constants, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOT_PERMISSIONS_DIR, ModelConfig, loadConfig } from "../src/config";
 import {
@@ -14,7 +15,7 @@ import { FolderGrants, folderIdentityExecutable } from "../src/gui/folder-grants
 import { GrantedFolderIO } from "../src/gui/folder-io";
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
-import { appendAuditRecord } from "../src/local";
+import { appendAuditRecord, LocalWorkspace } from "../src/local";
 import { DeepSeekClient } from "../src/deepseek";
 import { TaskStore, runTask } from "../src/service";
 import type { ConversationMessage, UserImageContentPart } from "../src/types";
@@ -24,7 +25,12 @@ import { clearAccountCredential, saveAccountCredential } from "../src/credential
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   const { mockKeychain } = await import("./keychain-fixture");
-  return { ...actual, execFileSync: mockKeychain(actual.execFileSync) };
+  return { ...actual, fork: vi.fn(actual.fork), execFileSync: mockKeychain(actual.execFileSync) };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, open: vi.fn(fs.open) };
 });
 
 describe("GUI controller", () => {
@@ -67,6 +73,71 @@ describe("GUI controller", () => {
     restarted.revokeFolder("first");
     controller.activeBotId = "first";
     expect((await controller.folderAccess()).validWorkspace).toBeUndefined();
+  });
+
+  it("times out a stalled folder selection and discards its late identity", async () => {
+    let finish!: (identity: string) => void;
+    const identity = new Promise<string>((resolve) => { finish = resolve; });
+    const identify = vi.fn().mockReturnValueOnce("original").mockReturnValueOnce(identity);
+    const grants = new FolderGrants(identify);
+    const original = await grants.grant("bot", home.path);
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    try {
+      const selection = grants.grant("bot", home.path);
+      const outcome = selection.catch((reason: unknown) => reason);
+      await vi.waitFor(() => expect(identify).toHaveBeenCalledTimes(2));
+      const expired = new Error("Folder selection timed out");
+      deadline.abort(expired);
+      expect(await Promise.race([outcome, new Promise((r) => setImmediate(() => r("pending")))])).toBe(expired);
+      finish("late");
+      await new Promise((r) => setImmediate(r));
+      expect(grants.read("bot")).toEqual(original);
+    } finally {
+      finish("late");
+      timeout.mockRestore();
+    }
+  });
+
+  it.each(["open", "stat"])("releases a timed-out fallback handle after a stalled %s and retains the original pin", async (stage) => {
+    const grants = new FolderGrants(() => undefined);
+    const original = await grants.grant("bot", home.path);
+    const originalId = grants.sessionDirectoryId("bot", original);
+    const replacement = join(home.path, "other");
+    mkdirSync(replacement);
+    const handle = await open(replacement, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
+    const stats = await handle.stat({ bigint: true });
+    let release!: () => void;
+    const stalled = new Promise<void>((resolve) => { release = resolve; });
+    let reached!: () => void;
+    const started = new Promise<void>((resolve) => { reached = resolve; });
+    vi.mocked(open).mockImplementationOnce(async () => {
+      if (stage === "open") { reached(); await stalled; }
+      return handle;
+    });
+    if (stage === "stat") vi.spyOn(handle, "stat").mockImplementationOnce(async () => {
+      reached();
+      await stalled;
+      return stats;
+    });
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(deadline.signal);
+    try {
+      const selection = grants.grant("bot", replacement);
+      const rejected = expect(selection).rejects.toThrow("timed out");
+      await started;
+      deadline.abort(new Error("Folder selection timed out"));
+      await rejected;
+      release();
+      await vi.waitFor(() => expect(handle.fd).toBe(-1));
+      expect(grants.read("bot")).toEqual(original);
+      expect(grants.sessionDirectoryId("bot", original)).toEqual(originalId);
+    } finally {
+      release();
+      timeout.mockRestore();
+      await handle.close();
+      grants.revoke("bot");
+    }
   });
 
   it("allows subdirectories, rejects redirected folders, and replaces the old scope on a new grant", async () => {
@@ -228,6 +299,52 @@ describe("GUI controller", () => {
     const pending = files.toolHandlers[`local_${operation}`]!({ path: operation === "read" ? "one.txt" : ".", query: "needle" });
     setImmediate(() => abort.abort(new Error("Stopped by the user")));
     await expect(pending).rejects.toThrow("Stopped by the user");
+  });
+
+  it("stops a mutation before approval even while the worker is still exiting", async () => {
+    const child = new ChildProcess();
+    const send = vi.fn(() => true);
+    child.send = send;
+    vi.spyOn(child, "kill").mockReturnValue(true);
+    vi.mocked(fork).mockReturnValueOnce(child);
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", { path: home.path, version: "version", identity: "identity" });
+    const stop = new AbortController();
+    const confirm = vi.fn(async () => true);
+    const result = files.mkdir("notes", confirm, stop.signal).catch((reason: unknown) => reason);
+    const stopped = new Error("Stopped by the user");
+    stop.abort(stopped);
+    try {
+      expect(await Promise.race([result, new Promise((r) => setImmediate(() => r("pending")))])).toBe(stopped);
+      child.emit("message", { type: "preview", paths: ["notes"] });
+      expect(confirm).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledTimes(1);
+    } finally { child.emit("close", 1); }
+  });
+
+  it("waits for an approved worker after Stop and reports its committed diff and activity", async () => {
+    const child = new ChildProcess();
+    child.connected = true;
+    let approvalSent!: () => void;
+    const committing = new Promise<void>((resolve) => { approvalSent = resolve; });
+    child.send = (message) => { if (message === true) approvalSent(); return true; };
+    const kill = vi.spyOn(child, "kill").mockReturnValue(true);
+    vi.mocked(fork).mockReturnValueOnce(child);
+    const stop = new AbortController();
+    const onActivity = vi.fn();
+    const onFileChange = vi.fn();
+    const scopedFolder = new GrantedFolderIO(new FolderGrants(), "bot", { path: home.path, version: "version", identity: "identity" });
+    const workspace = new LocalWorkspace(home.path, () => true, onActivity, { scopedFolder, signal: stop.signal, onFileChange });
+    const write = workspace.write({ path: "notes.txt", content: "approved" });
+    child.emit("message", { type: "preview", paths: ["notes.txt"] });
+    await committing;
+    stop.abort(new Error("Stopped by the user"));
+    child.emit("message", { type: "result", value: "written" });
+    child.emit("close", 0);
+    expect(JSON.parse(await write).status).toBe("ok");
+    expect(kill).not.toHaveBeenCalled();
+    expect(onFileChange).toHaveBeenCalledWith(expect.objectContaining({ operation: "create", path: "notes.txt" }));
+    expect(onActivity).toHaveBeenCalledWith({ operation: "write", paths: ["notes.txt"], status: "success" });
   });
 
   it("accepts another spelling of the same directory on case-insensitive volumes", async (context) => {

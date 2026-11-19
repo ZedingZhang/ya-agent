@@ -6,7 +6,7 @@ import { applyTextEdits, textRevision } from "../edits";
 import { isSensitive, listDirectory, MAX_TEXT_BYTES, openRegularFile, physicalWorkspacePath, readOpenedText, readRegularText, searchFiles, type ConfirmEdit, type EditResult, type ScopedFolderIO } from "../local";
 import { publishEdit } from "../publish-edit";
 import { moveInGrantedFolder } from "./folder-move";
-import { FolderGrants, folderIdentityExecutable, nativeIdentity, type FolderGrant } from "./folder-grants";
+import { FOLDER_CHECK_TIMEOUT_MS, FolderGrants, folderIdentityExecutable, nativeIdentity, type FolderGrant } from "./folder-grants";
 
 type Operation =
   | { kind: "probe" | "list" | "read"; path: string }
@@ -43,7 +43,7 @@ export class GrantedFolderIO implements ScopedFolderIO {
 
   async available(signal?: AbortSignal): Promise<boolean> {
     // A stalled mount must allow the task to offer ordinary chat.
-    const timeout = AbortSignal.timeout(5_000);
+    const timeout = AbortSignal.timeout(FOLDER_CHECK_TIMEOUT_MS);
     const probe = signal ? AbortSignal.any([signal, timeout]) : timeout;
     try {
       return await runWorker(this.request({ kind: "probe", path: "." }), probe) === "valid";
@@ -110,9 +110,8 @@ async function runWorker(request: FolderRequest, signal?: AbortSignal, confirm?:
     const stop = () => {
       if (committing) return;
       child.kill();
-      // A stalled kernel read can delay process exit. Read-only requests can
-      // discard the result immediately while the child finishes shutting down.
-      if (!confirm) reject(signal?.reason);
+      // A stalled filesystem call can delay exit. No approval has been sent.
+      reject(signal?.reason);
     };
     const failed = (reason: unknown) => { error = reason; child.kill(); };
     signal?.addEventListener("abort", stop, { once: true });

@@ -5,7 +5,10 @@ import { open, stat, type FileHandle } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
 import type { FolderAccess } from "./shared";
+import { abortable } from "../cancellation";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
+
+export const FOLDER_CHECK_TIMEOUT_MS = 5_000;
 
 // Keep the spelling used by existing grants, including Windows short paths.
 const resolveGrantPath = promisify(realpath);
@@ -84,8 +87,15 @@ export class FolderGrants {
     return pin.directoryId;
   }
 
-  async grant(botId: string, folder: string, checkSelection?: () => void): Promise<FolderGrant> {
+  grant(botId: string, folder: string, checkSelection?: () => void): Promise<FolderGrant> {
+    const deadline = AbortSignal.timeout(FOLDER_CHECK_TIMEOUT_MS);
+    // A mount can stall even before identification, or while opening a fallback handle.
+    return abortable(this.verifyAndGrant(botId, folder, deadline, checkSelection), deadline);
+  }
+
+  private async verifyAndGrant(botId: string, folder: string, deadline: AbortSignal, checkSelection?: () => void): Promise<FolderGrant> {
     const path = await resolveGrantPath(folder);
+    deadline.throwIfAborted();
     const record = this.recordPath(botId);
     const temp = record + "." + randomUUID();
     let handle: FileHandle | undefined;
@@ -93,15 +103,18 @@ export class FolderGrants {
     try {
       let identity = await this.identify(path);
       if (!identity) {
+        deadline.throwIfAborted();
         handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0));
-        const held = await handle.stat({ bigint: true });
-        const current = await stat(path, { bigint: true });
-        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await resolveGrantPath(path) !== path) {
+        deadline.throwIfAborted();
+        const held = await abortable(handle.stat({ bigint: true }), deadline);
+        const current = await abortable(stat(path, { bigint: true }), deadline);
+        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await abortable(resolveGrantPath(path), deadline) !== path) {
           throw new Error("Choose a folder with a verifiable filesystem identity.");
         }
         identity = "session:" + randomUUID();
         directoryId = { dev: String(held.dev), ino: String(held.ino) };
       }
+      deadline.throwIfAborted();
       checkSelection?.();
       const grant = { path, identity, version: randomUUID() };
       mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
