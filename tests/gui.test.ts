@@ -9,6 +9,7 @@ import {
   type TaskRunner,
 } from "../src/gui/controller";
 import { FolderGrants } from "../src/gui/folder-grants";
+import { searchGrantedFolder } from "../src/gui/folder-search";
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
@@ -167,6 +168,44 @@ describe("GUI controller", () => {
     } finally {
       store.revoke("reviewer");
     }
+  });
+
+  it("searches relative to a pinned session grant in a separate process", () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(join(folder, "drafts", "nested"), { recursive: true });
+    writeFileSync(join(folder, "drafts", "nested", "一.txt"), "FIRST\nneedle");
+    writeFileSync(join(folder, "drafts", "z.txt"), "needle");
+    writeFileSync(join(folder, "outside-subdirectory.txt"), "needle");
+    const grants = new FolderGrants(() => undefined);
+    const grant = grants.grant("bot", folder);
+    try {
+      expect(JSON.parse(searchGrantedFolder(grants, "bot", grant, "drafts", "needle")).results).toEqual([
+        { path: join("drafts", "nested", "一.txt"), match: "text", line: 2, text: "needle" },
+        { path: join("drafts", "z.txt"), match: "text", line: 1, text: "needle" },
+      ]);
+      grants.revoke("bot");
+      expect(() => searchGrantedFolder(grants, "bot", grant, ".", "needle")).toThrow("Folder access has changed");
+    } finally {
+      grants.revoke("bot");
+    }
+  });
+
+  it("discards a completed search when another controller revokes the grant before delivery", async () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "notes.txt"), "needle");
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
+    const controller = new GuiController(runner);
+    controller.activeBotId = "bot";
+    controller.setSessionApiKey("key");
+    const other = new GuiController();
+    other.activeBotId = "bot";
+    const { folderGrantVersion } = controller.grantFolder("bot", folder);
+    const revoke = vi.fn(() => other.revokeFolder("bot"));
+    await controller.run({ task: "search notes", sessionId: "bot", local: true, folderGrantVersion }, { onLocalActivity: revoke });
+    const files = runner.mock.calls[0]![3]!.localWorkspace!;
+    expect(() => files.search({ query: "needle" })).toThrow("Folder access has changed");
+    expect(revoke).toHaveBeenCalledOnce();
   });
 
   it("keeps identity-bound grants from earlier releases usable until the next selection", () => {

@@ -28,7 +28,8 @@
   },
   "scripts": {
     "build:folder-identity": "cmake -S src/gui/native -B build/folder-identity -DCMAKE_BUILD_TYPE=Release && cmake --build build/folder-identity --config Release",
-    "pretest": "npm run build:folder-identity",
+    "pretest": "npm run build:folder-identity && npm run build",
+    "pretest:watch": "npm run pretest",
     "presmoke:gui": "npm run build:folder-identity",
     "pregui": "npm run build:folder-identity",
     "prepackage:gui": "npm run build:folder-identity",

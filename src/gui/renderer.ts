@@ -398,45 +398,49 @@ function validSavedFileChange(value: unknown): value is FileChange {
 }
 
 async function loadSessionHistory(): Promise<string | undefined> {
+  let saved: unknown;
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
-    if (!isRecord(saved) || !Array.isArray(saved.sessions)) return undefined;
-    document.body.classList.toggle("sidebar-collapsed", saved.sidebarCollapsed === true);
-    element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(saved.sidebarCollapsed !== true));
-    for (const value of saved.sessions) {
-      if (!isRecord(value) || typeof value.title !== "string"
-        || typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt) || typeof value.draft !== "string"
-        || !Array.isArray(value.turns)) continue;
-      const turns: ConversationTurn[] = [];
-      for (const turn of value.turns) {
-        if (!isRecord(turn) || typeof turn.task !== "string" || typeof turn.answer !== "string"
-          || !["running", "complete", "error", "interrupted"].includes(String(turn.status))) continue;
-        const images = Array.isArray(turn.images) ? turn.images.filter((image): image is SelectedImage =>
-          isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
-          && typeof image.size === "number" && typeof image.mimeType === "string") : [];
-        turns.push({
-          ...(typeof turn.taskId === "string" && turn.taskId.trim() ? { taskId: turn.taskId.trim() } : {}),
-          task: turn.task, answer: turn.answer, images,
-          status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
-          partial: turn.partial === true,
-          commands: Array.isArray(turn.commands) ? turn.commands.filter(validSavedCommand) : [],
-          changes: Array.isArray(turn.changes) ? turn.changes.filter(validSavedFileChange) : [],
-        });
-      }
-      const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
-        isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
-        && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
-      bots.push({ id: typeof value.id === "string" ? value.id : "", title: value.title.trim() || "Ya",
-        instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
-        turns, activities: savedActivities });
-    }
-    const active = bots.find((bot) => bot.id === saved.activeId);
-    const ids = await bridge.restoreBotIds(bots.map((bot) => bot.id));
-    bots.forEach((bot, index) => { bot.id = ids[index]!; });
-    return active?.id;
+    saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
   } catch {
     return undefined;
   }
+  if (!isRecord(saved) || !Array.isArray(saved.sessions)) return undefined;
+  document.body.classList.toggle("sidebar-collapsed", saved.sidebarCollapsed === true);
+  element<HTMLButtonElement>("sidebar-toggle").setAttribute("aria-expanded", String(saved.sidebarCollapsed !== true));
+  // A damaged profile can still own a grant under its saved ID.
+  const savedIds = saved.sessions.map((value: unknown) => isRecord(value) && typeof value.id === "string" ? value.id : "");
+  const ids = await bridge.restoreBotIds(savedIds);
+  let activeId: string | undefined;
+  for (const [index, value] of saved.sessions.entries()) {
+    if (!isRecord(value) || typeof value.title !== "string"
+      || typeof value.updatedAt !== "number" || !Number.isFinite(value.updatedAt) || typeof value.draft !== "string"
+      || !Array.isArray(value.turns)) continue;
+    const turns: ConversationTurn[] = [];
+    for (const turn of value.turns) {
+      if (!isRecord(turn) || typeof turn.task !== "string" || typeof turn.answer !== "string"
+        || !["running", "complete", "error", "interrupted"].includes(String(turn.status))) continue;
+      const images = Array.isArray(turn.images) ? turn.images.filter((image): image is SelectedImage =>
+        isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
+        && typeof image.size === "number" && typeof image.mimeType === "string") : [];
+      turns.push({
+        ...(typeof turn.taskId === "string" && turn.taskId.trim() ? { taskId: turn.taskId.trim() } : {}),
+        task: turn.task, answer: turn.answer, images,
+        status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
+        partial: turn.partial === true,
+        commands: Array.isArray(turn.commands) ? turn.commands.filter(validSavedCommand) : [],
+        changes: Array.isArray(turn.changes) ? turn.changes.filter(validSavedFileChange) : [],
+      });
+    }
+    const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
+      isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
+      && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
+    const id = ids[index]!;
+    if (activeId === undefined && savedIds[index] === saved.activeId) activeId = id;
+    bots.push({ id, title: value.title.trim() || "Ya",
+      instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
+      turns, activities: savedActivities });
+  }
+  return activeId;
 }
 
 type BotFields = Pick<DesktopBot, "title" | "instructions">;

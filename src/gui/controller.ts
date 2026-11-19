@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { FolderAccessChangedError, FolderGrants, type FolderGrant } from "./folder-grants";
+import { searchGrantedFolder } from "./folder-search";
 import { dirname, join } from "node:path";
 import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
@@ -264,6 +265,7 @@ export class GuiController {
     const workspace = new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
       signal: callbacks.signal,
       onFileChange: callbacks.onFileChange,
+      searchFolder: (directory, query) => searchGrantedFolder(this.grants, botId, grant, directory, query),
       assertAccess: () => {
         this.assertActiveBot(botId);
         const current = this.grants.read(botId);

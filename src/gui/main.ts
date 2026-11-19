@@ -955,7 +955,13 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       if (!delivered) throw new Error("The live streaming chunk did not reach the running conversation.");
     }
     options.onContent?.("reply.");
-    if (options.localWorkspace) await options.localWorkspace.write({ path: "smoke.txt", content: "Approved smoke task" });
+    if (options.localWorkspace) {
+      await options.localWorkspace.write({ path: "smoke.txt", content: "Approved smoke task" });
+      if (task === "smoke-approval") {
+        const result = JSON.parse(options.localWorkspace.search({ query: "Approved smoke task" }));
+        if (!result.results.some((hit: { path: string }) => hit.path === "smoke.txt")) throw new Error("Granted folder search failed.");
+      }
+    }
     return { content: "A streamed reply.", mode: "single", usage: {} };
   });
   controller.setSessionApiKey("smoke-only-key");
@@ -1455,24 +1461,33 @@ async function verifyBotIdRecovery(window: BrowserWindow, root: string): Promise
   await verifyRenderer(window);
   if (await window.webContents.executeJavaScript("currentBot.id") !== repaired) throw new Error("The repaired ID was not saved.");
   controller.grantFolder(repaired, root);
-  await window.webContents.executeJavaScript(`(() => {
+  const damagedId = await window.webContents.executeJavaScript(`(async () => {
     const copy = createBot({ title: 'Second recovered bot', instructions: '' });
     copy.id = currentBot.id;
     copy.draft = 'Second draft';
+    const owner = createBot({ title: 'Damaged owner', instructions: '' });
+    await selectBot(owner);
+    const survivor = createBot({ title: 'Surviving bot', instructions: '' });
+    survivor.id = owner.id;
+    survivor.draft = 'Surviving draft';
+    delete owner.turns;
     persistSessions();
-  })()`);
+    return owner.id;
+  })()`) as string;
+  controller.grantFolder(damagedId, root);
   await window.loadFile(rendererFile);
   await verifyRenderer(window);
   const recovered = await window.webContents.executeJavaScript(`(async () => {
-    for (const [title, draft] of [['Recovered bot', 'Draft to recover'], ['Second recovered bot', 'Second draft']]) {
+    if (currentBot.title !== 'Surviving bot' || bots.some((bot) => bot.title === 'Damaged owner')) return false;
+    for (const [title, draft] of [['Recovered bot', 'Draft to recover'], ['Second recovered bot', 'Second draft'], ['Surviving bot', 'Surviving draft']]) {
       const bot = bots.find((entry) => entry.title === title);
-      if (!bot || bot.id === ${JSON.stringify(repaired)}) return false;
+      if (!bot || [${JSON.stringify(repaired)}, ${JSON.stringify(damagedId)}].includes(bot.id)) return false;
       await selectBot(bot);
       if (state.workspace || document.querySelector('#task-input').value !== draft) return false;
     }
     const original = bots.find((bot) => bot.id === ${JSON.stringify(originalId)});
     await selectBot(original);
-    bots = bots.filter((bot) => !['Recovered bot', 'Second recovered bot'].includes(bot.title));
+    bots = bots.filter((bot) => !['Recovered bot', 'Second recovered bot', 'Surviving bot'].includes(bot.title));
     persistSessions();
     return currentBot === original;
   })()`);

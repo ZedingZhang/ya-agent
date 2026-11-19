@@ -86,6 +86,23 @@ describe("local workspace", () => {
     expect(vi.mocked(readFileSync).mock.calls.map(([path]) => String(path))).toEqual([first]);
   });
 
+  it.each([1, MAX_SEARCH_RESULTS])("discards %i matches if access expires during a search", (count) => {
+    const first = join(workspace.root, "a.txt");
+    writeFileSync(first, "needle\n".repeat(count));
+    writeFileSync(join(root, "z.txt"), "needle");
+    const reads = vi.mocked(readFileSync);
+    reads.mockClear();
+    const activity = vi.fn();
+    const scoped = new LocalWorkspace(root, () => false, activity, {
+      assertAccess: () => {
+        if (reads.mock.calls.some(([path]) => path === first)) throw new Error("Folder access has changed.");
+      },
+    });
+    expect(() => scoped.search({ query: "needle" })).toThrow("Folder access has changed");
+    expect(reads.mock.calls.map(([path]) => path)).toEqual([first]);
+    expect(activity).not.toHaveBeenCalled();
+  });
+
   it("preserves depth-first search ordering below the limit", () => {
     mkdirSync(join(root, "a"));
     writeFileSync(join(root, "a", "one.txt"), "context\nneedle");

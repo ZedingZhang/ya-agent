@@ -17,13 +17,16 @@ export interface FolderGrant {
   identity: string;
 }
 
-function nativeIdentity(path: string, create: boolean): string | undefined {
+export function folderIdentityExecutable(): string {
   const packaged = process.resourcesPath && __dirname.startsWith(join(process.resourcesPath, "app.asar") + sep);
   const dist = basename(dirname(__dirname)) === "src" ? resolve(__dirname, "../../dist") : resolve(__dirname, "../..");
-  const binary = join(packaged ? process.resourcesPath : dist, "gui-native",
+  return join(packaged ? process.resourcesPath : dist, "gui-native",
     process.platform === "win32" ? "ya-folder-identity.exe" : "ya-folder-identity");
+}
+
+export function nativeIdentity(path: string, create: boolean, binary = folderIdentityExecutable()): string | undefined {
   try {
-    return execFileSync(binary, [create ? "grant" : "check", toNamespacedPath(path)], {
+    return execFileSync(binary, [create ? "grant" : "check", path === "." ? "." : toNamespacedPath(path)], {
       encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true, timeout: 3_000,
     }).trim() || undefined;
   } catch {
@@ -56,6 +59,13 @@ export class FolderGrants {
     }
     if (this.pins.has(botId) && this.pins.get(botId)?.identity !== record?.identity) this.release(botId);
     return record;
+  }
+
+  sessionDirectoryId(botId: string, grant: FolderGrant): { dev: string; ino: string } | undefined {
+    const pin = this.pins.get(botId);
+    if (pin?.identity !== grant.identity) return undefined;
+    const held = fstatSync(pin.fd, { bigint: true });
+    return { dev: String(held.dev), ino: String(held.ino) };
   }
 
   matches(botId: string, grant: FolderGrant): boolean {
