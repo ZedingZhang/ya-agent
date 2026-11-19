@@ -1,4 +1,4 @@
-import { LocalWorkspace } from "./local";
+import type { TaskWorkspace } from "./local";
 import { assertImageInputSupported, ModelConfig } from "./config";
 import { MAX_CODING_TOOL_CALL_ROUNDS, type ModelReply } from "./deepseek";
 import type { CommandResult } from "./commands";
@@ -121,7 +121,7 @@ async function runAgent(
   maxTokens: number,
   instruction = "",
   webMode: WebMode = "auto",
-  localWorkspace?: LocalWorkspace,
+  localWorkspace?: TaskWorkspace,
   webSearch: ToolHandler = webSearchWithSignal,
   images: UserImageContentPart[] = [],
   conversation: TaskConversation = [],
@@ -164,7 +164,7 @@ export async function singleAgent(
   config: ModelConfig,
   webMode: WebMode = "auto",
   onContent?: (content: string) => void,
-  localWorkspace?: LocalWorkspace,
+  localWorkspace?: TaskWorkspace,
   webSearch: ToolHandler = webSearchWithSignal,
   images: UserImageContentPart[] = [],
   conversation: TaskConversation = [],

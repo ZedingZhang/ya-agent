@@ -1,5 +1,5 @@
 import { basename, join, resolve } from "node:path";
-import { linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOT_PERMISSIONS_DIR, ModelConfig, loadConfig } from "../src/config";
 import {
@@ -9,7 +9,7 @@ import {
   type TaskRunner,
 } from "../src/gui/controller";
 import { FolderGrants } from "../src/gui/folder-grants";
-import { searchGrantedFolder } from "../src/gui/folder-search";
+import { GrantedFolderIO } from "../src/gui/folder-io";
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
 import { appendAuditRecord } from "../src/local";
@@ -170,7 +170,7 @@ describe("GUI controller", () => {
     }
   });
 
-  it("searches relative to a pinned session grant in a separate process", () => {
+  it("searches relative to a pinned session grant in a separate process", async () => {
     const folder = join(home.path, "notes");
     mkdirSync(join(folder, "drafts", "nested"), { recursive: true });
     writeFileSync(join(folder, "drafts", "nested", "一.txt"), "FIRST\nneedle");
@@ -179,18 +179,19 @@ describe("GUI controller", () => {
     const grants = new FolderGrants(() => undefined);
     const grant = grants.grant("bot", folder);
     try {
-      expect(JSON.parse(searchGrantedFolder(grants, "bot", grant, "drafts", "needle")).results).toEqual([
+      const files = new GrantedFolderIO(grants, "bot", grant);
+      expect(JSON.parse(await files.search("drafts", "needle")).results).toEqual([
         { path: join("drafts", "nested", "一.txt"), match: "text", line: 2, text: "needle" },
         { path: join("drafts", "z.txt"), match: "text", line: 1, text: "needle" },
       ]);
       grants.revoke("bot");
-      expect(() => searchGrantedFolder(grants, "bot", grant, ".", "needle")).toThrow("Folder access has changed");
+      await expect(files.search(".", "needle")).rejects.toThrow("Folder access has changed");
     } finally {
       grants.revoke("bot");
     }
   });
 
-  it("discards a completed search when another controller revokes the grant before delivery", async () => {
+  it.each(["read", "list", "search"])("discards %s results when another controller revokes the grant before delivery", async (operation) => {
     const folder = join(home.path, "notes");
     mkdirSync(folder);
     writeFileSync(join(folder, "notes.txt"), "needle");
@@ -204,8 +205,111 @@ describe("GUI controller", () => {
     const revoke = vi.fn(() => other.revokeFolder("bot"));
     await controller.run({ task: "search notes", sessionId: "bot", local: true, folderGrantVersion }, { onLocalActivity: revoke });
     const files = runner.mock.calls[0]![3]!.localWorkspace!;
-    expect(() => files.search({ query: "needle" })).toThrow("Folder access has changed");
+    const tool = files.toolHandlers[`local_${operation}`]!;
+    await expect(Promise.resolve().then(() => tool({ path: operation === "read" ? "notes.txt" : ".", query: "needle" })))
+      .rejects.toThrow("Folder access has changed");
     expect(revoke).toHaveBeenCalledOnce();
+  });
+
+  it("cancels a desktop search without blocking the event loop", async () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    writeFileSync(join(folder, "one.txt"), "needle");
+    const runner = vi.fn<TaskRunner>(async () => ({ content: "", mode: "single", usage: {} }));
+    const controller = new GuiController(runner);
+    controller.activeBotId = "bot";
+    controller.setSessionApiKey("key");
+    const { folderGrantVersion } = controller.grantFolder("bot", folder);
+    const abort = new AbortController();
+    await controller.run({ task: "search", sessionId: "bot", local: true, folderGrantVersion }, { signal: abort.signal });
+    const files = runner.mock.calls[0]![3]!.localWorkspace!;
+    const pending = files.toolHandlers.local_search!({ query: "needle" });
+    setImmediate(() => abort.abort(new Error("Stopped by the user")));
+    await expect(pending).rejects.toThrow("Stopped by the user");
+  });
+
+  it("accepts another spelling of the same directory on case-insensitive volumes", async (context) => {
+    const folder = join(home.path, "notes");
+    mkdirSync(join(folder, "Drafts"), { recursive: true });
+    if (!existsSync(join(folder, "drafts"))) return context.skip();
+    writeFileSync(join(folder, "Drafts", "one.txt"), "needle");
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", grants.grant("bot", folder));
+    try {
+      expect(JSON.parse(await files.search("drafts", "needle")).results).toEqual([
+        { path: join("drafts", "one.txt"), match: "text", line: 1, text: "needle" },
+      ]);
+    } finally { grants.revoke("bot"); }
+  });
+
+  it.each([false, true])("abandons an approved write after the folder grant changes (existing file: %s)", async (existing) => {
+    const folder = join(home.path, "notes");
+    const replacement = join(home.path, "other");
+    mkdirSync(folder);
+    mkdirSync(replacement);
+    if (existing) writeFileSync(join(folder, "note.txt"), "draft");
+    writeFileSync(join(replacement, "note.txt"), "other");
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", grants.grant("bot", folder));
+    try {
+      await expect(files.write("note.txt", "approved", async (previous) => {
+        expect(previous).toBe(existing ? "draft" : undefined);
+        grants.grant("bot", replacement);
+        return true;
+      })).rejects.toThrow("Folder access has changed");
+      expect(existing ? readFileSync(join(folder, "note.txt"), "utf8") : existsSync(join(folder, "note.txt"))).toBe(existing ? "draft" : false);
+      expect(readFileSync(join(replacement, "note.txt"), "utf8")).toBe("other");
+    } finally { grants.revoke("bot"); }
+  });
+
+  // Windows locks the child process's working directory for the lifetime of the approval.
+  it.skipIf(process.platform === "win32")("abandons a new file when its parent directory is replaced during approval", async () => {
+    const folder = join(home.path, "notes");
+    const drafts = join(folder, "drafts");
+    const archive = join(folder, "archive");
+    mkdirSync(drafts, { recursive: true });
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", grants.grant("bot", folder));
+    try {
+      await expect(files.write(join("drafts", "note.txt"), "approved", async () => {
+        renameSync(drafts, archive);
+        mkdirSync(drafts);
+        return true;
+      })).rejects.toThrow("directory has changed");
+      expect(readdirSync(drafts)).toEqual([]);
+      expect(readdirSync(archive)).toEqual([]);
+    } finally { grants.revoke("bot"); }
+  });
+
+  it("preserves a newer revision saved while the write approval is open", async () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    const note = join(folder, "note.txt");
+    writeFileSync(note, "draft");
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", grants.grant("bot", folder));
+    try {
+      await expect(files.write("note.txt", "approved", async () => {
+        writeFileSync(note, "user update");
+        return true;
+      })).rejects.toThrow("File changed during approval");
+      expect(readFileSync(note, "utf8")).toBe("user update");
+    } finally { grants.revoke("bot"); }
+  });
+
+  it("creates and replaces text using the approved directory and file handles", async () => {
+    const folder = join(home.path, "notes");
+    mkdirSync(folder);
+    const grants = new FolderGrants();
+    const files = new GrantedFolderIO(grants, "bot", grants.grant("bot", folder));
+    try {
+      for (const [before, after] of [[undefined, "original draft"], ["original draft", "短"], ["短", "a longer draft"]] as const) {
+        await expect(files.write("note.txt", after, async (previous) => previous === before)).resolves.toMatchObject({ approved: true });
+        expect(files.read("note.txt")).toBe(after);
+      }
+      await expect(files.write("note.txt", "discard", async () => false)).resolves.toMatchObject({ approved: false });
+      expect(readFileSync(join(folder, "note.txt"), "utf8")).toBe("a longer draft");
+    } finally { grants.revoke("bot"); }
   });
 
   it("keeps identity-bound grants from earlier releases usable until the next selection", () => {

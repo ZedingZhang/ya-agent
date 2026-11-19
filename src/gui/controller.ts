@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { FolderAccessChangedError, FolderGrants, type FolderGrant } from "./folder-grants";
-import { searchGrantedFolder } from "./folder-search";
+import { GrantedFolderIO } from "./folder-io";
 import { dirname, join } from "node:path";
 import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
+  type TaskWorkspace,
   auditLogFiles,
   auditLogTotalBytes,
   clearAuditLogs,
@@ -217,7 +218,7 @@ export class GuiController {
     callbacks.signal?.throwIfAborted();
     if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
     if (options.exec) throw new Error("Shell commands are unavailable for folder-scoped bots.");
-    let localWorkspace: LocalWorkspace | undefined;
+    let localWorkspace: TaskWorkspace | undefined;
     if (options.local) {
       this.assertActiveBot(options.sessionId);
       const grant = this.grants.read(options.sessionId);
@@ -260,12 +261,12 @@ export class GuiController {
     return selectRelevantCards(task);
   }
 
-  private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): LocalWorkspace | undefined {
+  private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace | undefined {
     if (!this.grants.matches(botId, grant)) return undefined;
     const workspace = new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
       signal: callbacks.signal,
       onFileChange: callbacks.onFileChange,
-      searchFolder: (directory, query) => searchGrantedFolder(this.grants, botId, grant, directory, query),
+      scopedFolder: new GrantedFolderIO(this.grants, botId, grant),
       assertAccess: () => {
         this.assertActiveBot(botId);
         const current = this.grants.read(botId);

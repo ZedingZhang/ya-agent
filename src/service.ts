@@ -1,7 +1,7 @@
 import { assertImageInputSupported, ModelConfig } from "./config";
 import { DeepSeekClient } from "./deepseek";
 import { assertImageCount } from "./images";
-import { LocalWorkspace } from "./local";
+import type { TaskWorkspace } from "./local";
 import { singleAgent, toaAgent, type RunResult } from "./orchestrator";
 import {
   ACTIVE_TASK_STATUSES,
@@ -56,7 +56,7 @@ export interface RunTaskOptions {
   toa?: boolean;
   toaWorkers?: number;
   onContent?: (content: string) => void;
-  localWorkspace?: LocalWorkspace;
+  localWorkspace?: TaskWorkspace;
   clientFactory?: (apiKey: DeepSeekCredential, signal?: AbortSignal) => DeepSeekClient;
   webSearch?: ToolHandler;
   images?: UserImageContentPart[];

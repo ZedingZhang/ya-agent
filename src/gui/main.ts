@@ -958,7 +958,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
     if (options.localWorkspace) {
       await options.localWorkspace.write({ path: "smoke.txt", content: "Approved smoke task" });
       if (task === "smoke-approval") {
-        const result = JSON.parse(options.localWorkspace.search({ query: "Approved smoke task" }));
+        const result = JSON.parse(await options.localWorkspace.toolHandlers.local_search!({ query: "Approved smoke task" }));
         if (!result.results.some((hit: { path: string }) => hit.path === "smoke.txt")) throw new Error("Granted folder search failed.");
       }
     }
