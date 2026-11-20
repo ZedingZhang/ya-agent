@@ -289,16 +289,20 @@ export class GuiController {
   }
 
   private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace {
+    const assertGrant = (): void => {
+      const current = this.grants.read(botId);
+      if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity) {
+        throw new Error("Folder access has changed.");
+      }
+    };
     return new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
       signal: callbacks.signal,
       onFileChange: callbacks.onFileChange,
       scopedFolder: new GrantedFolderIO(this.grants, botId, grant),
+      assertPreviewAccess: assertGrant,
       assertAccess: () => {
         this.assertActiveBot(botId);
-        const current = this.grants.read(botId);
-        if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity) {
-          throw new Error("Folder access has changed.");
-        }
+        assertGrant();
       },
     });
   }

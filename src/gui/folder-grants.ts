@@ -23,6 +23,7 @@ export interface FolderGrant {
   version: string;
   path: string;
   identity: string;
+  selectedPath?: string;
 }
 
 function nativeExecutable(name: string): string {
@@ -73,7 +74,9 @@ export class FolderGrants {
         // Existing identity-bound grants predate per-selection versions.
         const version = "version" in grant ? grant.version
           : createHash("sha256").update(JSON.stringify([grant.path, grant.identity])).digest("hex");
-        if (typeof version === "string" && version) record = { path: grant.path, identity: grant.identity, version };
+        if (typeof version === "string" && version) record = { path: grant.path, identity: grant.identity, version,
+          ...("selectedPath" in grant && typeof grant.selectedPath === "string" && isAbsolute(grant.selectedPath)
+            ? { selectedPath: grant.selectedPath } : {}) };
       }
     } catch {
       // Missing, malformed and legacy path-only records carry no authority.
@@ -90,25 +93,38 @@ export class FolderGrants {
   }
 
   snapshot(botId: string): Buffer | null {
-    try { return readFileSync(this.recordPath(botId)); }
+    try {
+      const record = readFileSync(this.recordPath(botId));
+      if (record.length) return record;
+      // A truncated record means revoked. A new picker needs a unique baseline
+      // so that another revoke during selection cannot recreate that baseline.
+      const baseline = { version: randomUUID() };
+      this.commit(botId, baseline, record);
+      return Buffer.from(JSON.stringify(baseline));
+    }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
   }
 
-  private commit(botId: string, value: { version: string }, expected?: Buffer | null): void {
+  private changeRecord(record: string, mode: string, temp: string, expected?: Buffer): void {
+    const result = spawnSync(nativeExecutable("ya-grant-commit"), [mode, toNamespacedPath(record),
+      temp && toNamespacedPath(temp), toNamespacedPath(record + ".lock"), toNamespacedPath(dirname(record))], {
+      input: expected, timeout: 3_000, windowsHide: true,
+    });
+    if (result.status === 2) throw new Error("Folder selection is no longer current.");
+    if (result.status !== 0) throw new Error("Could not save folder access.");
+  }
+
+  private commit(botId: string, value: { version: string }, expected: Buffer | null): void {
     const record = this.recordPath(botId);
     const temp = record + "." + randomUUID();
     mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
     try {
       writeFileSync(temp, JSON.stringify(value), { mode: 0o600, flag: "wx" });
-      const mode = expected === undefined ? "revoke" : expected === null ? "missing" : "compare";
-      const result = spawnSync(nativeExecutable("ya-grant-commit"), [mode, ...[record, temp, record + ".lock"].map(toNamespacedPath)], {
-        input: expected ?? undefined, timeout: 3_000, windowsHide: true,
-      });
-      if (result.status === 2) throw new Error("Folder selection is no longer current.");
-      if (result.status !== 0) throw new Error("Could not save folder access.");
+      const mode = expected === null ? "missing" : "compare";
+      this.changeRecord(record, mode, temp, expected ?? undefined);
     } finally { rmSync(temp, { force: true }); }
   }
 
@@ -139,7 +155,8 @@ export class FolderGrants {
       }
       deadline.throwIfAborted();
       checkSelection?.();
-      const grant = { path, identity, version: randomUUID() };
+      const selectedPath = resolve(folder);
+      const grant = { path, identity, version: randomUUID(), ...(selectedPath !== path ? { selectedPath } : {}) };
       this.commit(botId, grant, expected);
       this.release(botId);
       if (handle && directoryId) this.pins.set(botId, { handle, identity, directoryId });
@@ -151,7 +168,9 @@ export class FolderGrants {
   }
 
   revoke(botId: string): void {
-    this.commit(botId, { version: randomUUID() });
+    const record = this.recordPath(botId);
+    mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
+    this.changeRecord(record, "revoke", "");
     this.release(botId);
   }
 

@@ -1,7 +1,7 @@
 import { ChildProcess, execFileSync, fork } from "node:child_process";
 import { once } from "node:events";
 import { basename, join, resolve } from "node:path";
-import { constants, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, constants, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BOT_PERMISSIONS_DIR, ModelConfig, loadConfig } from "../src/config";
@@ -97,6 +97,26 @@ describe("GUI controller", () => {
     finish("stale");
     await expect(stale).rejects.toThrow("no longer current");
     expect(first.read("bot")).toEqual(expected);
+  });
+
+  it("revokes an existing grant without staging a file and invalidates a picker started while revoked", async () => {
+    const grants = new FolderGrants(() => "identity");
+    await grants.grant("bot", home.path);
+    const dir = join(home.path, BOT_PERMISSIONS_DIR);
+    // Older grants predate lock files. Revocation must work even in that format.
+    const lock = readdirSync(dir).find((name) => name.endsWith(".lock"))!;
+    unlinkSync(join(dir, lock));
+    const files = readdirSync(dir);
+    if (process.platform !== "win32") chmodSync(dir, 0o500);
+    try {
+      grants.revoke("bot");
+      expect(new FolderGrants().read("bot")).toBeUndefined();
+      expect(readdirSync(dir)).toEqual(files);
+    } finally { if (process.platform !== "win32") chmodSync(dir, 0o700); }
+    const snapshot = grants.snapshot("bot");
+    grants.revoke("bot");
+    await expect(grants.grant("bot", home.path, undefined, snapshot)).rejects.toThrow("no longer current");
+    expect((await grants.grant("bot", home.path)).identity).toBe("identity");
   });
 
   it("times out a stalled folder selection and discards its late identity", async () => {
@@ -346,7 +366,7 @@ describe("GUI controller", () => {
     } finally { child.emit("close", 1); }
   });
 
-  it("waits for an approved worker after Stop and reports its committed diff and activity", async () => {
+  it.each([false, true])("settles Stop while tracking an approved write (stalled worker: %s)", async (stalled) => {
     const child = new ChildProcess();
     child.connected = true;
     let approvalSent!: () => void;
@@ -363,9 +383,15 @@ describe("GUI controller", () => {
     child.emit("message", { type: "preview", paths: ["notes.txt"] });
     await committing;
     stop.abort(new Error("Stopped by the user"));
+    if (stalled) {
+      await expect(write).rejects.toThrow("outcome is pending");
+      expect(onActivity).toHaveBeenCalledWith({ operation: "write", paths: ["notes.txt"], status: "pending" });
+      expect(onFileChange).not.toHaveBeenCalled();
+    }
     child.emit("message", { type: "result", value: "written" });
     child.emit("close", 0);
-    expect(JSON.parse(await write).status).toBe("ok");
+    if (stalled) await vi.waitFor(() => expect(onFileChange).toHaveBeenCalledOnce());
+    else expect(JSON.parse(await write).status).toBe("ok");
     expect(kill).not.toHaveBeenCalled();
     expect(onFileChange).toHaveBeenCalledWith(expect.objectContaining({ operation: "create", path: "notes.txt" }));
     expect(onActivity).toHaveBeenCalledWith({ operation: "write", paths: ["notes.txt"], status: "success" });

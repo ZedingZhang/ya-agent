@@ -45,12 +45,23 @@ describe("desktop folder mutations", () => {
         expect(JSON.parse(await workspace.list({ path: join(spelling, "drafts") })).entries[0].path).toBe(note);
         expect(JSON.parse(await workspace.search({ path: join(spelling, "drafts"), query: "draft" })).results[0].path).toBe(note);
       };
+      // Only aliases selected by the user are grant roots.
+      await expect(workspace.read({ path: join(alias, note) })).rejects.toThrow("inside the authorized workspace");
+      const grant = await grants.grant("bot", alias);
+      workspace = new LocalWorkspace(root, confirm, undefined, { scopedFolder: new GrantedFolderIO(grants, "bot", grant) });
       await check(alias);
       if (root.toUpperCase() !== root && existsSync(root.toUpperCase())) await check(root.toUpperCase());
       const result = JSON.parse(await workspace.write({ path: join(alias, "new.txt"), content: "new" }));
       expect(result.path).toBe("new.txt");
       expect(confirm.mock.calls.at(-1)?.[0].paths).toEqual([join(root, "new.txt")]);
       await expect(workspace.read({ path: dirname(root) })).rejects.toThrow("inside the authorized workspace");
+      confirm.mockImplementationOnce(() => {
+        unlinkSync(alias);
+        symlinkSync(dirname(root), alias, process.platform === "win32" ? "junction" : "dir");
+        return true;
+      });
+      await expect(workspace.write({ path: join(alias, "stale.txt"), content: "stale" })).rejects.toThrow();
+      expect(existsSync(join(root, "stale.txt"))).toBe(false);
     } finally { unlinkSync(alias); }
   });
 

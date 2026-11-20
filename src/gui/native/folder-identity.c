@@ -13,9 +13,22 @@ static void print_hex(const void *data, size_t size) {
 #include <windows.h>
 #include <winioctl.h>
 #include <wchar.h>
+#include <stdlib.h>
 
 int wmain(int argc, wchar_t **argv) {
   if (argc != 3) return 1;
+  if (wcscmp(argv[1], L"short-path") == 0) {
+    DWORD size = GetShortPathNameW(argv[2], NULL, 0);
+    if (!size) return 1;
+    wchar_t *path = calloc(size, sizeof(*path));
+    if (!path) return 1;
+    DWORD length = GetShortPathNameW(argv[2], path, size);
+    if (!length || length >= size) return 1;
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, path, length, NULL, 0, NULL, NULL);
+    char *utf8 = malloc(bytes);
+    if (!bytes || !utf8 || !WideCharToMultiByte(CP_UTF8, 0, path, length, utf8, bytes, NULL, NULL)) return 1;
+    return fwrite(utf8, 1, bytes, stdout) == (size_t)bytes ? 0 : 1;
+  }
   HANDLE dir = CreateFileW(argv[2], FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);

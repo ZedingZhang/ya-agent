@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
@@ -26,6 +26,16 @@ function checkEndpoints(source: string, destination: string): void {
   }
 }
 
+function moveExecutable(identityExecutable: string): string {
+  return join(dirname(identityExecutable), process.platform === "win32" ? "ya-folder-move.exe" : "ya-folder-move");
+}
+
+/** Both names are direct children of the worker's pinned current directory. */
+export function publishNewFile(identityExecutable: string, stage: string, destination: string): void {
+  const result = spawnSync(moveExecutable(identityExecutable), ["1", stage, destination], { input: "Y", windowsHide: true });
+  if (result.status !== 0) throw new Error("Could not publish the new file. Check the destination and retry.");
+}
+
 /** Called only from the file worker, with the verified grant as its cwd. */
 export async function moveInGrantedFolder(identityExecutable: string, source: string, destination: string,
   checkAccess: () => void, confirm: () => Promise<boolean>): Promise<boolean> {
@@ -34,8 +44,7 @@ export async function moveInGrantedFolder(identityExecutable: string, source: st
   if ([...from, ...to].some((part) => !part || part === "." || part === "..")) throw new Error("Invalid move path.");
   const check = (): void => { checkAccess(); checkEndpoints(source, destination); };
   check();
-  const executable = join(dirname(identityExecutable), process.platform === "win32" ? "ya-folder-move.exe" : "ya-folder-move");
-  const child = spawn(executable, [String(from.length), ...from, ...to], { stdio: "pipe", windowsHide: true });
+  const child = spawn(moveExecutable(identityExecutable), [String(from.length), ...from, ...to], { stdio: "pipe", windowsHide: true });
   let failure: Error | undefined;
   let detail = "";
   child.on("error", (error) => { failure = error; });

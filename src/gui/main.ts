@@ -429,17 +429,18 @@ function registerIpc(): void {
     activeTaskController = taskController;
     const taskRendererGeneration = rendererGeneration;
     const send = (value: TaskEvent): void => {
-      if (activeTaskController !== taskController) return;
       // Stop lets an already approved mutation finish. Its outcome still belongs to this turn.
       const committed = value.type === "file-change" || (value.type === "activity"
-        && value.activity.status === "success" && ["write", "edit", "mkdir", "move"].includes(value.activity.operation));
-      let outgoing = value;
+        && (value.activity.status === "success" || (taskController.signal.aborted && value.activity.status !== "denied"))
+        && ["write", "edit", "mkdir", "move"].includes(value.activity.operation));
       if (committed && options.turnId && options.sessionId) {
         const outcome = { id: randomUUID(), botId: options.sessionId, turnId: options.turnId, event: value };
         pendingOutcomes.set(outcome.id, outcome);
-        outgoing = { type: "committed", outcome };
+        sendTaskEvent({ type: "committed", outcome });
+        return;
       }
-      if (rendererGeneration === taskRendererGeneration && (!taskController.signal.aborted || committed)) sendTaskEvent(outgoing);
+      if (activeTaskController === taskController && rendererGeneration === taskRendererGeneration
+        && (!taskController.signal.aborted || committed)) sendTaskEvent(value);
     };
     try {
       activeTaskPromise = controller.run(options, {
@@ -1137,7 +1138,19 @@ async function verifyApprovalLifecycle(window: BrowserWindow): Promise<void> {
         const lateIgnored = document.querySelector('#app-status').textContent === status && status === t('approvalExpired');
         pendingAction = { id: ${JSON.stringify(acceptedId)}, action: { operation: 'write', paths: ['accepted.txt'], summary: 'Await acknowledgement' } };
         actionExpired = false; renderPendingAction(); setStatus(t('waiting'), 'busy');
+        activeTurn = { turnId: crypto.randomUUID(), task: 'approval', answer: '', images: [], status: 'running', commands: [], changes: [] };
+        currentBot.turns.push(activeTurn);
+        const save = Storage.prototype.setItem;
+        try {
+          Storage.prototype.setItem = () => { throw new DOMException('quota', 'QuotaExceededError'); };
+          decideLocalAction(true);
+          if (pendingAction.responding || document.querySelector('#app-status').textContent !== t('historySaveError')) return false;
+        } finally { Storage.prototype.setItem = save; }
+        setStatus(t('waiting'), 'busy');
         decideLocalAction(true);
+        currentBot.turns.pop();
+        activeTurn = undefined;
+        persistSessions();
         const awaitsAck = pendingAction?.id === ${JSON.stringify(acceptedId)} && pendingAction.responding
           && document.querySelector('#action-approve').disabled && document.querySelector('#app-status').textContent === t('waiting');
         return hidden && notice && lateIgnored && awaitsAck;
@@ -1313,6 +1326,7 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
   const originalController = controller;
   let signal: AbortSignal | undefined;
   let taskStarted = false;
+  let deliverLate!: () => void;
   let release!: () => void;
   let finished!: () => void;
   const stopping = new Promise<void>((resolve) => { release = resolve; });
@@ -1327,8 +1341,11 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
         try {
           await stopping;
           // An approved operation can finish after the initiating renderer detached.
-          callbacks.onFileChange?.(createFileChange("note.txt", "draft", "final", "edit"));
-          callbacks.onLocalActivity?.({ operation: "edit", paths: ["note.txt"], status: "success" });
+          callbacks.onLocalActivity?.({ operation: "edit", paths: ["note.txt"], status: "pending" });
+          deliverLate = () => {
+            callbacks.onFileChange?.(createFileChange("note.txt", "draft", "final", "edit"));
+            callbacks.onLocalActivity?.({ operation: "edit", paths: ["note.txt"], status: "success" });
+          };
           callbacks.onContent?.(" late reply from the old task");
           signal?.throwIfAborted();
         } finally {
@@ -1377,19 +1394,22 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
     release();
     await stopped;
     await verifyRenderer(window);
+    await window.webContents.executeJavaScript(`selectBot(bots.find((session) => session.id === '${fixture.nextId}'))`);
+    deliverLate();
     const recovered = await window.webContents.executeJavaScript(`(async () => {
       const source = bots.find((session) => session.id === '${fixture.sourceId}');
       const turn = source.turns.at(-1);
-      const interrupted = currentBot.id === source.id && turn.status === 'interrupted'
+      const deadline = Date.now() + 3000;
+      while (source.activities.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      const interrupted = turn.status === 'interrupted'
         && turn.answer === 'Reply before reload' && turn.changes.length === 1 && turn.changes[0].path === 'note.txt'
-        && turn.committedActivities.length === 1 && source.activities.length === 1 && source.activities[0].operation === 'edit';
+        && turn.committedActivities.length === 2 && source.activities[0].status === 'pending' && source.activities[1].status === 'success';
       const outcome = { id: source.activities[0].id, botId: source.id, turnId: turn.turnId,
         event: { type: 'activity', activity: source.activities[0] } };
-      await selectBot(bots.find((session) => session.id === '${fixture.nextId}'));
       applyCommittedOutcome(outcome);
       applyCommittedOutcome({ ...outcome, id: crypto.randomUUID(), event: { type: 'file-change', change: turn.changes[0] } });
       const saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY)).sessions.find((bot) => bot.id === source.id);
-      const durable = saved.activities.length === 1 && saved.turns.at(-1).changes.length === 1
+      const durable = saved.activities.length === 2 && saved.turns.at(-1).changes.length === 1
         && saved.turns.at(-1).changes[0].id === turn.changes[0].id;
       const isolated = currentBot.id === '${fixture.nextId}' && currentBot.activities.length === 0
         && currentBot.turns.length === 0 && pendingAction === undefined && document.querySelector('#stop-button').hidden;

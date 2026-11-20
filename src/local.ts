@@ -55,7 +55,7 @@ export interface LocalAction {
 export interface LocalActivity {
   operation: "list" | "read" | "search" | "mkdir" | "write" | "edit" | "move" | "run";
   paths: string[];
-  status: "success" | "denied" | "error";
+  status: "success" | "denied" | "error" | "pending";
 }
 
 export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boolean>;
@@ -83,6 +83,7 @@ export interface ScopedFolderIO {
 export interface LocalWorkspaceOptions<Scope extends ScopedFolderIO | undefined = undefined> {
   scopedFolder?: Scope;
   assertAccess?: () => void;
+  assertPreviewAccess?: () => void;
   searchFolder?: (relativeDirectory: string, query: string) => string;
   commandsEnabled?: boolean;
   signal?: AbortSignal;
@@ -492,7 +493,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     if (!this.options.onFileChange || isSensitive(path) || after.includes("\0")
       || Buffer.from(after, "utf8").toString("utf8") !== after) return;
     try {
-      this.options.assertAccess?.();
+      (this.options.assertPreviewAccess ?? this.options.assertAccess)?.();
       this.options.onFileChange(createFileChange(this.relativePath(path), before, after, operation));
     } catch {
       // A failed preview or presentation observer must not turn a committed write into an error.
@@ -516,7 +517,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   private scopedPath(path: string): string {
     const rel = this.relativePath(path);
-    return outsideWorkspace(rel) ? path : rel;
+    return resolve(this.root, rel) === path && !outsideWorkspace(rel) ? rel : path;
   }
 
   private relativePath(path: string): string {
@@ -657,7 +658,36 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     return result;
   }
 
-  async mkdir(arguments_: ToolArguments): Promise<string> {
+  // Keep observing the approved operation after a slow mount has outlived
+  // cancellation. Its own callbacks still report the actual outcome.
+  private waitForMutation(work: Promise<string>, operation: LocalActivity["operation"], inputs: unknown[]): Promise<string> {
+    const signal = this.options.signal;
+    if (!this.options.scopedFolder || !signal) return work;
+    return new Promise((resolveWork, reject) => {
+      let timer: NodeJS.Timeout | undefined;
+      const stop = (): void => {
+        timer = setTimeout(() => {
+          const paths = inputs.filter((value): value is string => typeof value === "string")
+            .map((value) => resolve(this.root, expandHome(value)));
+          this.activity(operation, paths, "pending");
+          reject(new Error("Stopped waiting for an approved file operation. Its outcome is pending."));
+        }, 1_000);
+      };
+      if (signal.aborted) stop();
+      else signal.addEventListener("abort", stop, { once: true });
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", stop);
+      };
+      work.then((value) => { cleanup(); resolveWork(value); }, (error: unknown) => { cleanup(); reject(error); });
+    });
+  }
+
+  mkdir(arguments_: ToolArguments): Promise<string> {
+    return this.waitForMutation(this.applyMkdir(arguments_), "mkdir", [arguments_.path]);
+  }
+
+  private async applyMkdir(arguments_: ToolArguments): Promise<string> {
     let path = this.resolveInput(arguments_.path);
     try {
       if (isSensitive(path)) throw new Error("Creating sensitive directories is blocked in local mode.");
@@ -688,7 +718,11 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     return true;
   }
 
-  async write(arguments_: ToolArguments): Promise<string> {
+  write(arguments_: ToolArguments): Promise<string> {
+    return this.waitForMutation(this.applyWrite(arguments_), "write", [arguments_.path]);
+  }
+
+  private async applyWrite(arguments_: ToolArguments): Promise<string> {
     let path = this.resolveInput(arguments_.path);
     const content = arguments_.content;
     if (typeof content !== "string") throw new Error("Text content is required.");
@@ -735,7 +769,11 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     }
   }
 
-  async edit(arguments_: ToolArguments): Promise<string> {
+  edit(arguments_: ToolArguments): Promise<string> {
+    return this.waitForMutation(this.applyEdit(arguments_), "edit", [arguments_.path]);
+  }
+
+  private async applyEdit(arguments_: ToolArguments): Promise<string> {
     let path = this.resolveInput(arguments_.path);
     try {
       const revision = arguments_.expected_revision;
@@ -794,7 +832,11 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     return { approved, previous, content, count };
   }
 
-  async move(arguments_: ToolArguments): Promise<string> {
+  move(arguments_: ToolArguments): Promise<string> {
+    return this.waitForMutation(this.applyMove(arguments_), "move", [arguments_.source, arguments_.destination]);
+  }
+
+  private async applyMove(arguments_: ToolArguments): Promise<string> {
     let source = this.resolveInput(arguments_.source);
     let destination = this.resolveInput(arguments_.destination);
     try {

@@ -116,6 +116,7 @@ const TEXT = {
     welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
     folderChanged: "Folder access changed to {folder}. Review it and send again.", chatWithoutFolder: "Folder unavailable. Send this message without local tools?",
     toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
+    mutationPending: "Waiting for the file operation", mutationDone: "File operation completed", mutationFailed: "File operation failed",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", allowedFolder: "Allowed folder", folderMissing: "Folder unavailable", chooseFolder: "Choose folder…", revokeFolder: "Revoke access", choose: "Choose…", refresh: "Refresh",
     changes: "Changes", noChanges: "File changes made by Ya will appear here after approval.",
@@ -160,6 +161,7 @@ const TEXT = {
     createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
     welcome: "今天想做些什么？", welcomeHint: "发条消息，开始对话。",
     toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
+    mutationPending: "正在等待文件操作结果", mutationDone: "文件操作已完成", mutationFailed: "文件操作失败",
     interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存 Bot 记录，本地存储空间可能已满。",
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", allowedFolder: "已授权目录", folderMissing: "文件夹不可用", chooseFolder: "选择文件夹…", revokeFolder: "撤销授权", choose: "选择…", refresh: "刷新",
     changes: "变更", noChanges: "Ya 经批准完成的文件变更将显示在这里。",
@@ -502,6 +504,8 @@ function renderBot(): void {
   lastAnswer = "";
   for (const turn of currentBot.turns) {
     const answer = appendTask(turn.task, turn.images);
+    if (turn.turnId) answer.parentElement!.dataset.turnId = turn.turnId;
+    renderPendingMutation(turn, answer.parentElement!);
     answer.classList.remove("busy-answer");
     if (turn.status === "error") {
       answer.textContent = turn.answer;
@@ -868,6 +872,7 @@ async function runTask(): Promise<void> {
     activeTurn = { turnId, task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
     currentBot.turns.push(activeTurn);
     activeAnswer = appendTask(task, taskImages);
+    activeAnswer.parentElement!.dataset.turnId = turnId;
     activeAnswerText = "";
     lastAnswer = "";
     actionExpired = false;
@@ -1288,6 +1293,8 @@ function renderPendingAction(): void {
 
 function decideLocalAction(approved: boolean): void {
   if (!pendingAction || pendingAction.responding) return;
+  // A committed operation must have a recoverable owner before approval.
+  if (approved && (!activeTurn?.turnId || !currentBot.turns.includes(activeTurn) || !persistSessions())) return;
   pendingAction.responding = true;
   renderPendingAction();
   try { bridge.respondLocalAction(pendingAction.id, approved); }
@@ -1658,16 +1665,32 @@ function tableSeparator(line: string): boolean {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
 }
 
+function renderPendingMutation(turn: ConversationTurn, container: HTMLElement): void {
+  const history = turn.committedActivities ?? [];
+  if (!history.some((item) => item.status === "pending")) return;
+  let label = container.querySelector<HTMLElement>(".mutation-status");
+  if (!label) {
+    label = document.createElement("p");
+    label.className = "mutation-status";
+    container.append(label);
+  }
+  const outcome = history.at(-1)!;
+  const status = outcome.status === "pending" ? t("mutationPending") : outcome.status === "success" ? t("mutationDone") : t("mutationFailed");
+  label.textContent = [status, outcome.operation, outcome.paths.join(" → ")].join(" · ");
+}
+
 function applyCommittedOutcome(outcome: import("./shared").CommittedOutcome): void {
   const bot = bots.find((item) => item.id === outcome.botId);
   const turn = bot?.turns.find((item) => item.turnId === outcome.turnId);
   if (!bot || !turn) return;
+  const container = bot === currentBot ? Array.from(document.querySelectorAll<HTMLElement>(".turn"))
+    .find((item) => item.dataset.turnId === turn.turnId) : undefined;
   const event = outcome.event;
   if (event.type === "file-change") {
     if (!turn.changes.some((change) => change.id === event.change.id)) {
       turn.changes.push(event.change);
-      if (turn === activeTurn) {
-        activeAnswer?.parentElement?.append(fileChangeCard(event.change, true));
+      if (container) {
+        container.append(fileChangeCard(event.change, true));
         renderChanges();
         void renderFiles();
       }
@@ -1677,6 +1700,7 @@ function applyCommittedOutcome(outcome: import("./shared").CommittedOutcome): vo
     if (!history.some((activity) => activity.id === outcome.id)) {
       const activity = { ...event.activity, id: outcome.id };
       history.push(activity);
+      if (container) renderPendingMutation(turn, container);
       if (turn === bot.turns.at(-1)) {
         bot.activities.push(activity);
         if (bot === currentBot) renderActivities();

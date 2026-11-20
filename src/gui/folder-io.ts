@@ -1,11 +1,12 @@
 import { fork } from "node:child_process";
-import { accessSync, closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, realpathSync, statSync, writeSync } from "node:fs";
+import { accessSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { dataHome } from "../config";
 import { applyTextEdits, textRevision } from "../edits";
-import { isSensitive, listDirectory, MAX_TEXT_BYTES, openRegularFile, physicalWorkspacePath, readOpenedText, readRegularText, searchFiles, type ConfirmEdit, type EditResult, type ScopedFolderIO } from "../local";
+import { isSensitive, listDirectory, MAX_TEXT_BYTES, openRegularFile, readOpenedText, readRegularText, searchFiles, type ConfirmEdit, type EditResult, type ScopedFolderIO } from "../local";
+import { folderPathResolver } from "./scoped-path";
 import { publishEdit } from "../publish-edit";
-import { moveInGrantedFolder } from "./folder-move";
+import { moveInGrantedFolder, publishNewFile } from "./folder-move";
 import { FOLDER_CHECK_TIMEOUT_MS, FolderGrants, folderIdentityExecutable, nativeIdentity, type FolderGrant } from "./folder-grants";
 
 type Operation =
@@ -148,37 +149,38 @@ async function runWorker(request: FolderRequest, signal?: AbortSignal, confirm?:
 
 // The worker holds the actual parent directory as its cwd across the approval.
 // Keep the original file open without truncating it until the user approves.
-async function writeInDirectory(name: string, content: string, check: () => void, confirm: (previous?: string) => Promise<boolean>): Promise<string> {
-  const entry = lstatSync(name, { throwIfNoEntry: false });
-  let fd = entry ? openRegularFile(name, constants.O_RDWR) : undefined;
+export async function writeInDirectory(name: string, content: string, identityExecutable: string, check: () => void,
+  confirm: (previous?: string) => Promise<boolean>): Promise<string> {
+  let fd = lstatSync(name, { throwIfNoEntry: false }) ? openRegularFile(name, constants.O_RDWR) : undefined;
   try {
+    const original = fd === undefined ? undefined : fstatSync(fd, { bigint: true });
     const previous = fd === undefined ? undefined : readOpenedText(fd);
     check();
     if (!await confirm(previous)) return "denied";
-    check();
-    if (fd === undefined) {
-      fd = openSync(name, "wx");
-    } else {
-      const held = fstatSync(fd, { bigint: true });
+    const checkUnchanged = (): void => {
+      check();
       const current = lstatSync(name, { bigint: true, throwIfNoEntry: false });
-      if (!current?.isFile() || !held.ino || held.dev !== current.dev || held.ino !== current.ino || readOpenedText(fd) !== previous) {
+      if (!original) {
+        if (current) throw new Error("File changed during approval. Read again before writing.");
+        return;
+      }
+      if (current && current.nlink > 1n) {
+        throw new Error("Use local_edit to replace a hard-linked file without altering its other links.");
+      }
+      if (fd === undefined || !current?.isFile() || !original.ino || current.dev !== original.dev || current.ino !== original.ino
+          || current.mode !== original.mode || current.uid !== original.uid || current.gid !== original.gid
+          || readOpenedText(fd) !== previous) {
         throw new Error("File changed during approval. Read again before writing.");
       }
-      if (held.nlink !== 1n) throw new Error("Use local_edit to replace a hard-linked file without altering its other links.");
-      check();
-    }
-    const bytes = Buffer.from(content);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = writeSync(fd, bytes, offset, bytes.length - offset, offset);
-      if (!written) throw new Error("File write did not complete.");
-      offset += written;
-    }
-    ftruncateSync(fd, bytes.length);
+    };
+    checkUnchanged();
+    const metadata = original && { uid: Number(original.uid), gid: Number(original.gid), mode: Number(original.mode) };
+    publishEdit(name, content, metadata, () => {
+      checkUnchanged();
+      if (process.platform === "win32" && fd !== undefined) { closeSync(fd); fd = undefined; }
+    }, original ? undefined : (stage, dest) => publishNewFile(identityExecutable, stage, dest));
     return "written";
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
+  } finally { if (fd !== undefined) closeSync(fd); }
 }
 
 async function editInDirectory(name: string, operation: Extract<Operation, { kind: "edit" }>, check: () => void, confirm: (previous: string, edit: EditPreview) => Promise<boolean>): Promise<string> {
@@ -224,12 +226,12 @@ function checkSubmittedPath(path: string): void {
   }
 }
 
-async function mutate(operation: Mutation, root: string, identityExecutable: string, verifyCwd: (directory: string) => void, checkAccess: () => void, confirm: ConfirmWorker): Promise<string> {
+async function mutate(operation: Mutation, root: string, resolvePhysical: (submitted: string) => string, identityExecutable: string, verifyCwd: (directory: string) => void, checkAccess: () => void, confirm: ConfirmWorker): Promise<string> {
   // Preserve in-scope aliases, binding their original spelling to the physical
   // path used for approval. Mutations can never operate on the granted root.
   const resolvePath = (submitted: string): string => {
     checkSubmittedPath(submitted);
-    const physical = physicalWorkspacePath(root, submitted, realpathSync.native);
+    const physical = resolvePhysical(submitted);
     if (isSensitive(resolve(root, submitted)) || isSensitive(physical)) throw new Error("Access to sensitive paths is blocked.");
     const path = relative(root, physical);
     if (!path) throw new Error("Cannot change the granted root directory.");
@@ -257,7 +259,7 @@ async function mutate(operation: Mutation, root: string, identityExecutable: str
   check();
   const name = basename(path);
   switch (operation.kind) {
-    case "write": return writeInDirectory(name, operation.content, check, (previous) => confirm([path], previous));
+    case "write": return writeInDirectory(name, operation.content, identityExecutable, check, (previous) => confirm([path], previous));
     case "edit": return editInDirectory(name, operation, check, (previous, edit) => confirm([path], previous, edit));
     case "mkdir": {
       if (lstatSync(name, { throwIfNoEntry: false })) throw new Error(`Path already exists: ${path}`);
@@ -299,9 +301,10 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
       return { value: "valid" };
     }
     const root = realpathSync.native(".");
+    const resolvePhysical = folderPathResolver(root, grant, identityExecutable);
     if (operation.kind === "list" || operation.kind === "read" || operation.kind === "search") {
       if (isSensitive(resolve(root, path))) throw new Error("Access to sensitive paths is blocked.");
-      path = relative(root, physicalWorkspacePath(root, path, realpathSync.native)) || ".";
+      path = relative(root, resolvePhysical(path)) || ".";
       if (isAbsolute(displayPath)) displayPath = path;
     }
     const verifyCwd = (directory: string): void => {
@@ -326,7 +329,7 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     checkAccess();
     if (operation.kind === "write" || operation.kind === "edit" || operation.kind === "mkdir" || operation.kind === "move") {
       if (!confirm) throw new Error("File approval is required.");
-      return { value: await mutate(operation, root, identityExecutable, verifyCwd, checkAccess, confirm) };
+      return { value: await mutate(operation, root, resolvePhysical, identityExecutable, verifyCwd, checkAccess, confirm) };
     }
     const file = operation.kind === "read";
     const directory = file ? dirname(path) : path;
