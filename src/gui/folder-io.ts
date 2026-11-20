@@ -296,12 +296,17 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
         throw new Error("Folder access has changed.");
       }
     };
+    const root = realpathSync.native(".");
+    const resolvePhysical = folderPathResolver(root, grant, identityExecutable);
+    // Older alias grants identified only the computed path. Verify the original
+    // picker spelling within the recorded scope before allowing it to authorize I/O.
+    if (grant.selectedPath && !grant.verifiedSelection && resolvePhysical(grant.selectedPath) !== root) {
+      throw new Error("Choose this folder again to verify access.");
+    }
     if (operation.kind === "probe") {
       checkAccess();
       return { value: "valid" };
     }
-    const root = realpathSync.native(".");
-    const resolvePhysical = folderPathResolver(root, grant, identityExecutable);
     if (operation.kind === "list" || operation.kind === "read" || operation.kind === "search") {
       if (isSensitive(resolve(root, path))) throw new Error("Access to sensitive paths is blocked.");
       path = relative(root, resolvePhysical(path)) || ".";

@@ -16,7 +16,8 @@ static void print_hex(const void *data, size_t size) {
 #include <stdlib.h>
 
 int wmain(int argc, wchar_t **argv) {
-  if (argc != 3) return 1;
+  int from_picker = argc == 2 && wcscmp(argv[1], L"grant-open") == 0;
+  if (!from_picker && argc != 3) return 1;
   if (wcscmp(argv[1], L"short-path") == 0) {
     DWORD size = GetShortPathNameW(argv[2], NULL, 0);
     if (!size) return 1;
@@ -29,14 +30,14 @@ int wmain(int argc, wchar_t **argv) {
     if (!bytes || !utf8 || !WideCharToMultiByte(CP_UTF8, 0, path, length, utf8, bytes, NULL, NULL)) return 1;
     return fwrite(utf8, 1, bytes, stdout) == (size_t)bytes ? 0 : 1;
   }
-  HANDLE dir = CreateFileW(argv[2], FILE_READ_ATTRIBUTES,
+  HANDLE dir = from_picker ? GetStdHandle(STD_INPUT_HANDLE) : CreateFileW(argv[2], FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-  if (dir == INVALID_HANDLE_VALUE) return 1;
+  if (!dir || dir == INVALID_HANDLE_VALUE) return 1;
   BY_HANDLE_FILE_INFORMATION info;
   FILE_OBJECTID_BUFFER id;
   DWORD size;
-  DWORD op = wcscmp(argv[1], L"grant") == 0 ? FSCTL_CREATE_OR_GET_OBJECT_ID : FSCTL_GET_OBJECT_ID;
+  DWORD op = (from_picker || wcscmp(argv[1], L"grant") == 0) ? FSCTL_CREATE_OR_GET_OBJECT_ID : FSCTL_GET_OBJECT_ID;
   int ok = GetFileInformationByHandle(dir, &info)
       && (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
       && !(info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
@@ -101,6 +102,7 @@ static int print_identity(int dir) { (void)dir; return 1; }
 #endif
 
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "grant-open") == 0) return print_identity(STDIN_FILENO);
   if (argc != 3) return 1;
   int dir = open(argv[2], O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   if (dir < 0) return 1;

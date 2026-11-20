@@ -11,7 +11,7 @@ import {
   preferencesPath,
   type TaskRunner,
 } from "../src/gui/controller";
-import { FolderGrants, folderIdentityExecutable } from "../src/gui/folder-grants";
+import { FolderGrants, folderIdentityExecutable, nativeIdentity } from "../src/gui/folder-grants";
 import { GrantedFolderIO } from "../src/gui/folder-io";
 import { initialWindowGeometry } from "../src/gui/layout";
 import { markdownLines } from "../src/gui/markdown";
@@ -60,7 +60,10 @@ describe("GUI controller", () => {
     const controller = new GuiController();
     controller.activeBotId = "first";
     expect((await controller.folderAccess()).workspace).toBeUndefined();
+    const persistent = nativeIdentity(realpathSync.native(folder), true);
     const access = await controller.grantFolder("first", folder);
+    expect(access.folderSessionOnly).toBe(!persistent);
+    if (persistent) expect(new FolderGrants().read("first")?.identity).toBe(persistent);
     expect((await controller.folderAccess()).validWorkspace).toBe(realpathSync(folder));
     controller.activeBotId = "second";
     expect((await controller.workspaceEntries("second")).access.validWorkspace).toBeUndefined();
@@ -73,6 +76,43 @@ describe("GUI controller", () => {
     restarted.revokeFolder("first");
     controller.activeBotId = "first";
     expect((await controller.folderAccess()).validWorkspace).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")("grants the directory opened by the picker when a link target contains ..", async () => {
+    const team = join(home.path, "team");
+    mkdirSync(join(team, "active"), { recursive: true });
+    mkdirSync(join(team, "reports"));
+    mkdirSync(join(home.path, "reports"));
+    const picked = join(home.path, "picked");
+    symlinkSync("team/active", join(home.path, "current"));
+    symlinkSync("current/../reports", picked);
+    writeFileSync(join(team, "reports", "summary.txt"), "selected");
+    const controller = new GuiController();
+    controller.activeBotId = "bot";
+    const access = await controller.grantFolder("bot", picked);
+    expect(access.validWorkspace).toBe(realpathSync.native(picked));
+    expect((await controller.workspaceEntries("bot")).entries).toEqual([{ path: "summary.txt", type: "file" }]);
+    controller.revokeFolder("bot");
+  });
+
+  it("keeps the previous grant if the picker alias changes during identification", async () => {
+    const first = join(home.path, "first");
+    const second = join(home.path, "second");
+    mkdirSync(first);
+    mkdirSync(second);
+    const alias = join(home.path, "picked");
+    const type = process.platform === "win32" ? "junction" : "dir";
+    symlinkSync(first, alias, type);
+    const identify = vi.fn(() => "stable-identity");
+    const grants = new FolderGrants(identify);
+    const original = await grants.grant("bot", first);
+    identify.mockImplementationOnce(() => {
+      unlinkSync(alias);
+      symlinkSync(second, alias, type);
+      return "stable-identity";
+    });
+    await expect(grants.grant("bot", alias)).rejects.toThrow();
+    expect(grants.read("bot")).toEqual(original);
   });
 
   it.each(["revoke", "regrant"])("keeps a later %s from a second store when a slow selection completes", async (operation) => {
@@ -517,6 +557,32 @@ describe("GUI controller", () => {
     expect(legacy).toMatchObject({ path, identity });
     expect(new FolderGrants().read("bot")?.version).toBe(legacy.version);
     expect((await store.grant("bot", folder)).version).not.toBe(legacy.version);
+  });
+
+  it.skipIf(process.platform === "win32")("revalidates earlier alias grants before restoring local access", async () => {
+    const folder = join(home.path, "reports");
+    mkdirSync(folder);
+    mkdirSync(join(home.path, "team", "active"), { recursive: true });
+    mkdirSync(join(home.path, "team", "reports"));
+    const picked = join(home.path, "picked");
+    symlinkSync("reports", picked);
+    const grants = new FolderGrants();
+    try {
+      const { path, identity, version } = await grants.grant("bot", picked);
+      const dir = join(home.path, BOT_PERMISSIONS_DIR);
+      const record = readdirSync(dir).find((entry) => !entry.endsWith(".lock"))!;
+      writeFileSync(join(dir, record), JSON.stringify({ path, identity, version, selectedPath: picked }));
+      const files = new GrantedFolderIO(grants, "bot", grants.read("bot")!);
+      expect(await files.available()).toBe(true);
+
+      unlinkSync(picked);
+      symlinkSync("team/active", join(home.path, "current"));
+      symlinkSync("current/../reports", picked);
+      expect(await files.available()).toBe(false);
+      const renewed = await grants.grant("bot", picked);
+      expect(renewed.path).toBe(realpathSync.native(picked));
+      expect(await new GrantedFolderIO(grants, "bot", renewed).available()).toBe(true);
+    } finally { grants.revoke("bot"); }
   });
 
   it("requires the picker to renew a legacy path-only grant", async () => {

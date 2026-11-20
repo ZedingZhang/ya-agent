@@ -54,7 +54,12 @@ function selectedRootMatches(selected: string, root: string, short?: string[]): 
     const entry = lstatSync(next, { throwIfNoEntry: false });
     if (!entry) return false;
     if (entry.isSymbolicLink()) {
-      const target = resolve(dir, linkTarget(next));
+      const link = linkTarget(next);
+      // Leading ".." starts at the verified parent. After a name it could cross another link.
+      const names = parts(link);
+      const firstChild = names.findIndex((part) => part !== "..");
+      if (firstChild >= 0 && names.slice(firstChild).includes("..")) return false;
+      const target = resolve(dir, link);
       const count = parts(target).length;
       const ancestor = join(parse(root).root, ...parts(root).slice(0, count));
       if (suffix(ancestor, target, short)?.length !== 0) return false;

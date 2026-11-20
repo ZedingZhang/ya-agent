@@ -1,7 +1,7 @@
-import { execFile, execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, mkdirSync, readFileSync, realpath, rmSync, writeFileSync } from "node:fs";
-import { open, stat, type FileHandle } from "node:fs/promises";
+import { open, realpath as nativeRealpath, stat, type FileHandle } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
 import type { FolderAccess } from "./shared";
@@ -10,8 +10,8 @@ import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
 
 export const FOLDER_CHECK_TIMEOUT_MS = 5_000;
 
-// Keep the spelling used by existing grants, including Windows short paths.
-const resolveGrantPath = promisify(realpath);
+// Preserve an existing Windows short spelling only when it names the selection directly.
+const windowsSpelling = promisify(realpath);
 
 export class FolderAccessChangedError extends Error {
   constructor(readonly access: FolderAccess) {
@@ -24,6 +24,7 @@ export interface FolderGrant {
   path: string;
   identity: string;
   selectedPath?: string;
+  verifiedSelection?: true;
 }
 
 function nativeExecutable(name: string): string {
@@ -45,21 +46,27 @@ export function nativeIdentity(path: string, create: boolean, binary = folderIde
   }
 }
 
-async function identifyPickedFolder(path: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await promisify(execFile)(folderIdentityExecutable(), ["grant", toNamespacedPath(path)], {
-      encoding: "utf8", windowsHide: true, timeout: 3_000,
+function readFolderIdentity(args: string[], input: number | "ignore"): Promise<string | undefined> {
+  return new Promise<string | undefined>((done) => {
+    const child = spawn(folderIdentityExecutable(), args, {
+      stdio: [input, "pipe", "ignore"], windowsHide: true, timeout: 3_000,
     });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+    let identity = "";
+    child.stdout!.setEncoding("utf8").on("data", (part: string) => { identity += part; });
+    child.once("error", () => done(undefined));
+    child.once("close", (code) => done(code === 0 ? identity.trim() || undefined : undefined));
+  }).catch(() => undefined);
+}
+
+function identifyPickedFolder(handle: FileHandle): Promise<string | undefined> {
+  // Derive the persistent identity from the held directory, even across a rename.
+  return readFolderIdentity(["grant-open"], handle.fd);
 }
 
 export class FolderGrants {
   private readonly pins = new Map<string, { handle: FileHandle; identity: string; directoryId: { dev: string; ino: string } }>();
 
-  constructor(private readonly identify: (path: string) => string | undefined | Promise<string | undefined> = identifyPickedFolder) {}
+  constructor(private readonly identify: (handle: FileHandle) => string | undefined | Promise<string | undefined> = identifyPickedFolder) {}
 
   private recordPath(botId: string): string {
     return join(dataHome(), BOT_PERMISSIONS_DIR, createHash("sha256").update(botId).digest("hex"));
@@ -76,7 +83,8 @@ export class FolderGrants {
           : createHash("sha256").update(JSON.stringify([grant.path, grant.identity])).digest("hex");
         if (typeof version === "string" && version) record = { path: grant.path, identity: grant.identity, version,
           ...("selectedPath" in grant && typeof grant.selectedPath === "string" && isAbsolute(grant.selectedPath)
-            ? { selectedPath: grant.selectedPath } : {}) };
+            ? { selectedPath: grant.selectedPath } : {}),
+          ...("verifiedSelection" in grant && grant.verifiedSelection === true ? { verifiedSelection: true } : {}) };
       }
     } catch {
       // Missing, malformed and legacy path-only records carry no authority.
@@ -135,35 +143,40 @@ export class FolderGrants {
   }
 
   private async verifyAndGrant(botId: string, folder: string, expected: Buffer | null, deadline: AbortSignal, checkSelection?: () => void): Promise<FolderGrant> {
-    const path = await resolveGrantPath(folder);
-    deadline.throwIfAborted();
-    let handle: FileHandle | undefined;
-    let directoryId: { dev: string; ino: string } | undefined;
+    // Open the picker's spelling first, following links with the OS's path semantics.
+    const handle = await open(folder, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
+    let pinned = false;
     try {
-      let identity = await this.identify(path);
-      if (!identity) {
-        deadline.throwIfAborted();
-        handle = await open(path, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0) | (constants.O_NOFOLLOW ?? 0));
-        deadline.throwIfAborted();
-        const held = await abortable(handle.stat({ bigint: true }), deadline);
-        const current = await abortable(stat(path, { bigint: true }), deadline);
-        if (!held.isDirectory() || held.ino === 0n || held.ino !== current.ino || held.dev !== current.dev || await abortable(resolveGrantPath(path), deadline) !== path) {
-          throw new Error("Choose a folder with a verifiable filesystem identity.");
-        }
-        identity = "session:" + randomUUID();
-        directoryId = { dev: String(held.dev), ino: String(held.ino) };
+      deadline.throwIfAborted();
+      const held = await abortable(handle.stat({ bigint: true }), deadline);
+      if (!held.isDirectory()) throw new Error("Choose a directory.");
+      const canonical = await abortable(nativeRealpath(folder), deadline);
+      let path = canonical;
+      if (process.platform === "win32" && canonical !== folder) {
+        const spelling = await abortable(windowsSpelling(folder).catch(() => undefined), deadline);
+        if (spelling === folder) path = folder;
+      }
+      const persistent = await abortable(Promise.resolve(this.identify(handle)), deadline);
+      const current = await abortable(stat(canonical, { bigint: true }), deadline);
+      const sameDirectory = held.ino !== 0n ? held.ino === current.ino
+        : !!persistent && await abortable(readFolderIdentity(["check", toNamespacedPath(canonical)], "ignore"), deadline) === persistent;
+      if (!sameDirectory || held.dev !== current.dev || await abortable(nativeRealpath(folder), deadline) !== canonical) {
+        throw new Error("The selected directory changed or its identity could not be verified.");
       }
       deadline.throwIfAborted();
       checkSelection?.();
-      const selectedPath = resolve(folder);
-      const grant = { path, identity, version: randomUUID(), ...(selectedPath !== path ? { selectedPath } : {}) };
+      const selectedPath = isAbsolute(folder) ? folder : resolve(folder);
+      const identity = persistent || "session:" + randomUUID();
+      const grant: FolderGrant = { path, identity, version: randomUUID(), ...(selectedPath !== path ? { selectedPath, verifiedSelection: true } : {}) };
       this.commit(botId, grant, expected);
       this.release(botId);
-      if (handle && directoryId) this.pins.set(botId, { handle, identity, directoryId });
+      if (!persistent) {
+        this.pins.set(botId, { handle, identity, directoryId: { dev: String(held.dev), ino: String(held.ino) } });
+        pinned = true;
+      }
       return grant;
-    } catch (error) {
-      await handle?.close();
-      throw error;
+    } finally {
+      if (!pinned) await handle.close();
     }
   }
 
