@@ -32,18 +32,31 @@ function suffix(root: string, candidate: string, short?: string[]): string[] | u
   return input.slice(approved.length);
 }
 
+function linkTarget(path: string): string {
+  const target = readlinkSync(path);
+  // Windows junctions can return the extended spelling of a DOS or UNC path.
+  if (process.platform === "win32" && target.startsWith("\\\\?\\")) {
+    const plain = target.slice(4);
+    if (plain.startsWith("UNC\\")) return "\\\\" + plain.slice(4);
+    if (/^[a-z]:\\/iu.test(plain)) return plain;
+  }
+  return target;
+}
+
 // Recheck the spelling returned by the picker without following a replacement
 // link to an unrelated volume. Accepted link targets lead along the verified root.
-function selectedRootMatches(selected: string, root: string): boolean {
+function selectedRootMatches(selected: string, root: string, short?: string[]): boolean {
   let dir = parse(selected).root;
   for (const name of parts(selected)) {
     const next = join(dir, name);
     const entry = lstatSync(next, { throwIfNoEntry: false });
     if (!entry) return false;
     if (entry.isSymbolicLink()) {
-      const target = resolve(dir, readlinkSync(next));
-      if (!suffix(target, root)) return false;
-      dir = target;
+      const target = resolve(dir, linkTarget(next));
+      const count = parts(target).length;
+      const ancestor = join(parse(root).root, ...parts(root).slice(0, count));
+      if (suffix(ancestor, target, short)?.length !== 0) return false;
+      dir = ancestor;
     } else {
       if (!entry.isDirectory()) return false;
       dir = next;
@@ -61,6 +74,16 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
     }
   }
   let shortParts: string[] | undefined;
+  const shortRootParts = (): string[] | undefined => {
+    if (process.platform !== "win32") return;
+    if (!shortParts) {
+      try {
+        const shortRoot = execFileSync(identityExecutable, ["short-path", root], { encoding: "utf8", windowsHide: true });
+        shortParts = parts(shortRoot);
+      } catch { shortParts = []; }
+    }
+    return shortParts;
+  };
   const components = (input: string): string[] => {
     if (isSensitive(input)) throw new Error("Access to sensitive paths is blocked.");
     if (!isAbsolute(input)) {
@@ -70,18 +93,13 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
     for (const anchor of anchors) {
       const tail = suffix(anchor, normalize(input));
       if (tail) {
-        if (anchor === grant.selectedPath && anchor !== root && !selectedRootMatches(anchor, root)) throw new Error(denied);
+        if (anchor === grant.selectedPath && anchor !== root && !selectedRootMatches(anchor, root, shortRootParts())) throw new Error(denied);
         return tail;
       }
     }
     if (process.platform === "win32" && parse(root).root.toLowerCase() === parse(input).root.toLowerCase()) {
-      if (!shortParts) {
-        try {
-          const shortRoot = execFileSync(identityExecutable, ["short-path", root], { encoding: "utf8", windowsHide: true });
-          shortParts = parts(shortRoot);
-        } catch { shortParts = []; }
-      }
-      const tail = suffix(root, normalize(input), shortParts);
+
+      const tail = suffix(root, normalize(input), shortRootParts());
       if (tail) return tail;
     }
     throw new Error(denied);
@@ -102,7 +120,7 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
         continue;
       }
       if (entry.isSymbolicLink()) {
-        const target = resolve(dirname(path), readlinkSync(path));
+        const target = resolve(dirname(path), linkTarget(path));
         path = walk(components(target), depth + 1, true);
       } else {
         path = realpathSync.native(path);
