@@ -63,7 +63,39 @@
         <div class="workbench">
           <section class="center-panel">
             <div id="timeline" class="timeline" role="log" aria-label="Conversation">
-              <div id="timeline-empty" class="timeline-empty"><div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div><h2 data-i18n="welcome">What would you like to work on?</h2><p id="welcome-hint">Send a message to get started.</p></div>
+              <div id="timeline-empty" class="timeline-empty">
+                <template id="sprout-artwork">
+                  <svg class="home-sprout" viewBox="0 0 560 360" aria-hidden="true" focusable="false">
+                    <defs>
+                      <pattern id="sprout-dots" width="4" height="4" patternUnits="userSpaceOnUse">
+                        <circle cx="2" cy="2" r="1.45" fill="currentColor"/>
+                      </pattern>
+                      <pattern id="sprout-code" width="148" height="24" patternUnits="userSpaceOnUse">
+                        <text x="-8" y="9">await ya.run()  // grow</text>
+                        <text x="-2" y="21">const seed = memory.read()</text>
+                      </pattern>
+                    </defs>
+                    <g class="sprout-shoot">
+                      <path d="M264 296 C273 263 273 236 259 211 Q243 183 211 164
+                               Q251 180 268 208 Q275 217 278 228 Q282 183 306 151
+                               Q322 131 346 115 Q306 151 295 193 C282 233 290 266 284 296
+                               Q276 301 264 296Z"/>
+                      <path class="sprout-leaf-left" d="M261 207 C202 220 156 185 133 125
+                               C182 125 243 137 260 192 Q240 171 182 150 Q235 177 261 207Z"/>
+                      <path class="sprout-leaf-right" d="M298 169 C289 109 346 60 429 47
+                               C415 115 369 173 309 169 Q327 140 380 94 Q322 133 298 169Z"/>
+                    </g>
+                    <g class="sprout-ground" fill="currentColor">
+                      <ellipse cx="273" cy="299" rx="63" ry="2"/>
+                      <ellipse cx="196" cy="300" rx="6" ry="1.5"/>
+                      <ellipse cx="344" cy="299" rx="4" ry="1.25"/>
+                    </g>
+                  </svg>
+                </template>
+                <div class="welcome-badge" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg></div>
+                <h2 data-i18n="welcome">What would you like to work on?</h2>
+                <p id="welcome-hint">Send a message to get started.</p>
+              </div>
             </div>
             <div class="composer-area">
               <div class="composer">

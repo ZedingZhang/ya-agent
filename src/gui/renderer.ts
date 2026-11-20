@@ -497,6 +497,12 @@ function renderNavigation(): void {
   element<HTMLButtonElement>("revoke-folder").disabled = disabled;
 }
 
+function setTimelineEmpty(empty: boolean): void {
+  const home = element<HTMLDivElement>("timeline-empty");
+  home.querySelector(".home-sprout")?.remove();
+  home.hidden = !empty;
+}
+
 function renderBot(): void {
   const timeline = element<HTMLDivElement>("timeline");
   timeline.querySelectorAll(".turn").forEach((turn) => turn.remove());
@@ -532,7 +538,7 @@ function renderBot(): void {
     for (const change of turn.changes ?? []) answer.parentElement?.append(fileChangeCard(change, true));
     activeAnswer = undefined;
   }
-  element<HTMLDivElement>("timeline-empty").hidden = currentBot.turns.length > 0;
+  setTimelineEmpty(currentBot.turns.length === 0);
   element<HTMLTextAreaElement>("task-input").value = currentBot.draft;
   resizeTaskInput();
   element<HTMLButtonElement>("learn-button").disabled = !lastAnswer;
@@ -799,7 +805,7 @@ function fileRow(name: string, type: string): HTMLButtonElement {
 
 function appendTask(task: string, images: SelectedImage[]): HTMLElement {
   const timeline = element<HTMLDivElement>("timeline");
-  element<HTMLDivElement>("timeline-empty").hidden = true;
+  setTimelineEmpty(false);
   const turn = document.createElement("article");
   turn.className = "turn";
   const prompt = document.createElement("div");
@@ -1710,7 +1716,33 @@ function applyCommittedOutcome(outcome: import("./shared").CommittedOutcome): vo
   if (persistSessions()) void bridge.acknowledgeOutcome(outcome.id).catch(() => undefined);
 }
 
+function registerHomeSprout(): void {
+  const timeline = element<HTMLDivElement>("timeline");
+  const home = element<HTMLDivElement>("timeline-empty");
+  const template = element<HTMLTemplateElement>("sprout-artwork");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let codeFill = false;
+
+  timeline.addEventListener("click", (event) => {
+    if (event.button !== 0 || (event.target !== home && event.target !== timeline)) return;
+    if (home.hidden || reducedMotion.matches || home.querySelector(".home-sprout")) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && timeline.contains(selection.anchorNode)) return;
+
+    const sprout = template.content.querySelector("svg")!.cloneNode(true) as SVGSVGElement;
+    sprout.classList.toggle("code-fill", codeFill);
+    codeFill = !codeFill;
+    const finish = (event: AnimationEvent) => {
+      if (event.target === sprout) sprout.remove();
+    };
+    sprout.addEventListener("animationend", finish);
+    sprout.addEventListener("animationcancel", finish);
+    home.append(sprout);
+  });
+}
+
 function registerEvents(): void {
+  registerHomeSprout();
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
   });
