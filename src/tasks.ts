@@ -11,6 +11,7 @@ import {
   type ReasoningEffort,
 } from "./config";
 import type { DeepSeekCredential } from "./credentials";
+import type { TaskWorkspace } from "./local";
 import type { WebMode } from "./types";
 
 export const TASK_STORE_VERSION = 1;
@@ -576,11 +577,14 @@ export class TaskStore {
       .map((record) => toPublicRecord(record, false));
   }
 
-  create(input: CreateTaskInput): TaskRecord {
+  create(input: CreateTaskInput, taskWorkspace?: TaskWorkspace): TaskRecord {
     assertNoSecretFields(input, "createTask");
     const objective = validateObjective(input.objective);
     const sessionId = validateSessionId(input.sessionId);
-    const workspace = input.workspace !== undefined ? validateWorkspaceIdentity(input.workspace) : undefined;
+    // The desktop worker verified this grant before starting the task. Touching
+    // its mount synchronously here would block the Electron main process.
+    const workspace = input.workspace !== undefined ? validateWorkspaceIdentity(input.workspace)
+      : taskWorkspace && (taskWorkspace.folderScoped ? taskWorkspace.root : validateWorkspaceIdentity(taskWorkspace.root));
     const options = validateExecutionOptions(
       {
         ...input.options,

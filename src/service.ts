@@ -1,7 +1,7 @@
 import { assertImageInputSupported, ModelConfig } from "./config";
 import { DeepSeekClient } from "./deepseek";
 import { assertImageCount } from "./images";
-import { LocalWorkspace } from "./local";
+import type { TaskWorkspace } from "./local";
 import { singleAgent, toaAgent, type RunResult } from "./orchestrator";
 import {
   ACTIVE_TASK_STATUSES,
@@ -22,7 +22,7 @@ import {
   type TaskStoreOptions,
   type TransitionTaskInput,
 } from "./tasks";
-import type { ConversationMessage, ToolHandler, UserImageContentPart, WebMode } from "./types";
+import type { BotProfile, ConversationMessage, ToolHandler, UserImageContentPart, WebMode } from "./types";
 import { search } from "./web";
 import type { DeepSeekCredential } from "./credentials";
 
@@ -50,12 +50,13 @@ export type {
 
 export interface RunTaskOptions {
   sessionId?: string;
+  botProfile?: BotProfile;
   history?: ConversationMessage[];
   webMode?: WebMode;
   toa?: boolean;
   toaWorkers?: number;
   onContent?: (content: string) => void;
-  localWorkspace?: LocalWorkspace;
+  localWorkspace?: TaskWorkspace;
   clientFactory?: (apiKey: DeepSeekCredential, signal?: AbortSignal) => DeepSeekClient;
   webSearch?: ToolHandler;
   images?: UserImageContentPart[];
@@ -122,7 +123,6 @@ export async function runTask(
   const record = store.create({
     objective: task,
     sessionId: options.sessionId,
-    workspace: localWorkspace?.root,
     config,
     options: {
       model: config.model,
@@ -139,7 +139,7 @@ export async function runTask(
       imageCount: images.length,
       historyLength: history.length,
     },
-  });
+  }, localWorkspace);
   const taskId = record.id;
   const initialRevision = record.revision;
   options.onTaskCreated?.(structuredClone(record));
@@ -149,8 +149,9 @@ export async function runTask(
     options.signal?.throwIfAborted();
     const client = options.clientFactory?.(apiKey, options.signal) ?? new DeepSeekClient(apiKey, undefined, undefined, options.signal);
     const webSearch: ToolHandler = options.webSearch ?? ((arguments_, signal) => search(arguments_, undefined, undefined, signal ?? options.signal));
+    const context = options.botProfile ? { botProfile: options.botProfile, history } : history;
     result = toa
-      ? await toaAgent(client, task, config, toaWorkers, webSearch, images, history, options.signal)
+      ? await toaAgent(client, task, config, toaWorkers, webSearch, images, context, options.signal)
       : await singleAgent(
           client,
           task,
@@ -160,7 +161,7 @@ export async function runTask(
           localWorkspace,
           webSearch,
           images,
-          history,
+          context,
         );
     options.signal?.throwIfAborted();
   } catch (error) {

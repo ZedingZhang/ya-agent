@@ -1,4 +1,6 @@
 import { chmodSync, existsSync, fchownSync, fstatSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { writeSync } from "node:fs";
+import { writeInDirectory } from "../src/gui/folder-io";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_TEXT_BYTES, LocalWorkspace, type LocalAction, type LocalActivity } from "../src/local";
@@ -6,7 +8,7 @@ import { tempHome, type TempHome } from "./helpers";
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, fchownSync: vi.fn(actual.fchownSync), fstatSync: vi.fn(actual.fstatSync), renameSync: vi.fn(actual.renameSync) };
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync), fchownSync: vi.fn(actual.fchownSync), fstatSync: vi.fn(actual.fstatSync), renameSync: vi.fn(actual.renameSync) };
 });
 
 describe("reliable local edits", () => {
@@ -25,6 +27,19 @@ describe("reliable local edits", () => {
     workspace = new LocalWorkspace(root, (action) => { actions.push(action); return true; });
   });
   afterEach(() => home.cleanup());
+
+  it.each([false, true])("keeps the destination intact when staging a desktop write runs out of space (existing: %s)", async (existing) => {
+    const path = join(root, "note.txt");
+    if (existing) writeFileSync(path, "original");
+    vi.mocked(writeFileSync).mockImplementationOnce((fd) => {
+      if (typeof fd !== "number") throw new Error("Expected an open stage");
+      writeSync(fd, "UP");
+      throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+    });
+    await expect(writeInDirectory(path, "UPDATED!", "", () => {}, async () => true)).rejects.toThrow("disk full");
+    expect(readdirSync(root)).toEqual(existing ? ["note.txt"] : []);
+    if (existing) expect(readFileSync(path, "utf8")).toBe("original");
+  });
 
   it("applies a disjoint batch against the original bytes and returns a new revision", async () => {
     const path = join(root, "code.ts");
@@ -115,11 +130,15 @@ describe("reliable local edits", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("refuses an edit whose ownership it cannot restore", async () => {
+  it("refuses an edit whose ownership it cannot restore", async () => {
     const path = join(root, "code.txt");
     writeFileSync(path, "old");
     const args = request("code.txt", "old", "new");
-    vi.mocked(fstatSync).mockReturnValueOnce({ uid: 4242, gid: 4242 } as unknown as ReturnType<typeof fstatSync>);
+    const fs = await vi.importActual<typeof import("node:fs")>("node:fs");
+    vi.mocked(fstatSync).mockImplementationOnce((fd) => {
+      const staged = fs.fstatSync(fd, { bigint: true });
+      return Object.assign(staged, { uid: staged.uid + 1n });
+    });
     vi.mocked(fchownSync).mockImplementationOnce(() => { throw new Error("EPERM: operation not permitted"); });
     await expect(workspace.edit(args)).rejects.toThrow("Cannot preserve the owner");
     expect(readFileSync(path, "utf8")).toBe("old");
