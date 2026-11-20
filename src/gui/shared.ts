@@ -4,7 +4,7 @@ import type { FileChange } from "../file-diff";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
-import type { ConversationMessage, ImageDetail, WebMode } from "../types";
+import type { BotProfile, ConversationMessage, ImageDetail, WebMode } from "../types";
 import type { Language } from "./controller";
 
 export interface SerializedConfig {
@@ -21,7 +21,8 @@ export interface AppState {
   language: Language;
   workspace?: string;
   validWorkspace?: string;
-  workspaces: string[];
+  folderSessionOnly?: boolean;
+  folderGrantVersion?: string;
   stream: boolean;
   hasApiKey: boolean;
   accountSignedIn: boolean;
@@ -30,6 +31,18 @@ export interface AppState {
   cards: MemoryCard[];
   auditLogCount: number;
   auditLogBytes: number;
+}
+
+export interface FolderAccess {
+  folderGrantVersion: string | undefined;
+  folderSessionOnly: boolean;
+  workspace: string | undefined;
+  validWorkspace: string | undefined;
+}
+
+export interface WorkspaceListing {
+  access: FolderAccess;
+  entries: Array<{ path: string; type: string }>;
 }
 
 export interface WorkspaceModelSelection {
@@ -48,7 +61,9 @@ export interface SettingsUpdate {
 }
 
 export interface RendererTaskOptions {
+  turnId?: string;
   sessionId?: string;
+  botProfile?: BotProfile;
   task: string;
   history?: ConversationMessage[];
   webMode: WebMode;
@@ -56,6 +71,7 @@ export interface RendererTaskOptions {
   toaWorkers: 1 | 2;
   stream: boolean;
   local: boolean;
+  folderGrantVersion?: string;
   exec?: boolean;
   imageIds: string[];
   imageDetail: ImageDetail;
@@ -68,11 +84,21 @@ export interface SelectedImage {
   mimeType: string;
 }
 
+type FileOutcome = { type: "activity"; activity: LocalActivity } | { type: "file-change"; change: FileChange };
+
+export interface CommittedOutcome {
+  id: string;
+  botId: string;
+  turnId: string;
+  event: FileOutcome;
+}
+
 export type TaskEvent =
+  | { type: "started" }
   | { type: "content"; content: string }
-  | { type: "activity"; activity: LocalActivity }
+  | FileOutcome
   | { type: "command"; event: CommandEvent }
-  | { type: "file-change"; change: FileChange }
+  | { type: "committed"; outcome: CommittedOutcome }
   | { type: "local-action"; id: string; action: LocalAction }
   | { type: "local-action-expired"; id: string }
   | { type: "local-action-resolved"; id: string };
@@ -82,17 +108,22 @@ export type TaskTransportEvent = TaskEvent | { type: "flush"; id: string };
 
 export interface YaBridge {
   state(): Promise<AppState>;
-  chooseWorkspace(): Promise<string | undefined>;
-  activateWorkspace(workspace?: string): Promise<AppState>;
+  chooseWorkspace(botId: string): Promise<FolderAccess | undefined>;
+  revokeFolder(botId: string): Promise<FolderAccess>;
+  selectBot(botId: string): Promise<FolderAccess>;
+  restoreBotIds(ids: string[]): Promise<string[]>;
   chooseImages(): Promise<SelectedImage[] | undefined>;
   clearImages(): Promise<void>;
-  workspaceEntries(path?: string): Promise<Array<{ path: string; type: string }>>;
+  checkFolder(botId: string): Promise<FolderAccess>;
+  workspaceEntries(botId: string, path: string, folderGrantVersion?: string): Promise<WorkspaceListing>;
   saveWorkspaceModelSelection(selection: WorkspaceModelSelection): Promise<AppState>;
   saveSettings(settings: SettingsUpdate): Promise<AppState>;
   loginDeepSeek(): Promise<AppState>;
   cancelDeepSeekLogin(): Promise<void>;
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
-  runTask(options: RendererTaskOptions): Promise<RunResult>;
+  runTask(options: RendererTaskOptions): Promise<RunResult | { folderAccessChanged: FolderAccess }>;
+  pendingOutcomes(): Promise<CommittedOutcome[]>;
+  acknowledgeOutcome(id: string): Promise<void>;
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
