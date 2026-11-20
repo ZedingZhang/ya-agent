@@ -272,11 +272,21 @@ async function mutate(operation: Mutation, root: string, resolvePhysical: (submi
 }
 
 async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise<FolderResult> {
-  const { botId, grant, operation, sessionDirectoryId, identityExecutable } = request;
+  const { botId, grant: requested, operation, sessionDirectoryId, identityExecutable } = request;
   let displayPath = normalize(operation.path);
   let path = displayPath;
   checkSubmittedPath(operation.path);
 
+  const grants = new FolderGrants();
+  const currentGrant = (): FolderGrant => {
+    const current = grants.read(botId);
+    if (!current || current.version !== requested.version || current.path !== requested.path || current.identity !== requested.identity
+      || current.selectedPath !== requested.selectedPath || current.verifiedSelection !== requested.verifiedSelection) {
+      throw new Error("Folder access has changed.");
+    }
+    return current;
+  };
+  const grant = currentGrant();
   process.chdir(grant.path);
   const fd = openSync(".", constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
   try {
@@ -286,12 +296,10 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
       : nativeIdentity(".", false, identityExecutable) === grant.identity;
     if (!verified) throw new Error("Folder access has changed.");
 
-    const grants = new FolderGrants();
     const checkAccess = (): void => {
-      const current = grants.read(botId);
+      currentGrant();
       const attached = statSync(grant.path, { bigint: true, throwIfNoEntry: false });
-      if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity
-        || !attached || attached.dev !== held.dev || attached.ino !== held.ino || realpathSync(grant.path) !== grant.path
+      if (!attached || attached.dev !== held.dev || attached.ino !== held.ino || realpathSync(grant.path) !== grant.path
         || (!held.ino && nativeIdentity(grant.path, false, identityExecutable) !== grant.identity)) {
         throw new Error("Folder access has changed.");
       }
@@ -300,7 +308,7 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     const resolvePhysical = folderPathResolver(root, grant, identityExecutable);
     // Older alias grants identified only the computed path. Verify the original
     // picker spelling within the recorded scope before allowing it to authorize I/O.
-    if (grant.selectedPath && !grant.verifiedSelection && resolvePhysical(grant.selectedPath) !== root) {
+    if (!grant.verifiedSelection && resolvePhysical(grant.selectedPath) !== root) {
       throw new Error("Choose this folder again to verify access.");
     }
     if (operation.kind === "probe") {

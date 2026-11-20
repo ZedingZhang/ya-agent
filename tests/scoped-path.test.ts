@@ -20,7 +20,7 @@ it("rejects an unapproved absolute root before looking up its entries, including
     mkdirSync(outside);
     const alias = join(root, "alias");
     symlinkSync(outside, alias, process.platform === "win32" ? "junction" : "dir");
-    const resolvePath = folderPathResolver(root, { path: root, identity: "test", version: "1" }, folderIdentityExecutable());
+    const resolvePath = folderPathResolver(root, { path: root, selectedPath: root, identity: "test", version: "1" }, folderIdentityExecutable());
     vi.mocked(lstatSync).mockClear();
     expect(() => resolvePath(join(outside, "note"))).toThrow("inside the authorized workspace");
     if (process.platform === "win32") {

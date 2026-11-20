@@ -73,7 +73,7 @@ function selectedRootMatches(selected: string, root: string, short?: string[]): 
 }
 
 export function folderPathResolver(root: string, grant: FolderGrant, identityExecutable: string): (submitted: string) => string {
-  const anchors = new Set([root, grant.path, ...(grant.selectedPath ? [grant.selectedPath] : [])]);
+  const anchors = new Set([root, grant.path, grant.selectedPath]);
   if (process.platform === "darwin") {
     for (const alias of ["/tmp", "/var", "/etc"]) {
       if ((root === "/private" + alias || root.startsWith("/private" + alias + "/"))
@@ -95,7 +95,7 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
     for (const anchor of anchors) {
       const tail = suffix(anchor, input);
       if (tail) {
-        if (anchor === grant.selectedPath && anchor !== root && !selectedRootMatches(anchor, root, shortRootParts())) throw new Error(denied);
+        if (anchor === grant.selectedPath && anchor !== root && anchor !== grant.path && !selectedRootMatches(anchor, root, shortRootParts())) throw new Error(denied);
         return tail;
       }
     }

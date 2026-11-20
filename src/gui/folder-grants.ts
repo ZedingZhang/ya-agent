@@ -9,6 +9,7 @@ import { abortable } from "../cancellation";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
 
 export const FOLDER_CHECK_TIMEOUT_MS = 5_000;
+const GRANT_SCHEMA_VERSION = 1;
 
 // Preserve an existing Windows short spelling only when it names the selection directly.
 const windowsSpelling = promisify(realpath);
@@ -20,11 +21,30 @@ export class FolderAccessChangedError extends Error {
 }
 
 export interface FolderGrant {
+  schemaVersion?: typeof GRANT_SCHEMA_VERSION;
   version: string;
   path: string;
   identity: string;
-  selectedPath?: string;
+  selectedPath: string;
   verifiedSelection?: true;
+}
+
+function parseGrant(json: string): FolderGrant | undefined {
+  const value: unknown = JSON.parse(json);
+  if (!value || typeof value !== "object") return;
+  const { schemaVersion, version, path, identity, selectedPath, verifiedSelection } = value as Record<string, unknown>;
+  if (typeof version !== "string" || !version || typeof identity !== "string" || !identity
+    || typeof path !== "string" || !isAbsolute(path) || typeof selectedPath !== "string" || !isAbsolute(selectedPath)) return;
+
+  // Earlier writers only saved selectedPath for aliases. An identity alone
+  // identifies the recorded directory but cannot prove which folder was picked.
+  if (schemaVersion === undefined) {
+    if (selectedPath === path) return;
+    return { version, path, identity, selectedPath, ...(verifiedSelection === true ? { verifiedSelection: true } : {}) };
+  }
+  if (schemaVersion === GRANT_SCHEMA_VERSION && verifiedSelection === true) {
+    return { schemaVersion, version, path, identity, selectedPath, verifiedSelection };
+  }
 }
 
 function nativeExecutable(name: string): string {
@@ -75,17 +95,7 @@ export class FolderGrants {
   read(botId: string): FolderGrant | undefined {
     let record: FolderGrant | undefined;
     try {
-      const grant: unknown = JSON.parse(readFileSync(this.recordPath(botId), "utf8"));
-      if (typeof grant === "object" && grant !== null && "path" in grant && "identity" in grant
-        && typeof grant.path === "string" && isAbsolute(grant.path) && typeof grant.identity === "string") {
-        // Existing identity-bound grants predate per-selection versions.
-        const version = "version" in grant ? grant.version
-          : createHash("sha256").update(JSON.stringify([grant.path, grant.identity])).digest("hex");
-        if (typeof version === "string" && version) record = { path: grant.path, identity: grant.identity, version,
-          ...("selectedPath" in grant && typeof grant.selectedPath === "string" && isAbsolute(grant.selectedPath)
-            ? { selectedPath: grant.selectedPath } : {}),
-          ...("verifiedSelection" in grant && grant.verifiedSelection === true ? { verifiedSelection: true } : {}) };
-      }
+      record = parseGrant(readFileSync(this.recordPath(botId), "utf8"));
     } catch {
       // Missing, malformed and legacy path-only records carry no authority.
     }
@@ -167,7 +177,7 @@ export class FolderGrants {
       checkSelection?.();
       const selectedPath = isAbsolute(folder) ? folder : resolve(folder);
       const identity = persistent || "session:" + randomUUID();
-      const grant: FolderGrant = { path, identity, version: randomUUID(), ...(selectedPath !== path ? { selectedPath, verifiedSelection: true } : {}) };
+      const grant: FolderGrant = { schemaVersion: GRANT_SCHEMA_VERSION, version: randomUUID(), path, identity, selectedPath, verifiedSelection: true };
       this.commit(botId, grant, expected);
       this.release(botId);
       if (!persistent) {

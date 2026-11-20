@@ -392,7 +392,7 @@ describe("GUI controller", () => {
     vi.spyOn(child, "kill").mockReturnValue(true);
     vi.mocked(fork).mockReturnValueOnce(child);
     const grants = new FolderGrants();
-    const files = new GrantedFolderIO(grants, "bot", { path: home.path, version: "version", identity: "identity" });
+    const files = new GrantedFolderIO(grants, "bot", { path: home.path, selectedPath: home.path, version: "version", identity: "identity" });
     const stop = new AbortController();
     const confirm = vi.fn(async () => true);
     const result = files.mkdir("notes", confirm, stop.signal).catch((reason: unknown) => reason);
@@ -417,7 +417,7 @@ describe("GUI controller", () => {
     const stop = new AbortController();
     const onActivity = vi.fn();
     const onFileChange = vi.fn();
-    const scopedFolder = new GrantedFolderIO(new FolderGrants(), "bot", { path: home.path, version: "version", identity: "identity" });
+    const scopedFolder = new GrantedFolderIO(new FolderGrants(), "bot", { path: home.path, selectedPath: home.path, version: "version", identity: "identity" });
     const workspace = new LocalWorkspace(home.path, () => true, onActivity, { scopedFolder, signal: stop.signal, onFileChange });
     const write = workspace.write({ path: "notes.txt", content: "approved" });
     child.emit("message", { type: "preview", paths: ["notes.txt"] });
@@ -546,17 +546,30 @@ describe("GUI controller", () => {
     } finally { grants.revoke("bot"); }
   });
 
-  it("keeps identity-bound grants from earlier releases usable until the next selection", async () => {
+  it.each([false, true])("requires a fresh selection for old identity records missing the picker path (version present: %s)", async (versioned) => {
     const folder = join(home.path, "notes");
     mkdirSync(folder);
-    const store = new FolderGrants(() => "persistent-directory-id");
-    const { path, identity } = await store.grant("bot", folder);
+    const picked = realpathSync.native(folder);
+    const store = new FolderGrants();
+    const grant = await store.grant("bot", picked);
     const directory = join(home.path, BOT_PERMISSIONS_DIR);
-    writeFileSync(join(directory, readdirSync(directory)[0]!), JSON.stringify({ path, identity }));
-    const legacy = store.read("bot")!;
-    expect(legacy).toMatchObject({ path, identity });
-    expect(new FolderGrants().read("bot")?.version).toBe(legacy.version);
-    expect((await store.grant("bot", folder)).version).not.toBe(legacy.version);
+    const record = join(directory, readdirSync(directory).find((name) => !name.endsWith(".lock"))!);
+    writeFileSync(record, JSON.stringify({ path: grant.path, identity: grant.identity, ...(versioned ? { version: grant.version } : {}) }));
+
+    const controller = new GuiController();
+    controller.activeBotId = "bot";
+    try {
+      expect(store.read("bot")).toBeUndefined();
+      expect((await controller.workspaceEntries("bot")).access.validWorkspace).toBeUndefined();
+      expect(await new GrantedFolderIO(store, "bot", grant).available()).toBe(false);
+      const renewed = await controller.grantFolder("bot", picked);
+      expect((await controller.folderAccess()).validWorkspace).toBe(picked);
+      expect(renewed.folderGrantVersion).not.toBe(grant.version);
+      expect(JSON.parse(readFileSync(record, "utf8"))).toMatchObject({ schemaVersion: 1, selectedPath: picked });
+      const restarted = new GuiController();
+      restarted.activeBotId = "bot";
+      expect((await restarted.folderAccess()).validWorkspace).toBe(renewed.folderSessionOnly ? undefined : picked);
+    } finally { controller.revokeFolder("bot"); }
   });
 
   it.skipIf(process.platform === "win32")("revalidates earlier alias grants before restoring local access", async () => {
@@ -568,10 +581,12 @@ describe("GUI controller", () => {
     symlinkSync("reports", picked);
     const grants = new FolderGrants();
     try {
-      const { path, identity, version } = await grants.grant("bot", picked);
+      const grant = await grants.grant("bot", picked);
+      const { path, identity, version } = grant;
       const dir = join(home.path, BOT_PERMISSIONS_DIR);
       const record = readdirSync(dir).find((entry) => !entry.endsWith(".lock"))!;
-      writeFileSync(join(dir, record), JSON.stringify({ path, identity, version, selectedPath: picked }));
+      const legacy = { path, identity, version, selectedPath: picked };
+      writeFileSync(join(dir, record), JSON.stringify(legacy));
       const files = new GrantedFolderIO(grants, "bot", grants.read("bot")!);
       expect(await files.available()).toBe(true);
 
@@ -579,6 +594,10 @@ describe("GUI controller", () => {
       symlinkSync("team/active", join(home.path, "current"));
       symlinkSync("current/../reports", picked);
       expect(await files.available()).toBe(false);
+      expect(await new GrantedFolderIO(grants, "bot", grant).available()).toBe(false);
+      // The previous picker verified the held directory when it wrote this marker.
+      writeFileSync(join(dir, record), JSON.stringify({ ...legacy, verifiedSelection: true }));
+      expect(await new GrantedFolderIO(grants, "bot", grants.read("bot")!).available()).toBe(true);
       const renewed = await grants.grant("bot", picked);
       expect(renewed.path).toBe(realpathSync.native(picked));
       expect(await new GrantedFolderIO(grants, "bot", renewed).available()).toBe(true);
