@@ -211,6 +211,36 @@ describe("DeepSeek client", () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
+  it.each([null, ""] as const)("rejects clean EOF after visible content with finish reason %j", async (finishReason) => {
+    const chunk = { choices: [{ delta: { content: "Partial answer" }, finish_reason: finishReason }] };
+    const fetcher = vi.fn<FetchLike>(async () => streamResponse([`data: ${JSON.stringify(chunk)}\n\n`]));
+    const onContent = vi.fn();
+    const sleep = vi.fn(async () => undefined);
+    await expect(new DeepSeekClient("key", fetcher, sleep).completeStream([], new ModelConfig(), 100, onContent))
+      .rejects.toThrow("DeepSeek API stream ended before completion.");
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Partial answer");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("retries a truncated stream before any visible text", async () => {
+    const fetcher = vi.fn<FetchLike>()
+      .mockImplementationOnce(async () => streamResponse([
+        'data: {"choices":[{"delta":{"content":"","reasoning_content":"unfinished"},"finish_reason":null}]}\n\n',
+      ]))
+      .mockImplementationOnce(async () => streamResponse([
+        'data: {"choices":[{"delta":{"content":"Complete answer"},"finish_reason":"stop"}]}\n\n',
+        'data: [DONE]\n\n',
+      ]));
+    const onContent = vi.fn();
+    const sleep = vi.fn(async () => undefined);
+    await expect(new DeepSeekClient("key", fetcher, sleep).completeStream([], new ModelConfig(), 100, onContent))
+      .resolves.toMatchObject({ content: "Complete answer" });
+    expect(onContent).toHaveBeenCalledExactlyOnceWith("Complete answer");
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
   it("does not retry callback exceptions", async () => {
     const fetcher = vi.fn<FetchLike>(async () => streamResponse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n']));
     const failure = new TypeError("callback failed");
@@ -449,6 +479,7 @@ describe("DeepSeek client", () => {
   it("decodes split UTF-8 bytes, CRLF frames, and an unterminated final frame", async () => {
     const bytes = new TextEncoder().encode(
       ': heartbeat\r\ndata: {"choices":[{"delta":{"content":"你好🙂"}}]}\r\n\r\n' +
+      'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\r\n\r\n' +
       'data: {"usage":{"total_tokens":3}}',
     );
     const fetcher: FetchLike = async () => new Response(new ReadableStream<Uint8Array>({
