@@ -530,6 +530,31 @@ describe("durable task identity and lifecycle records", () => {
     });
   });
 
+  it("settles the task when onTaskCreated throws and allows another task on the same store", async () => {
+    const store = new TaskStore();
+    const config = new ModelConfig();
+    const callbackError = new Error("Task notification failed");
+    const fetcher = vi.fn(async () =>
+      Response.json({ choices: [{ message: { role: "assistant", content: "Done" } }] }));
+    const options = {
+      taskStore: store,
+      clientFactory: () => new DeepSeekClient("test-key", fetcher),
+    };
+
+    await expect(runTask("test-key", "First task", config, {
+      ...options,
+      onTaskCreated: () => { throw callbackError; },
+    })).rejects.toBe(callbackError);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(store.list()).toEqual([
+      expect.objectContaining({ objective: "First task", status: "failed", error: callbackError.message }),
+    ]);
+
+    const next = await runTask("test-key", "Next task", config, options);
+    expect(store.get(next.taskId!)?.status).toBe("completed");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("does not downgrade a completed execution to failed if persisting completion fails", async () => {
     let failNextWrite = false;
     const store = new TaskStore({
