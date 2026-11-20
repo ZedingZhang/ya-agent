@@ -8,3 +8,4 @@ mkdirSync(destination, { recursive: true });
 for (const file of ["index.html", "styles.css"]) {
   copyFileSync(join(source, file), join(destination, file));
 }
+copyFileSync(resolve(source, "../octop-memory.py"), resolve(destination, "../octop-memory.py"));

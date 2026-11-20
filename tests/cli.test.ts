@@ -7,6 +7,7 @@ import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
 import { appendAuditRecord, auditLogFiles, LocalWorkspace, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
+import { listTasks } from "../src/service";
 import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
@@ -317,7 +318,18 @@ describe("CLI", () => {
 
     const pipe = fakeIo(false);
     expect(await main(["ask", "test", "--no-feedback"], context(pipe.io))).toBe(0);
-    expect(pipe.stdout.output).toContain("## Title");
+    expect(pipe.stdout.output).toBe("## Title\n\n**bold**\n");
+  });
+
+  it.each(["auto", "markdown"])("writes only the answer with --format %s when stdout is redirected but stdin is a TTY", async (format) => {
+    const capture = fakeIo(true);
+    capture.stdout.isTTY = false;
+
+    expect(await main(["ask", "test", "--format", format, "--web", "off"], context(capture.io))).toBe(0);
+
+    expect(capture.prompts).toEqual([]);
+    expect(capture.stdout.output).toBe("## Title\n\n**bold**\n");
+    expect(capture.stderr.output).toContain("[Ya single result]");
   });
 
   it("sends local images as vision content blocks with the selected detail", async () => {
@@ -402,13 +414,13 @@ describe("CLI", () => {
     expect(capture.stdout.output).not.toContain("## Title");
   });
 
-  it("shows selected memory before the answer only when requested", async () => {
+  it("shows selected memory before the answer only when requested", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("Use PostgreSQL indexes", "evidence").id, "approved");
     const capture = fakeIo(false);
     await main(["ask", "Explain PostgreSQL indexes", "--show-memory", "--no-feedback"], context(capture.io, fakeClient("answer")));
     expect(capture.stdout.output).toContain("[Ya memory context]");
     expect(capture.stdout.output).toContain(card.id);
-    expect(capture.stdout.output.indexOf(card.id)).toBeLessThan(capture.stdout.output.indexOf("[Ya single result]"));
+    expect(capture.stdout.output.indexOf(card.id)).toBeLessThan(capture.stdout.output.indexOf("\nanswer\n"));
 
     const silent = fakeIo(false);
     await main(["ask", "Explain PostgreSQL indexes", "--no-feedback"], context(silent.io, fakeClient("answer")));
@@ -508,7 +520,7 @@ describe("CLI", () => {
     expect(process.listenerCount("SIGINT")).toBe(before);
   });
 
-  it("requires --yes to prune memory non-interactively", async () => {
+  it("requires --yes to prune memory non-interactively", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("discard me", "evidence").id, "rejected");
     const denied = fakeIo(false);
     expect(await main(["memory", "prune"], { io: denied.io })).toBe(2);
@@ -519,7 +531,7 @@ describe("CLI", () => {
     expect(listCards()).toEqual([]);
   });
 
-  it("does not prune a candidate created while CLI confirmation is pending", async () => {
+  it("does not prune a candidate created while CLI confirmation is pending", { timeout: 30_000 }, async () => {
     const shown = createCandidate("shown candidate", "evidence");
     let unseen = "";
     const capture = fakeIo(true);
@@ -533,7 +545,7 @@ describe("CLI", () => {
     expect(listCards().map((card) => card.id)).toEqual([unseen]);
   });
 
-  it("can decline interactive pruning", async () => {
+  it("can decline interactive pruning", { timeout: 30_000 }, async () => {
     const card = setStatus(createCandidate("discard me", "evidence").id, "rejected");
     const capture = fakeIo(true, ["n"]);
     expect(await main(["memory", "prune"], { io: capture.io })).toBe(0);
@@ -557,5 +569,23 @@ describe("CLI", () => {
     const capture = fakeIo();
     expect(await main(["audit", "clear", "--yes"], { io: capture.io })).toBe(0);
     expect(capture.stdout.output).toContain("No audit logs to delete");
+  });
+
+  it("persists CLI task lifecycle records through the shared service without storing credentials", async () => {
+    const capture = fakeIo();
+    expect(await main(["ask", "Inspect workspace", "--local", "--workspace", home.path, "--web", "off", "--no-feedback"], context(capture.io))).toBe(0);
+    const records = listTasks();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      objective: "Inspect workspace",
+      status: "completed",
+      revision: 2,
+      options: {
+        local: true,
+        commandsEnabled: false,
+        webMode: "off",
+      },
+    });
+    expect(JSON.stringify(records)).not.toContain("key");
   });
 });

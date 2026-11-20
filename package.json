@@ -27,6 +27,12 @@
     "node": ">=22"
   },
   "scripts": {
+    "build:folder-identity": "cmake -S src/gui/native -B build/folder-identity -DCMAKE_BUILD_TYPE=Release && cmake --build build/folder-identity --config Release",
+    "pretest": "npm run build:folder-identity && npm run build",
+    "pretest:watch": "npm run pretest",
+    "presmoke:gui": "npm run build:folder-identity",
+    "pregui": "npm run build:folder-identity",
+    "prepackage:gui": "npm run build:folder-identity",
     "build": "tsc -p tsconfig.json && node dist/typescript/scripts/copy-assets.js",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
@@ -36,7 +42,7 @@
     "check": "npm run typecheck && npm test && npm run build",
     "start": "npm run build && node dist/typescript/cli.js",
     "gui": "npm run build && node dist/typescript/scripts/run-gui.js",
-    "package:cli": "npm run build && pkg --compress GZip --output release/ya dist/typescript/cli.js",
+    "package:cli": "npm run build && pkg --config package.json --compress GZip --output release/ya dist/typescript/cli.js",
     "package:gui": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
@@ -53,9 +59,10 @@
   },
   "pkg": {
     "scripts": [
-      "dist/typescript/**/*.js"
+      "dist/typescript/cli.js"
     ],
     "assets": [
+      "dist/typescript/octop-memory.py",
       "dist/typescript/gui/index.html",
       "dist/typescript/gui/styles.css"
     ]
@@ -67,6 +74,7 @@
       "main": "dist/typescript/gui/main.js"
     },
     "asar": true,
+    "extraResources": [{ "from": "dist/gui-native", "to": "gui-native" }],
     "directories": {
       "output": "release/electron"
     },
