@@ -7,7 +7,8 @@ import type { FolderGrant } from "./folder-grants";
 const denied = "Path must remain inside the authorized workspace.";
 
 function parts(path: string): string[] {
-  return path.slice(parse(path).root.length).split(sep).filter(Boolean);
+  const names = path.slice(parse(path).root.length).split(sep).filter(Boolean);
+  return names.filter((name, i) => name !== "." || i === names.length - 1);
 }
 
 // Only inspect a case variant of an approved component, from its trusted
@@ -33,7 +34,8 @@ function suffix(root: string, candidate: string, short?: string[]): string[] | u
 }
 
 function linkTarget(path: string): string {
-  const target = readlinkSync(path);
+  const raw = readlinkSync(path);
+  const target = process.platform === "win32" ? raw.replaceAll("/", sep) : raw;
   // Windows junctions can return the extended spelling of a DOS or UNC path.
   if (process.platform === "win32" && target.startsWith("\\\\?\\")) {
     const plain = target.slice(4);
@@ -84,44 +86,48 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
     }
     return shortParts;
   };
-  const components = (input: string): string[] => {
-    if (isSensitive(input)) throw new Error("Access to sensitive paths is blocked.");
-    if (!isAbsolute(input)) {
-      if (parse(input).root || normalize(input).split(sep).includes("..")) throw new Error(denied);
-      return normalize(input).split(sep).filter((name) => name && name !== ".");
-    }
+  const absoluteComponents = (input: string): string[] => {
     for (const anchor of anchors) {
-      const tail = suffix(anchor, normalize(input));
+      const tail = suffix(anchor, input);
       if (tail) {
         if (anchor === grant.selectedPath && anchor !== root && !selectedRootMatches(anchor, root, shortRootParts())) throw new Error(denied);
         return tail;
       }
     }
     if (process.platform === "win32" && parse(root).root.toLowerCase() === parse(input).root.toLowerCase()) {
-
-      const tail = suffix(root, normalize(input), shortRootParts());
+      const tail = suffix(root, input, shortRootParts());
       if (tail) return tail;
     }
     throw new Error(denied);
   };
 
-  // Inspect links themselves before following them. Restart from the pinned
-  // root after translating each target, including absolute junction targets.
-  const walk = (names: string[], depth: number, mustExist: boolean): string => {
+  // Keep link targets unnormalized: a link before ".." determines its actual parent.
+  const walk = (input: string, directory: string, depth: number): string => {
     if (depth > 40) throw new Error("Too many symbolic links.");
-    let path = root;
+    if (isSensitive(input)) throw new Error("Access to sensitive paths is blocked.");
+    const absolute = isAbsolute(input);
+    if (!absolute && parse(input).root) throw new Error(denied);
+    let path = absolute ? root : directory;
+    const names = absolute ? absoluteComponents(input) : parts(input);
+    if (depth > 0 && input.endsWith(sep)) names.push(".");
     for (const name of names) {
+      if (name === "." || name === "..") {
+        const next = name === ".." ? dirname(path) : path;
+        if (!suffix(root, next)) throw new Error(denied);
+        if (!lstatSync(path).isDirectory()) throw new Error("Symbolic link target is not a directory.");
+        path = next;
+        continue;
+      }
       if (process.platform === "win32" && (name.includes(":") || /[. ]$/u.test(name) || /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu.test(name))) throw new Error(denied);
       path = join(path, name);
       if (isSensitive(path)) throw new Error("Access to sensitive paths is blocked.");
       const entry = lstatSync(path, { throwIfNoEntry: false });
       if (!entry) {
-        if (mustExist) throw new Error("Symbolic link target is unavailable.");
+        if (depth > 0) throw new Error("Symbolic link target is unavailable.");
         continue;
       }
       if (entry.isSymbolicLink()) {
-        const target = resolve(dirname(path), linkTarget(path));
-        path = walk(components(target), depth + 1, true);
+        path = walk(linkTarget(path), dirname(path), depth + 1);
       } else {
         path = realpathSync.native(path);
         if (!suffix(root, path)) throw new Error(denied);
@@ -130,5 +136,8 @@ export function folderPathResolver(root: string, grant: FolderGrant, identityExe
     }
     return path;
   };
-  return (submitted) => walk(components(submitted), 0, false);
+  return (submitted) => {
+    if (isSensitive(submitted)) throw new Error("Access to sensitive paths is blocked.");
+    return walk(normalize(submitted), root, 0);
+  };
 }

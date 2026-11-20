@@ -107,6 +107,34 @@ describe("desktop folder mutations", () => {
     expect(events.map((event) => event.paths)).toEqual(endpoints);
   });
 
+  it.skipIf(process.platform === "win32").each(["relative", "absolute"])(
+    "follows an intermediate directory link before .. in %s link targets", async (kind) => {
+      mkdirSync(join(root, "drafts", "nested"));
+      symlinkSync("drafts/nested", join(root, "via"));
+      writeFileSync(join(root, "note.txt"), "root copy");
+      const alias = join("drafts", "chosen.txt");
+      const target = kind === "relative" ? "../via/../note.txt" : root + "/via/../note.txt";
+      symlinkSync(target, join(root, alias));
+
+      expect(readFileSync(join(root, alias), "utf8")).toBe("draft");
+      expect(JSON.parse(await workspace.read({ path: alias })).content).toBe("draft");
+      await workspace.write({ path: alias, content: "updated" });
+      expect(confirm.mock.calls[0]?.[0].paths).toEqual([join(root, note)]);
+      expect(readFileSync(join(root, note), "utf8")).toBe("updated");
+      expect(readFileSync(join(root, "note.txt"), "utf8")).toBe("root copy");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("requires the component before .. in a link target to be a directory", async () => {
+    for (const name of ["note.txt", "missing"]) {
+      const alias = join("drafts", name + "-alias");
+      symlinkSync(name + "/../note.txt", join(root, alias));
+      await expect(workspace.write({ path: alias, content: "updated" })).rejects.toThrow();
+    }
+    expect(confirm).not.toHaveBeenCalled();
+    expect(readFileSync(join(root, note), "utf8")).toBe("draft");
+  });
+
   it("releases handles after denial and leaves all three mutations unapplied", async () => {
     confirm.mockReturnValue(false);
     for (const result of [
