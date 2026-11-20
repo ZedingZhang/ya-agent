@@ -138,6 +138,8 @@ function expandHome(value: string): string {
   return value;
 }
 
+export const BOT_PERMISSIONS_DIR = ".ya-bot-permissions";
+
 export function dataHome(): string {
   const override = process.env.YA_HOME;
   return resolve(expandHome(override || join(homedir(), ".ya")));

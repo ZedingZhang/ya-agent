@@ -8,9 +8,9 @@ Ya uses the DeepSeek API (`DeepSeek-V4.1-Flash-1017` by default, with the option
 
 ## Desktop preview
 
-Navigate projects and sessions on the left, chat with Ya on the right, and open Settings from the bottom of the sidebar. Files, applied diffs, relevant memory, tool activity, and approvals are available in an optional details panel.
+Start with the Ya bot, or create a named bot for a recurring job. Choose a bot in the sidebar to resume its conversation. Files, applied diffs, relevant memory, tool activity, and approvals are available in an optional details panel.
 
-![Ya desktop workspace: project and session navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
+![Ya desktop workspace: bot navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
 ## Architecture
 
@@ -156,6 +156,8 @@ ya ask --format terminal "Create a concise table"
 ya ask --format markdown "Create a concise table" > answer.md
 ```
 
+The result banner goes to stderr when Markdown output is redirected. The feedback prompt appears only when both stdin and stdout are terminals.
+
 Simple tool-free answers stream by default in an interactive terminal. Web research, ToA, local workspace tasks, pipes, and Markdown output remain buffered. Use `--stream off` to disable streaming.
 
 ### Vision input
@@ -237,9 +239,9 @@ Enable `local_run` for a coding task with `--local --exec`. Ya inspects the repo
 ya ask --local --exec --workspace "$PWD" "Fix the bug and run the relevant tests and type check"
 ```
 
-Each command approval displays the exact shell command, absolute working directory and timeout. The desktop equivalent is **Allow command execution** in the workspace; command cards display live stdout/stderr, completion status, exit code and duration. **Stop** cancels pending approvals, API requests and the running command's process tree. The CLI uses Ctrl+C.
+Each command approval displays the exact shell command, absolute working directory and timeout. Press Ctrl+C in the CLI to cancel pending approvals, API requests and the running command’s process tree.
 
-Commands containing terminal control characters are rejected before approval; LF and tab are allowed. Commands are limited to 8,192 characters and 50 lines, and consecutive blank or whitespace-only lines are refused. CLI and GUI approvals show the complete, unchanged command with its line count. CLI approvals show controls in file paths and diffs as visible escapes. Library callers can pass `signal` to `runTask` to cancel local tools and pending approvals without configuring a second signal on `LocalWorkspace`.
+Commands containing terminal control characters are rejected before approval; LF and tab are allowed. Commands are limited to 8,192 characters and 50 lines, and consecutive blank or whitespace-only lines are refused. CLI approvals show the complete, unchanged command with its line count. CLI approvals show controls in file paths and diffs as visible escapes. Library callers can pass `signal` to `runTask` to cancel local tools and pending approvals without configuring a second signal on `LocalWorkspace`.
 
 For an unattended task, file changes and commands have separate authorizations:
 
@@ -251,7 +253,7 @@ ya ask --local --exec --approve --approve-commands --no-feedback "Fix the bug an
 
 Commands use `cmd.exe /d /s /c` on Windows and `/bin/sh -c` on macOS/Linux, inherit the installed project toolchain, and run without stdin. Use one-shot checks instead of watch modes, interactive programs or detached background services. Process-tree termination uses the operating system's process controls; if cleanup cannot be confirmed, the result reports an error and bounds output draining instead of hanging. The default timeout is 120 seconds; the model can request an integer from 1 to 600 seconds. Each tool result retains the last 64 KiB of stdout and stderr, with explicit truncation flags. Command-enabled tasks have up to 20 tool rounds for inspection, repair and verification; other tasks retain the six-round limit. Final answers must report the checks performed and any failures, denied commands or incomplete checks.
 
-Only the **initial working directory** is confined to the resolved workspace. Shell commands execute with your account's permissions and can modify or delete files elsewhere or access the network; execution is not sandboxed. CLI and GUI commands share a default environment allowlist: system and home paths, locale and temporary-directory settings, terminal settings, and common Node.js, Python, Java, Go, Rust, Android and .NET toolchain locations. Other inherited variables are omitted, including cloud/CI/API credentials, SSH agents, askpass helpers, `DEEPSEEK_API_KEY`, `YA_HOME` and application runtime flags. Project-specific variables must be set explicitly in the command you approve. Files and other credentials accessible to your account remain accessible to commands. Audit logs record command status, working-directory metadata, exit code and duration, without command text or stdout/stderr.
+Only the **initial working directory** is confined to the resolved workspace. Shell commands execute with your account's permissions and can modify or delete files elsewhere or access the network; execution is not sandboxed. CLI commands use a default environment allowlist: system and home paths, locale and temporary-directory settings, terminal settings, and common Node.js, Python, Java, Go, Rust, Android and .NET toolchain locations. Other inherited variables are omitted, including cloud/CI/API credentials, SSH agents, askpass helpers, `DEEPSEEK_API_KEY`, `YA_HOME` and application runtime flags. Project-specific variables must be set explicitly in the command you approve. Files and other credentials accessible to your account remain accessible to commands. Audit logs record command status, working-directory metadata, exit code and duration, without command text or stdout/stderr.
 
 Approving `npm install` or `npm ci` can also run [dependency lifecycle scripts](https://docs.npmjs.com/cli/v11/using-npm/scripts/#life-cycle-operation-order), including `postinstall`. These scripts can access files, the network, and credentials available to the command; review the repository and its dependencies before approving installation.
 
@@ -306,17 +308,19 @@ Concurrent processes serialize Octop schema initialization using `memory.init.lo
 
 The desktop application uses a two-column workspace inspired by the [official DeepSeek Harness desktop and sidebar sources](https://github.com/deepseek-ai/deepseek-harness/tree/master/apps/desktop):
 
-- Project and session navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
-- Conversation history and a compact composer on the right. Each session keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that session's earlier user messages and completed replies, including requests that failed before an answer, so you can configure an API key and then ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
+- Bot navigation on the left, with Settings pinned to the bottom and a separate Memory entry.
+- Conversation history and a compact composer on the right. Each bot keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that bot's earlier user messages and completed replies, including requests that failed before an answer, so you can configure an API key and then ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
 - An optional Files/Changes/Activity panel for file navigation, applied diffs, relevant memory, and approvals. Pending approvals open the panel automatically.
 
-After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current session's file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching sessions or restarting preserves the diff at the time of each operation, without requiring Git.
+After a successful `local_write` or `local_edit`, the conversation shows an expandable diff card. Open **Changes** in the top-right corner to review the current bot’s file changes; repeated edits to a path are recorded separately. Diffs include red/green additions and deletions, old/new line numbers, three lines of context, expansion for longer changes, and copying. Cards and change history are saved with the conversation, so switching bots or restarting preserves the diff at the time of each operation, without requiring Git.
 
-Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive-path writes are rejected before approval; non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
+Each preview retains at most 2,000 lines and 128K characters. Larger previews are marked as truncated while statistics cover the complete change; a diff calculation timeout displays an unavailable preview. Sensitive-path writes are rejected before approval; non-text writes do not retain content diffs. The history covers file-tool operations, excluding changes made by shell commands, and records individual operations rather than a net diff for the conversation. Action audits and model-facing tool results continue to contain metadata only.
 
-Add projects with the sidebar's **+** button, create sessions with **New session**, and switch between saved sessions in the project list. Ctrl/⌘+N starts a session, Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, command execution, web search, ToA, and image-detail controls.
+Use **New bot** (Ctrl/⌘+N) to choose a name and optional standing instructions, such as “Review patches and suggest a regression test.” The bot receives this profile with every request. Use **Edit bot** in the chat header to change it. Existing sessions appear as individual bots with their original titles and history. Untitled sessions open as **Ya**.
 
-Saved transcripts and drafts remain accessible if a project's folder is moved or deleted. Opening that history disables local tools and clears access to the previously selected project's folder. Reloading the desktop during a task cancels it and waits for it to stop before enabling session navigation.
+Every bot starts with no local directory access, including bots imported from older sessions. Open **Files → Choose folder…** and confirm **Grant access** to give the current bot access to one folder and its subfolders. Ya restores the grant across restarts when the filesystem supplies a persistent directory identifier. On other filesystems, the Files panel prompts you to choose the folder again after restarting. Pick another folder to replace the grant or use **Revoke access** to remove it. File changes still require approval. Desktop bots use scoped file tools. Shell execution is available through the CLI. Ctrl/⌘+B collapses the sidebar, and Ctrl/⌘+Enter sends a task. The composer’s **Task options** menu contains local tools, web search, ToA, and image-detail controls.
+
+Saved transcripts and drafts remain accessible if a bot’s folder is moved or deleted. If another folder or volume takes its place, choose the folder again to enable local tools. If an older grant cannot verify which folder you selected, choose the folder again to restore access. Reloading the desktop cancels the current task. If an approved file operation is still waiting on its folder, you can resume chatting while its original turn tracks the outcome. Ya saves the turn before accepting a file approval. Desktop whole-file writes stage the complete content beside the destination and publish it atomically. As with edits, replacing a file preserves its ordinary permissions and ownership but creates a new file identity.
 
 It also includes memory review and pruning, bilingual English/简体中文 UI, DeepSeek settings, ToA preflight, streaming simple answers, vision image selection, and audit-history management. Model and reasoning-effort controls live in the workspace and are saved as soon as they change; `deepseek-flash` is selected by default and is the model to use before attaching images. The renderer receives only opaque selection IDs plus display metadata; local paths and image bytes remain in the main process and are cleared after the task, when the selection is cleared, or when the window closes.
 
@@ -325,7 +329,7 @@ The application does not start a local web server. The renderer cannot access No
 ## Development
 
 The shared core, CLI, and Electron desktop application are written in TypeScript.
-Development requires Node.js 22 or later:
+Development requires Node.js 22 or later. Desktop builds and tests also use CMake 3.15+ and a C compiler for the native directory identity and file move helpers.
 
 ```sh
 npm ci
@@ -349,7 +353,7 @@ npm run package:cli        # package a CLI for the current host
 npm run package:gui        # package the Electron app for the current host
 ```
 
-The test suite covers configuration/data compatibility, Keychain fallback, memory ranking, local-workspace confinement, audit rotation, command approval/output/timeouts/process-tree cancellation, failed-check repair and re-verification, DeepSeek request/retry/stream/tool behavior and cancellation, vision input validation and payloads, web result parsing, orchestration, CLI semantics, and GUI controller/rendering helpers. The GUI smoke test additionally loads the packaged renderer boundary and verifies page navigation, vision and command controls.
+The test suite covers configuration/data compatibility, Keychain fallback, memory ranking, local-workspace confinement, audit rotation, command approval/output/timeouts/process-tree cancellation, failed-check repair and re-verification, DeepSeek request/retry/stream/tool behavior and cancellation, vision input validation and payloads, web result parsing, orchestration, CLI semantics, and GUI controller/rendering helpers. The GUI smoke test additionally loads the packaged renderer boundary and verifies bot navigation, folder grants, vision input and approval controls.
 
 ## Project layout
 

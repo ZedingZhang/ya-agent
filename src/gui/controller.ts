@@ -1,9 +1,12 @@
-import { existsSync, readFileSync, realpathSync, statSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { FolderAccessChangedError, FolderGrants, type FolderGrant } from "./folder-grants";
+import { GrantedFolderIO } from "./folder-io";
+import { dirname, join } from "node:path";
 import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
 import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
+  type TaskWorkspace,
   auditLogFiles,
   auditLogTotalBytes,
   clearAuditLogs,
@@ -31,9 +34,10 @@ import {
   type RunTaskOptions,
   type TaskRecord,
 } from "../service";
-import type { ConversationMessage, UserImageContentPart, WebMode } from "../types";
+import type { BotProfile, ConversationMessage, UserImageContentPart, WebMode } from "../types";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
+import type { FolderAccess, WorkspaceListing } from "./shared";
 import { loadAccountCredential, type DeepSeekCredential } from "../credentials";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
@@ -41,13 +45,12 @@ export type Language = (typeof LANGUAGES)[number];
 
 export interface GuiPreferences {
   language: Language;
-  workspace?: string;
-  workspaces?: string[];
   stream: boolean;
 }
 
 export interface GuiTaskOptions {
   sessionId?: string;
+  botProfile?: BotProfile;
   task: string;
   history?: ConversationMessage[];
   webMode?: WebMode;
@@ -55,11 +58,14 @@ export interface GuiTaskOptions {
   toaWorkers?: number;
   stream?: boolean;
   local?: boolean;
+  folderGrantVersion?: string;
   exec?: boolean;
   images?: UserImageContentPart[];
 }
 
 export interface GuiRunCallbacks {
+  loadImages?: () => UserImageContentPart[];
+  onStarted?: () => void;
   onContent?: (content: string) => void;
   onLocalAction?: LocalConfirmation;
   onLocalActivity?: (activity: LocalActivity) => void;
@@ -90,32 +96,38 @@ export function loadPreferences(): GuiPreferences {
     const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (!isRecord(value)) return { language: "en", stream: true };
     const language = LANGUAGES.includes(value.language as Language) ? value.language as Language : "en";
-    const workspace = typeof value.workspace === "string" ? value.workspace : undefined;
     const stream = typeof value.stream === "boolean" ? value.stream : true;
-    const workspaces = Array.isArray(value.workspaces)
-      ? [...new Set(value.workspaces.filter((path): path is string => typeof path === "string" && path.length > 0))]
-      : undefined;
-    return { language, ...(workspace ? { workspace } : {}), ...(workspaces ? { workspaces } : {}), stream };
+    return { language, stream };
   } catch {
     return { language: "en", stream: true };
   }
 }
 
-export function savePreferences(language: Language, workspace?: string, stream = true, workspaces: string[] = []): void {
+export function savePreferences(language: Language, stream = true): void {
   if (!LANGUAGES.includes(language)) throw new Error("GUI language must be en or zh-CN.");
   const path = preferencesPath();
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ language, workspace: workspace ?? null, workspaces, stream }, null, 2)}\n`, "utf8");
+  writeFileSync(temporary, `${JSON.stringify({ language, stream }, null, 2)}\n`, "utf8");
   renameSync(temporary, path);
 }
 
+function describeFolderAccess(grant?: FolderGrant, validWorkspace?: string): FolderAccess {
+  return {
+    workspace: grant?.path,
+    validWorkspace,
+    folderGrantVersion: grant?.version,
+    folderSessionOnly: grant?.identity.startsWith("session:") ?? false,
+  };
+}
+
 export class GuiController {
+  private readonly grants = new FolderGrants();
+  private readonly verifiedGrants = new Map<string, string>();
   private pendingPrune?: { ids: string[]; includeCandidates: boolean };
   config: ModelConfig;
   language: Language;
-  workspace?: string;
-  workspaces: string[];
+  activeBotId?: string;
   stream: boolean;
   private sessionApiKey?: string;
   private readonly taskRunner: TaskRunner;
@@ -124,15 +136,13 @@ export class GuiController {
     this.config = loadConfig();
     const preferences = loadPreferences();
     this.language = preferences.language;
-    this.workspace = preferences.workspace;
-    this.workspaces = [...new Set([...(preferences.workspaces ?? []), ...(this.workspace ? [this.workspace] : [])])];
     this.stream = preferences.stream;
     this.taskRunner = taskRunner;
     reconcileInterruptedTasks();
   }
 
   private persistPreferences(): void {
-    savePreferences(this.language, this.workspace, this.stream, this.workspaces);
+    savePreferences(this.language, this.stream);
   }
 
   setLanguage(language: Language): void {
@@ -141,40 +151,55 @@ export class GuiController {
     this.persistPreferences();
   }
 
-  setWorkspace(value: string): string {
-    const workspace = resolve(value);
-    if (!existsSync(workspace)) throw new Error(`Workspace does not exist: ${value}`);
-    const physical = realpathSync(workspace);
-    if (!statSync(physical).isDirectory()) throw new Error(`Workspace is not a directory: ${physical}`);
-    this.workspace = physical;
-    this.workspaces = [physical, ...this.workspaces.filter((path) => path !== physical)];
-    this.persistPreferences();
-    return physical;
+  assertActiveBot(botId: unknown): asserts botId is string {
+    if (typeof botId !== "string" || !botId || botId !== this.activeBotId) throw new Error("Select this bot first.");
   }
 
-  activateWorkspace(value?: string): void {
-    if (value === undefined) {
-      this.workspace = undefined;
-      this.persistPreferences();
-      return;
-    }
-    if (!this.workspaces.includes(value)) throw new Error("Choose this project through the directory picker first.");
-    this.setWorkspace(value);
+  // Display state only. A task and each operation independently verify the grant.
+  folderState(): FolderAccess {
+    const botId = this.activeBotId;
+    const grant = botId ? this.grants.read(botId) : undefined;
+    return describeFolderAccess(grant, botId && grant && this.verifiedGrants.get(botId) === grant.version ? grant.path : undefined);
+  }
+
+  async folderAccess(signal?: AbortSignal): Promise<FolderAccess> {
+    const botId = this.activeBotId;
+    if (!botId) return describeFolderAccess();
+    const grant = this.grants.read(botId);
+    if (!grant) return describeFolderAccess();
+    const valid = await new GrantedFolderIO(this.grants, botId, grant).available(signal);
+    this.assertActiveBot(botId);
+    if (this.grants.read(botId)?.version !== grant.version) return this.folderState();
+    if (valid) this.verifiedGrants.set(botId, grant.version);
+    else this.verifiedGrants.delete(botId);
+    return describeFolderAccess(grant, valid ? grant.path : undefined);
+  }
+
+  folderSelectionSnapshot(botId: string): Buffer | null {
+    this.assertActiveBot(botId);
+    return this.grants.snapshot(botId);
+  }
+
+  async grantFolder(botId: string, folder: string, beforeCommit?: () => void, expected = this.folderSelectionSnapshot(botId)): Promise<FolderAccess> {
+    this.assertActiveBot(botId);
+    const grant = await this.grants.grant(botId, folder, () => {
+      this.assertActiveBot(botId);
+      beforeCommit?.();
+    }, expected);
+    this.verifiedGrants.set(botId, grant.version);
+    return describeFolderAccess(grant, grant.path);
+  }
+
+  revokeFolder(botId: string): FolderAccess {
+    this.assertActiveBot(botId);
+    this.grants.revoke(botId);
+    this.verifiedGrants.delete(botId);
+    return describeFolderAccess();
   }
 
   setStream(enabled: boolean): void {
     this.stream = Boolean(enabled);
     this.persistPreferences();
-  }
-
-  validWorkspace(): string | undefined {
-    if (!this.workspace) return undefined;
-    try {
-      const workspace = realpathSync(resolve(this.workspace));
-      return statSync(workspace).isDirectory() ? workspace : undefined;
-    } catch {
-      return undefined;
-    }
   }
 
   saveModelConfig(config: ModelConfig): void {
@@ -216,31 +241,33 @@ export class GuiController {
 
   async run(options: GuiTaskOptions, callbacks: GuiRunCallbacks = {}): Promise<RunResult> {
     callbacks.signal?.throwIfAborted();
+    if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
+    if (options.exec) throw new Error("Shell commands are unavailable for folder-scoped bots.");
+    let localWorkspace: TaskWorkspace | undefined;
+    if (options.local) {
+      this.assertActiveBot(options.sessionId);
+      const access = await this.folderAccess(callbacks.signal);
+      const grant = this.grants.read(options.sessionId);
+      if (!access.validWorkspace || !grant || grant.version !== options.folderGrantVersion || grant.version !== access.folderGrantVersion) {
+        throw new FolderAccessChangedError(access);
+      }
+      localWorkspace = this.workspaceForBot(options.sessionId, grant, callbacks);
+    }
+    callbacks.signal?.throwIfAborted();
+    const images = callbacks.loadImages ? callbacks.loadImages() : options.images;
+    callbacks.onStarted?.();
     const apiKey = this.apiKey();
     if (!apiKey) throw new Error("Sign in to DeepSeek or add an API key in Settings.");
-    if (options.local && options.toa) throw new Error("Local workspace mode cannot be used with Tree of Agents.");
-    if (options.exec && !options.local) throw new Error("Command execution requires local workspace mode.");
-    let localWorkspace: LocalWorkspace | undefined;
-    if (options.local) {
-      const workspace = this.validWorkspace();
-      if (!workspace) throw new Error("Choose an existing local workspace before running this task.");
-      localWorkspace = new LocalWorkspace(
-        workspace,
-        callbacks.onLocalAction ?? (() => false),
-        callbacks.onLocalActivity,
-        { commandsEnabled: options.exec, signal: callbacks.signal, onCommandEvent: callbacks.onCommandEvent,
-          onFileChange: callbacks.onFileChange },
-      );
-    }
     return this.taskRunner(apiKey, options.task, this.config, {
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      botProfile: options.botProfile,
       history: options.history,
       webMode: options.webMode ?? "auto",
       toa: options.toa ?? false,
       toaWorkers: options.toaWorkers ?? 2,
       onContent: this.canStream(options) ? callbacks.onContent : undefined,
       localWorkspace,
-      images: options.images,
+      images,
       signal: callbacks.signal,
     });
   }
@@ -261,12 +288,40 @@ export class GuiController {
     return selectRelevantCards(task);
   }
 
-  workspaceEntries(path = "."): Array<{ path: string; type: string }> {
-    const workspace = this.validWorkspace();
-    if (!workspace) return [];
-    const payload = JSON.parse(new LocalWorkspace(workspace, () => false).list({ path })) as unknown;
-    if (!isRecord(payload) || !Array.isArray(payload.entries)) return [];
-    return payload.entries.filter(isRecord).map((entry) => ({ path: String(entry.path), type: String(entry.type) }));
+  private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace {
+    const assertGrant = (): void => {
+      const current = this.grants.read(botId);
+      if (current?.version !== grant.version || current.path !== grant.path || current.identity !== grant.identity) {
+        throw new Error("Folder access has changed.");
+      }
+    };
+    return new LocalWorkspace(grant.path, callbacks.onLocalAction ?? (() => false), callbacks.onLocalActivity, {
+      signal: callbacks.signal,
+      onFileChange: callbacks.onFileChange,
+      scopedFolder: new GrantedFolderIO(this.grants, botId, grant),
+      assertPreviewAccess: assertGrant,
+      assertAccess: () => {
+        this.assertActiveBot(botId);
+        assertGrant();
+      },
+    });
+  }
+
+  async workspaceEntries(botId: string, path = ".", folderGrantVersion?: string, signal?: AbortSignal): Promise<WorkspaceListing> {
+    this.assertActiveBot(botId);
+    const grant = this.grants.read(botId);
+    if (!grant || (path !== "." && grant.version !== folderGrantVersion)) return { access: await this.folderAccess(signal), entries: [] };
+    try {
+      const workspace = this.workspaceForBot(botId, grant, { signal });
+      const payload = JSON.parse(await workspace.list({ path })) as { entries: Array<{ path: string; type: string }> };
+      this.verifiedGrants.set(botId, grant.version);
+      return { access: describeFolderAccess(grant, grant.path), entries: payload.entries };
+    } catch (error) {
+      signal?.throwIfAborted();
+      const access = await this.folderAccess(signal);
+      if (!access.validWorkspace || access.folderGrantVersion !== grant.version) return { access, entries: [] };
+      throw error;
+    }
   }
 
   createMemory(text: string, evidence: string, kind: MemoryKind): MemoryCard {
