@@ -39,7 +39,6 @@ interface AppState {
     toaTokenBudget: number;
     toaTimeout: number;
   };
-  cards: MemoryCard[];
   auditLogCount: number;
   auditLogBytes: number;
 }
@@ -95,6 +94,7 @@ interface YaRendererBridge {
   pendingOutcomes: import("./shared").YaBridge["pendingOutcomes"];
   acknowledgeOutcome: import("./shared").YaBridge["acknowledgeOutcome"];
   cancelTask(): Promise<void>;
+  memoryCards(): Promise<MemoryCard[]>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number | null }>>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;
@@ -135,6 +135,7 @@ const TEXT = {
     noTasks: "Ask a question to begin.", answer: "Ya", learn: "Learn from this answer", noWorkspace: "Choose a folder to allow this bot to access its files and subfolders.",
     status: "Status", kind: "Kind", text: "Text", evidence: "Evidence", actions: "Actions", candidateText: "What should Ya learn?",
     createCandidate: "Create candidate", prune: "Prune", includeCandidates: "Include candidates", reject: "Reject", revoke: "Revoke",
+    memoryLoading: "Loading memory…", memoryUnavailable: "Memory is unavailable.", retryMemory: "Retry memory",
     language: "Language", stream: "Stream simple answers", reasoning: "Reasoning effort", budget: "ToA token budget",
     timeout: "ToA timeout (seconds)", apiKey: "DeepSeek API key", apiPlaceholder: "Leave blank to keep the current key",
     keychain: "Save in macOS Keychain", saveSettings: "Save settings", clearAudit: "Clear audit history", apiReady: "API key available",
@@ -180,6 +181,7 @@ const TEXT = {
     noTasks: "输入问题即可开始。", answer: "Ya", learn: "从此回答中学习", noWorkspace: "选择文件夹，授权此 Bot 访问其中的文件和子目录。",
     status: "状态", kind: "类别", text: "内容", evidence: "依据", actions: "操作", candidateText: "Ya 应该学到什么？",
     createCandidate: "创建候选记忆", prune: "清理", includeCandidates: "包括候选项", reject: "拒绝", revoke: "撤销",
+    memoryLoading: "正在加载记忆…", memoryUnavailable: "记忆暂时无法加载。", retryMemory: "重试加载记忆",
     language: "语言", stream: "简单回答使用流式输出", reasoning: "推理强度", budget: "ToA Token 预算",
     timeout: "ToA 超时（秒）", apiKey: "DeepSeek API 密钥", apiPlaceholder: "留空以保留当前密钥",
     keychain: "保存到 macOS 钥匙串", saveSettings: "保存设置", clearAudit: "清除操作审计", apiReady: "API 密钥可用",
@@ -216,6 +218,10 @@ let lastAnswer = "";
 let selectedImages: SelectedImage[] = [];
 let workspaceModelSaving = false;
 let accountPending: "login" | "logout" | undefined;
+type MemoryView = { cards: MemoryCard[] } | { error: string };
+let memoryView: MemoryView | undefined;
+let memoryRequest = 0;
+let relevantMemoryRequest = 0;
 type CommandResult = Extract<ShellCommandEvent, { type: "finish" }>["result"];
 interface ConversationCommand {
   id: string;
@@ -332,7 +338,7 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
   });
   element<HTMLDivElement>("workspace-actions").hidden = page !== "workspace";
   renderPageTitle();
-  if (page === "memory") renderMemory();
+  if (page === "memory") void refreshMemory();
 }
 
 function renderWorkspaceLabel(): void {
@@ -551,9 +557,10 @@ function renderBot(): void {
   renderWorkspaceLabel();
   renderPageTitle();
   syncWorkspaceControls();
-  const lastTask = currentBot.turns.at(-1)?.task;
-  if (lastTask) void renderRelevant(lastTask);
-  else element<HTMLDivElement>("relevant-list").textContent = t("noRelevant");
+  relevantMemoryRequest++;
+  const relevant = element<HTMLDivElement>("relevant-list");
+  relevant.className = "compact-list empty";
+  relevant.textContent = t("noRelevant");
 }
 
 function resizeTaskInput(): void {
@@ -621,6 +628,7 @@ async function showBotEditor(bot?: DesktopBot): Promise<void> {
 }
 
 function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
+  const openingActivity = page === "activity" && drawerPage !== page;
   drawerPage = page;
   element<HTMLElement>("details-drawer").hidden = page === undefined;
   document.querySelector(".workbench")?.classList.toggle("drawer-open", page !== undefined);
@@ -634,6 +642,8 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
     button.classList.toggle("active", page === name);
     button.setAttribute("aria-expanded", String(page === name));
   }
+  const lastTask = openingActivity ? currentBot.turns.at(-1)?.task : undefined;
+  if (lastTask) void renderRelevant(lastTask);
   if (page === "files") void renderFiles();
 }
 
@@ -891,7 +901,7 @@ async function runTask(): Promise<void> {
     renderPageTitle();
     persistSessions();
     element<HTMLDetailsElement>("task-options").open = false;
-    void renderRelevant(task);
+    if (drawerPage === "activity") void renderRelevant(task);
     setStatus(t("working"), "busy");
     return { turn: activeTurn, answer: activeAnswer };
   };
@@ -1053,10 +1063,10 @@ async function stopTask(): Promise<void> {
 async function renderRelevant(task: string): Promise<void> {
   const panel = element<HTMLDivElement>("relevant-list");
   panel.replaceChildren();
+  const request = ++relevantMemoryRequest;
   try {
-    const sessionId = currentBot.id;
     const matches = await bridge.relevantCards(task);
-    if (sessionId !== currentBot.id) return;
+    if (request !== relevantMemoryRequest) return;
     if (matches.length === 0) {
       panel.textContent = t("noRelevant");
       panel.className = "compact-list empty";
@@ -1070,7 +1080,7 @@ async function renderRelevant(task: string): Promise<void> {
       panel.append(item);
     }
   } catch (error) {
-    panel.textContent = errorText(error);
+    if (request === relevantMemoryRequest) panel.textContent = errorText(error);
   }
 }
 
@@ -1311,10 +1321,35 @@ function decideLocalAction(approved: boolean): void {
   }
 }
 
+async function refreshMemory(): Promise<void> {
+  const request = ++memoryRequest;
+  memoryView = undefined;
+  renderMemory();
+  let next: MemoryView;
+  try {
+    next = { cards: await bridge.memoryCards() };
+  } catch (error) {
+    next = { error: errorText(error) };
+  }
+  if (request !== memoryRequest) return;
+  memoryView = next;
+  renderMemory();
+}
+
 function renderMemory(): void {
+  const cards = memoryView && "cards" in memoryView ? memoryView.cards : undefined;
+  const error = memoryView && "error" in memoryView ? memoryView.error : undefined;
+  const status = element<HTMLDivElement>("memory-status");
+  status.textContent = error === undefined ? t("memoryLoading") : `${t("memoryUnavailable")} ${error}`;
+  status.hidden = cards !== undefined;
+  element<HTMLButtonElement>("memory-retry").hidden = error === undefined;
+  element<HTMLButtonElement>("memory-create").disabled = cards === undefined;
+  element<HTMLButtonElement>("memory-prune").disabled = cards === undefined;
+  element<HTMLDivElement>("memory-empty").hidden = cards?.length !== 0;
+
   const body = element<HTMLTableSectionElement>("memory-body");
   body.replaceChildren();
-  for (const card of state.cards) {
+  for (const card of cards ?? []) {
     const row = document.createElement("tr");
     row.append(cell(card.id), cell(card.status), cell(card.kind), cell(card.text, "wide"), cell(card.evidence, "wide"));
     const actions = document.createElement("td");
@@ -1327,7 +1362,6 @@ function renderMemory(): void {
     row.append(actions);
     body.append(row);
   }
-  element<HTMLDivElement>("memory-empty").hidden = state.cards.length > 0;
 }
 
 function cell(value: string, className = ""): HTMLTableCellElement {
@@ -1349,8 +1383,7 @@ function actionButton(label: string, action: () => Promise<void>): HTMLButtonEle
 async function updateMemory(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<void> {
   try {
     await bridge.setMemoryStatus(cardId, status);
-    state = await bridge.state();
-    renderMemory();
+    await refreshMemory();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   }
@@ -1366,8 +1399,7 @@ async function createMemory(): Promise<void> {
     await bridge.createMemory(text, evidence, kind);
     element<HTMLTextAreaElement>("candidate-text").value = "";
     evidenceInput.value = "";
-    state = await bridge.state();
-    renderMemory();
+    await refreshMemory();
     setStatus(t("saved"));
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
@@ -1381,8 +1413,7 @@ async function pruneMemory(): Promise<void> {
     if (preview.length === 0) return;
     if (!window.confirm(interpolate(t("confirmPrune"), { count: preview.length }))) return;
     await bridge.pruneMemory(includeCandidates);
-    state = await bridge.state();
-    renderMemory();
+    await refreshMemory();
   } catch (error) {
     setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   }
@@ -1825,6 +1856,7 @@ function registerEvents(): void {
   element<HTMLButtonElement>("action-deny").addEventListener("click", () => decideLocalAction(false));
   element<HTMLButtonElement>("memory-create").addEventListener("click", () => void createMemory());
   element<HTMLButtonElement>("memory-prune").addEventListener("click", () => void pruneMemory());
+  element<HTMLButtonElement>("memory-retry").addEventListener("click", () => void refreshMemory());
   element<HTMLButtonElement>("settings-save").addEventListener("click", () => void saveSettings());
   element<HTMLButtonElement>("account-login").addEventListener("click", () => void signInDeepSeek());
   element<HTMLButtonElement>("account-cancel").addEventListener("click", () => {

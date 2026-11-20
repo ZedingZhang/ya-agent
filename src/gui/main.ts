@@ -106,7 +106,6 @@ function appState(): AppState {
       toaTokenBudget: controller.config.toaTokenBudget,
       toaTimeout: controller.config.toaTimeout,
     },
-    cards: controller.cards(),
     auditLogCount: logs.length,
     auditLogBytes: controller.auditLogTotalBytes(),
   };
@@ -523,6 +522,10 @@ function registerIpc(): void {
     pending.resolve(Boolean(raw.approved));
   });
 
+  ipcMain.handle("memory:cards", (event) => {
+    assertTrustedSender(event);
+    return controller.cards();
+  });
   ipcMain.handle("memory:relevant", (event, task: unknown) => {
     assertTrustedSender(event);
     return controller.relevantCards(typeof task === "string" ? task : "");
@@ -1790,19 +1793,76 @@ async function verifyApplicationMenu(window: BrowserWindow): Promise<void> {
   }
 }
 
-async function verifyMemory(window: BrowserWindow): Promise<void> {
+async function verifyMemoryUnavailable(window: BrowserWindow, root: string, cardId: string): Promise<void> {
+  await window.webContents.executeJavaScript(`(() => {
+    currentBot.turns.push({ task: 'PostgreSQL 索引', images: [], answer: 'Saved memory-outage answer',
+      status: 'complete', commands: [], changes: [] });
+    persistSessions();
+  })()`);
+  const originalPython = process.env.YA_MEMORY_PYTHON;
+  try {
+    process.env.YA_MEMORY_PYTHON = join(root, "missing-python");
+    await window.loadFile(rendererFile);
+    const available = await window.webContents.executeJavaScript(`(async () => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && document.body.dataset.ready !== 'true' && !document.body.dataset.startupError) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      if (document.body.dataset.ready !== 'true' || !document.querySelector('#timeline').textContent.includes('Saved memory-outage answer')) {
+        return false;
+      }
+      document.querySelector('#settings-tab').click();
+      if (!document.querySelector('#page-settings').classList.contains('active')) return false;
+
+      document.querySelector('#memory-tab').click();
+      while (Date.now() < deadline && document.querySelector('#memory-retry').hidden) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return !document.querySelector('#memory-retry').hidden && document.querySelector('#memory-create').disabled
+        && document.querySelector('#memory-prune').disabled && document.querySelector('#memory-empty').hidden
+        && document.querySelector('#memory-status').textContent.includes('Octop Memory failed');
+    })()`);
+    if (!available) throw new Error("Unavailable memory blocked startup or did not offer a retry.");
+  } finally {
+    if (originalPython === undefined) delete process.env.YA_MEMORY_PYTHON;
+    else process.env.YA_MEMORY_PYTHON = originalPython;
+  }
+
+  const recovered = await window.webContents.executeJavaScript(`(async () => {
+    document.querySelector('#memory-retry').click();
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && document.querySelector('#memory-create').disabled) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return document.querySelector('#memory-body').textContent.includes(${JSON.stringify(cardId)})
+      && document.querySelector('#memory-status').hidden && document.querySelector('#memory-retry').hidden;
+  })()`);
+  if (!recovered) throw new Error("Memory retry did not show the saved card.");
+}
+
+async function verifyMemory(window: BrowserWindow, root: string): Promise<void> {
+  const cardId = await window.webContents.executeJavaScript(`(async () =>
+    (await window.ya.createMemory('PostgreSQL 索引优化关注查询计划', 'GUI smoke evidence', 'knowledge')).id)()`) as string;
+  await verifyMemoryUnavailable(window, root, cardId);
   const passed = await window.webContents.executeJavaScript(`(async () => {
-    const card = await window.ya.createMemory('PostgreSQL 索引优化关注查询计划', 'GUI smoke evidence', 'knowledge');
+    const cardId = ${JSON.stringify(cardId)};
     if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
-    await window.ya.setMemoryStatus(card.id, 'approved');
+    await window.ya.setMemoryStatus(cardId, 'approved');
     const matches = await window.ya.relevantCards('PostgreSQL 索引');
-    if (matches.length !== 1 || matches[0].card.id !== card.id) return false;
-    await window.ya.setMemoryStatus(card.id, 'revoked');
+    if (matches.length !== 1 || matches[0].card.id !== cardId) return false;
+    document.querySelector('[data-page="workspace"]').click();
+    document.querySelector('#toggle-activity').click();
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && !document.querySelector('#relevant-list .memory-chip')) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!document.querySelector('#relevant-list .memory-chip')?.textContent.includes(matches[0].card.text)) return false;
+    await window.ya.setMemoryStatus(cardId, 'revoked');
     if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
     await window.ya.prunePreview(false);
     const removed = await window.ya.pruneMemory(false);
-    return removed.length === 1 && removed[0].id === card.id
-      && (await window.ya.state()).cards.length === 0;
+    return removed.length === 1 && removed[0].id === cardId
+      && (await window.ya.memoryCards()).length === 0;
   })()`);
   if (!passed) throw new Error("Octop Memory desktop lifecycle verification failed.");
 }
@@ -1835,7 +1895,7 @@ app.whenReady().then(async () => {
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
     await verifyAccountLogin(window);
-    await verifyMemory(window);
+    await verifyMemory(window, smokeRoot!);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);
     process.stdout.write(`Ya ${VERSION} GUI smoke test passed.\n`);
     window.destroy();
