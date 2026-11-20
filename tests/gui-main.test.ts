@@ -51,10 +51,10 @@ vi.mock("../src/gui/controller", () => ({
       mocks.saveWorkspaceModelSelection(model, reasoningEffort);
       this.config = { model, reasoningEffort };
     }
-    workspaces = [];
+
     auditLogs() { return []; }
     auditLogTotalBytes() { return 0; }
-    validWorkspace() { return undefined; }
+    folderState() { return { workspace: undefined, validWorkspace: undefined }; }
     apiKey() { return mocks.accountCredential() ?? "test-key"; }
     cards = mocks.cards;
     run = mocks.run;
@@ -274,6 +274,33 @@ describe("GUI pending action lifecycle", () => {
     await expect(task).resolves.toBe("cancelled");
   });
 
+  it.each([false, true])("keeps committed changes after Stop only in the originating document (reload=%s)", async (reload) => {
+    let finish!: () => void;
+    const committing = new Promise<void>((resolve) => { finish = resolve; });
+    const activity = { operation: "edit", paths: ["notes.txt"], status: "success" };
+    const change = { id: "edit", path: "notes.txt", operation: "edit", additions: 1, deletions: 1, hunks: [], truncated: false };
+    mocks.run.mockImplementation(async (_options, cb) => {
+      cb.onStarted();
+      await committing;
+      cb.onFileChange(change);
+      cb.onLocalActivity(activity);
+      cb.onContent("discard after stop");
+      cb.signal.throwIfAborted();
+    });
+    const task = start();
+    await mocks.handlers.get("task:cancel")!(event);
+    if (reload) sender.emit("did-start-loading");
+    finish();
+    await expect(task).rejects.toThrow("cancelled");
+    await mocks.handlers.get("task:flush")!(event, "done");
+    const events = sender.send.mock.calls.map((call: any[]) => call[1]);
+    expect(events).toEqual([
+      { type: "started" },
+      ...(reload ? [] : [{ type: "file-change", change }, { type: "activity", activity }]),
+      { type: "flush", id: "done" },
+    ]);
+  });
+
   it("rejects untrusted cancellation requests", async () => {
     const task = start();
     const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
@@ -321,7 +348,7 @@ describe("GUI pending action lifecycle", () => {
     });
     await Promise.resolve();
     expect(stateReady).toBe(false);
-    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    expect(() => mocks.handlers.get("bot:select")!(event)).toThrow(/running/);
     const sent = sender.send.mock.calls.length;
     callbacks.onContent("late reply");
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task.txt"], status: "success" });
@@ -332,7 +359,7 @@ describe("GUI pending action lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
     finish();
     await expect(task).resolves.toBe("cancelled");
-    await expect(state).resolves.toMatchObject({ workspaces: [], hasApiKey: true });
+    await expect(state).resolves.toMatchObject({ hasApiKey: true });
     expect(stateReady).toBe(true);
     callbacks.onLocalActivity({ operation: "write", paths: ["old-task-after-exit.txt"], status: "success" });
     callbacks.onFileChange({ id: "late-change-after-exit", path: "old-task.txt", operation: "write", additions: 1, deletions: 0, hunks: [], truncated: false });
@@ -349,23 +376,23 @@ describe("GUI pending action lifecycle", () => {
     await expect(nextTask).resolves.toBe("done");
   });
 
-  it("rejects project switching and directory picking while an approval is pending", async () => {
+  it("rejects folder switching and directory picking while an approval is pending", async () => {
     const task = start();
-    expect(() => mocks.handlers.get("workspace:activate")!(event)).toThrow(/running/);
+    expect(() => mocks.handlers.get("bot:select")!(event)).toThrow(/running/);
     await expect(mocks.handlers.get("workspace:choose")!(event)).rejects.toThrow(/running/);
     respond(true);
     await expect(task).resolves.toBe("done");
   });
 
-  it("rejects untrusted project activation before changing workspace", () => {
+  it("rejects untrusted folder activation before changing workspace", () => {
     const untrusted = { ...event, senderFrame: { url: "https://untrusted.example/" } };
-    expect(() => mocks.handlers.get("workspace:activate")!(untrusted)).toThrow("Untrusted");
-    expect(() => mocks.handlers.get("workspace:activate")!(event, 123)).toThrow("Invalid project");
+    expect(() => mocks.handlers.get("bot:select")!(untrusted)).toThrow("Untrusted");
+    expect(() => mocks.handlers.get("bot:select")!(event, 123)).toThrow("Invalid bot ID");
   });
 
   it("validates execution opt-in at the IPC boundary", async () => {
     await expect(mocks.handlers.get("task:run")!(event, { ...options, exec: "true" })).rejects.toThrow("Invalid command");
-    await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("requires local");
+    await expect(mocks.handlers.get("task:run")!(event, { ...options, local: false, exec: true })).rejects.toThrow("unavailable");
     expect(mocks.run).not.toHaveBeenCalled();
   });
 
@@ -390,6 +417,33 @@ describe("GUI pending action lifecycle", () => {
     mocks.run.mockResolvedValue("done");
     await expect(mocks.handlers.get("task:run")!(event, { ...options, history })).rejects.toThrow("Invalid conversation history");
     expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("forwards only a named bot's bounded profile at the IPC boundary", async () => {
+    mocks.run.mockResolvedValue("done");
+    const botProfile = { name: " Reviewer ", instructions: " Review patches. ", exec: true };
+    await mocks.handlers.get("task:run")!(event, { ...options, botProfile });
+    expect(mocks.run.mock.calls[0]?.[0].botProfile).toEqual({ name: "Reviewer", instructions: "Review patches." });
+    for (const invalid of [null, { ...botProfile, name: " " }, { ...botProfile, name: "x".repeat(65) },
+      { name: "Reviewer" }, { ...botProfile, instructions: "x".repeat(4001) }]) {
+      await expect(mocks.handlers.get("task:run")!(event, { ...options, botProfile: invalid }))
+        .rejects.toThrow("Invalid bot profile.");
+    }
+  });
+
+  it("restores invalid or duplicate history IDs with fresh selectable bot identities", () => {
+    const restore = mocks.handlers.get("bot:restore-ids")!;
+    const select = mocks.handlers.get("bot:select")!;
+    const saved = ["unique", "existing", "", "   ", " padded ", "a".repeat(129), "bad\ncontrol", "existing", null];
+    const ids = restore(event, saved) as string[];
+    expect(ids[0]).toBe("unique");
+    expect(ids).not.toContain("existing");
+    expect(new Set(ids).size).toBe(saved.length);
+    for (const id of ids.slice(1)) {
+      expect(id).toMatch(/^[a-f0-9-]{36}$/u);
+      expect(() => select(event, id)).not.toThrow();
+    }
+    expect(restore(event, ids)).toEqual(ids);
   });
 
   it("validates and forwards an originating session ID at the task IPC boundary", async () => {
