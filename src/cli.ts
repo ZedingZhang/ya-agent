@@ -217,7 +217,7 @@ export async function toaConfirm(options: AskOptions, config: ModelConfig, io: C
 
 export async function collectFeedback(result: RunResult, disabled: boolean, io: CliIo, signal?: AbortSignal): Promise<void> {
   void result;
-  if (disabled || !io.stdin.isTTY) return;
+  if (disabled || !io.stdin.isTTY || !io.stdout.isTTY) return;
   const prompt = (question: string): Promise<string> => abortable(io.prompt(question, false, signal), signal);
   const learn = (await prompt("\nLearn from this answer? [y/N] ")).trim().toLocaleLowerCase("und");
   if (learn !== "y" && learn !== "yes") return;
@@ -322,12 +322,13 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
         { commandsEnabled: options.exec, signal: cancellation.signal, onCommandEvent: (event) => showCommandEvent(event, io) },
       )
       : undefined;
+    const stdoutIsTty = Boolean(io.stdout.isTTY);
     const canStream = options.stream === "auto"
       && !options.toa
       && !options.local
       && !shouldUseWeb(task, options.web)
       && options.format !== "markdown"
-      && Boolean(io.stdout.isTTY);
+      && stdoutIsTty;
     const renderer = canStream ? new StreamingMarkdownRenderer(!("NO_COLOR" in process.env)) : undefined;
     const emit = renderer
       ? (chunk: string): void => {
@@ -352,8 +353,9 @@ async function ask(task: string, options: AskOptions, io: CliIo, runtime: CliRun
       const tail = renderer.finish();
       if (tail) write(io.stdout, `${tail}\n`);
     } else {
-      write(io.stdout, `\n[Ya ${result.mode} result]\n\n`);
-      write(io.stdout, `${formatOutput(result.content, options.format, Boolean(io.stdout.isTTY))}\n`);
+      const bannerStream = stdoutIsTty || options.format === "terminal" ? io.stdout : io.stderr;
+      write(bannerStream, `\n[Ya ${result.mode} result]\n\n`);
+      write(io.stdout, `${formatOutput(result.content, options.format, stdoutIsTty)}\n`);
     }
     if (result.partial) write(io.stderr, "\n[Some ToA worker results were unavailable; the synthesis may be incomplete.]\n");
     await collectFeedback(result, !options.feedback, io, cancellation.signal);
