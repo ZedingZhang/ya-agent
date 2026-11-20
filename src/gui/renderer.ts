@@ -146,6 +146,7 @@ const TEXT = {
     accountRevokeFailed: "Signed out locally. The platform session could not be revoked.",
     accountInvalid: "Saved sign-in is invalid. Sign in again or clear it.", accountClear: "Clear saved sign-in",
     approvalExpired: "Approval expired; the action was not approved.",
+    activityPending: "Activity, 1 action awaiting approval", approvalAnnouncement: "1 action awaiting approval.",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
@@ -191,6 +192,7 @@ const TEXT = {
     accountRevokeFailed: "已在本机退出，未能撤销平台会话。",
     accountInvalid: "保存的登录信息无效，请重新登录或清除。", accountClear: "清除登录信息",
     approvalExpired: "批准已过期，此操作未获批准。",
+    activityPending: "活动，有 1 项操作等待批准", approvalAnnouncement: "有 1 项操作等待批准。",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
@@ -210,6 +212,7 @@ let onTaskStarted: (() => void) | undefined;
 let activeAnswer: HTMLElement | undefined;
 let activeAnswerText = "";
 let pendingAction: { id: string; action: LocalAction; responding?: boolean } | undefined;
+let approvalReturnFocus: HTMLElement | undefined;
 let actionExpired = false;
 let activities: LocalActivity[] = [];
 let lastAnswer = "";
@@ -971,8 +974,7 @@ async function runTask(): Promise<void> {
     }
     if (local && drawerPage === "files") void renderFiles();
   } finally {
-    pendingAction = undefined;
-    renderPendingAction();
+    clearPendingAction();
     onTaskStarted = undefined;
     if (activeTurn) {
       selectedImages = [];
@@ -1282,7 +1284,14 @@ function renderPendingAction(): void {
   const content = element<HTMLDivElement>("action-content");
   element<HTMLButtonElement>("action-approve").disabled = Boolean(pendingAction?.responding);
   element<HTMLButtonElement>("action-deny").disabled = Boolean(pendingAction?.responding);
-  element<HTMLButtonElement>("toggle-activity").classList.toggle("has-pending", Boolean(pendingAction));
+  const toggle = element<HTMLButtonElement>("toggle-activity");
+  toggle.classList.toggle("has-pending", Boolean(pendingAction));
+  const label = t(pendingAction ? "activityPending" : "activity");
+  toggle.setAttribute("aria-label", label);
+  toggle.title = label;
+  const announcement = element<HTMLParagraphElement>("approval-announcement");
+  const message = pendingAction ? t("approvalAnnouncement") : actionExpired ? t("approvalExpired") : "";
+  if (announcement.textContent !== message) announcement.textContent = message;
   if (!pendingAction) {
     empty.hidden = false;
     empty.textContent = t(actionExpired ? "approvalExpired" : "noAction");
@@ -1295,6 +1304,23 @@ function renderPendingAction(): void {
   element<HTMLDivElement>("action-paths").textContent = pendingAction.action.paths.join("\n");
   element<HTMLPreElement>("action-diff").textContent = pendingAction.action.diff ?? "";
   element<HTMLPreElement>("action-diff").hidden = !pendingAction.action.diff;
+}
+
+function clearPendingAction(expired = actionExpired): void {
+  const restore = Boolean(pendingAction) && (element<HTMLElement>("approval-panel").contains(document.activeElement)
+    || document.activeElement === document.body);
+  const target = approvalReturnFocus;
+  pendingAction = undefined;
+  approvalReturnFocus = undefined;
+  actionExpired = expired;
+  renderPendingAction();
+  if (restore) {
+    if (target && target !== document.body && target.isConnected && !target.matches(":disabled") && target.getClientRects().length > 0) {
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target) return;
+    }
+    element<HTMLButtonElement>("toggle-activity").focus({ preventScroll: true });
+  }
 }
 
 function decideLocalAction(approved: boolean): void {
@@ -1804,6 +1830,13 @@ function registerEvents(): void {
       element<HTMLButtonElement>("sidebar-toggle").click();
     } else if (event.key === "Escape") {
       element<HTMLDetailsElement>("task-options").open = false;
+      if (pendingAction) {
+        event.preventDefault();
+        switchPage("workspace");
+        setDrawer("activity");
+        element<HTMLElement>(pendingAction.responding ? "action-summary" : "action-deny").focus({ preventScroll: true });
+        return;
+      }
       const previous = drawerPage;
       setDrawer(undefined);
       if (previous) element<HTMLButtonElement>(`toggle-${previous}`).focus();
@@ -1859,21 +1892,19 @@ function registerEvents(): void {
       persistSessions();
       void renderFiles();
     } else if (event.type === "local-action") {
+      if (!pendingAction) approvalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       actionExpired = false;
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();
       switchPage("workspace");
       setDrawer("activity");
       setStatus(t("waiting"), "busy");
+      element<HTMLButtonElement>("action-deny").focus({ preventScroll: true });
     } else if (event.type === "local-action-expired" && pendingAction?.id === event.id) {
-      pendingAction = undefined;
-      actionExpired = true;
-      renderPendingAction();
+      clearPendingAction(true);
       setStatus(t("approvalExpired"), "error");
     } else if (event.type === "local-action-resolved" && pendingAction?.id === event.id) {
-      pendingAction = undefined;
-      actionExpired = false;
-      renderPendingAction();
+      clearPendingAction(false);
       if (document.body.classList.contains("task-running")) setStatus(t("working"), "busy");
     }
   });
