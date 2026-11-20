@@ -190,6 +190,20 @@ describe("agent orchestration", () => {
     expect(messages[0]!.content).not.toContain(unrelated.text);
   });
 
+  it("uses the bot profile for identity and keeps editable instructions in the user role", async () => {
+    const botProfile = { name: "Patch reviewer", instructions: "Use short paragraphs." };
+    const client = new FakeClient();
+    await toaAgent(client, "Compare changes", new ModelConfig(), 1, () => "[]", [], { botProfile, history: [] });
+    expect(client.calls).toHaveLength(2);
+    for (const { messages } of client.calls) {
+      expect(messages[0]?.content).toContain("as your display name");
+      expect(messages[0]?.content).not.toContain("You are Ya");
+      expect(messages[0]?.content).not.toContain(botProfile.instructions);
+      expect(messages[1]).toEqual({ role: "user", content: `Bot profile: ${JSON.stringify(botProfile)}` });
+    }
+    expect(messagesForTask("Hello")[0]?.content).toContain("You are Ya");
+  });
+
   it("builds a multimodal user message without placing images in system messages", () => {
     const messages = messagesForTask("Explain the chart", "", false, [image]);
     expect(messages[0]!.role).toBe("system");

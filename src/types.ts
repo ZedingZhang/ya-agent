@@ -70,3 +70,8 @@ export interface TokenUsage {
 
 export type WebMode = "auto" | "on" | "off";
 export type OutputFormat = "auto" | "terminal" | "markdown";
+
+export interface BotProfile {
+  name: string;
+  instructions: string;
+}
