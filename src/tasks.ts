@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   ModelConfig,
   VALID_MODELS,
@@ -12,6 +12,7 @@ import {
 } from "./config";
 import type { DeepSeekCredential } from "./credentials";
 import type { TaskWorkspace } from "./local";
+import { isProcessAlive, withTaskStoreLock } from "./task-store-lock";
 import type { WebMode } from "./types";
 
 export const TASK_STORE_VERSION = 1;
@@ -116,6 +117,7 @@ interface StoredTaskRecord {
   partial?: boolean;
   error?: string;
   runtime_id?: string;
+  runtime_pid?: number;
 }
 
 interface StoredTaskStore {
@@ -412,6 +414,11 @@ function parseStoredRecord(raw: unknown): StoredTaskRecord {
   if (runtimeId !== undefined && (typeof runtimeId !== "string" || !runtimeId.trim())) {
     throw new Error("Invalid task runtime_id.");
   }
+  const runtimePid = raw.runtime_pid;
+  if (runtimePid !== undefined && (typeof runtimePid !== "number"
+    || !Number.isInteger(runtimePid) || runtimePid <= 0 || runtimePid > 0x7fffffff)) {
+    throw new Error("Invalid task runtime_pid.");
+  }
   return {
     schema_version: TASK_STORE_VERSION,
     id,
@@ -429,11 +436,12 @@ function parseStoredRecord(raw: unknown): StoredTaskRecord {
     ...(partial !== undefined ? { partial } : {}),
     ...(error !== undefined ? { error } : {}),
     ...(runtimeId ? { runtime_id: runtimeId } : {}),
+    ...(runtimePid !== undefined ? { runtime_pid: runtimePid } : {}),
   };
 }
 
-function toPublicRecord(stored: StoredTaskRecord, isActiveInRuntime: boolean): TaskRecord {
-  const interrupted = stored.status === "running" && !isActiveInRuntime;
+function toPublicRecord(stored: StoredTaskRecord, isRunning: boolean): TaskRecord {
+  const interrupted = stored.status === "running" && !isRunning;
   const status: TaskStatus = interrupted ? "interrupted" : stored.status;
   const endedAt = stored.ended_at ?? (status !== "running" ? stored.updated_at : undefined);
   return {
@@ -502,8 +510,13 @@ export class TaskStore {
       && this.activeTaskIds.has(record.id);
   }
 
-  private readStoreFile(): StoredTaskRecord[] {
-    const file = this.path;
+  private isRecordRunning(record: StoredTaskRecord): boolean {
+    return this.isRecordActive(record) || (record.status === "running"
+      && record.runtime_id !== undefined && record.runtime_pid !== undefined
+      && record.runtime_pid !== process.pid && isProcessAlive(record.runtime_pid));
+  }
+
+  private readStoreFile(file = this.path): StoredTaskRecord[] {
     if (!existsSync(file)) return [];
     let parsed: unknown;
     try {
@@ -524,14 +537,12 @@ export class TaskStore {
     });
   }
 
-  private writeStoreFile(tasks: readonly StoredTaskRecord[]): void {
-    const file = this.path;
+  private writeStoreFile(file: string, tasks: readonly StoredTaskRecord[]): void {
     const envelope: StoredTaskStore = {
       version: TASK_STORE_VERSION,
       tasks: [...tasks],
     };
     const payload = `${JSON.stringify(envelope, null, 2)}\n`;
-    mkdirSync(dirname(file), { recursive: true });
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     try {
       if (this.customWriteFile) {
@@ -545,13 +556,20 @@ export class TaskStore {
     }
   }
 
+  private mutateStore<T>(
+    action: (file: string, records: StoredTaskRecord[]) => T,
+    file = this.path,
+  ): T {
+    return withTaskStoreLock(file, () => action(file, this.readStoreFile(file)));
+  }
+
   private interruptStaleRecords(records: readonly StoredTaskRecord[]): { records: StoredTaskRecord[]; changed: boolean } {
     let changed = false;
     const updated = records.map((record): StoredTaskRecord => {
-      if (record.status !== "running" || this.isRecordActive(record)) return record;
+      if (record.status !== "running" || this.isRecordRunning(record)) return record;
       changed = true;
       const timestamp = nextTimestamp(this.now, record.updated_at);
-      const { runtime_id: _runtimeId, ...rest } = record;
+      const { runtime_id: _runtimeId, runtime_pid: _runtimePid, ...rest } = record;
       return {
         ...rest,
         status: "interrupted",
@@ -564,17 +582,19 @@ export class TaskStore {
   }
 
   /**
-   * Classifies any records left active by a previous process/runtime as interrupted.
+   * Classifies records without a live owner as interrupted.
    * Does not start or resume task execution.
    */
   reconcileInterrupted(): TaskRecord[] {
     const file = this.path;
     if (!existsSync(file)) return [];
-    const { records: updated, changed } = this.interruptStaleRecords(this.readStoreFile());
-    if (changed) this.writeStoreFile(updated);
-    return updated
-      .filter((record) => record.status === "interrupted")
-      .map((record) => toPublicRecord(record, false));
+    return this.mutateStore((path, records) => {
+      const { records: updated, changed } = this.interruptStaleRecords(records);
+      if (changed) this.writeStoreFile(path, updated);
+      return updated
+        .filter((record) => record.status === "interrupted")
+        .map((record) => toPublicRecord(record, false));
+    }, file);
   }
 
   create(input: CreateTaskInput, taskWorkspace?: TaskWorkspace): TaskRecord {
@@ -600,32 +620,34 @@ export class TaskStore {
       throw new Error("Non-local tasks cannot specify a workspace directory.");
     }
 
-    const existing = this.readStoreFile();
-    if (existing.some((record) => this.isRecordActive(record))) {
-      throw new Error("A task is already running.");
-    }
-    const { records: baseRecords } = this.interruptStaleRecords(existing);
-    let id = randomUUID();
-    while (baseRecords.some((record) => record.id === id)) {
-      id = randomUUID();
-    }
-    const timestamp = nextTimestamp(this.now);
-    const stored: StoredTaskRecord = {
-      schema_version: TASK_STORE_VERSION,
-      id,
-      objective,
-      ...(sessionId ? { session_id: sessionId } : {}),
-      ...(workspace ? { workspace } : {}),
-      options: toStoredOptions(options),
-      status: "running",
-      revision: 1,
-      created_at: timestamp,
-      updated_at: timestamp,
-      runtime_id: this.runtimeId,
-    };
-    this.writeStoreFile([...baseRecords, stored]);
-    this.activeTaskIds.add(id);
-    return toPublicRecord(stored, true);
+    return this.mutateStore((file, existing) => {
+      if (existing.some((record) => this.isRecordActive(record))) {
+        throw new Error("A task is already running.");
+      }
+      const { records: baseRecords } = this.interruptStaleRecords(existing);
+      let id = randomUUID();
+      while (baseRecords.some((record) => record.id === id)) {
+        id = randomUUID();
+      }
+      const timestamp = nextTimestamp(this.now);
+      const stored: StoredTaskRecord = {
+        schema_version: TASK_STORE_VERSION,
+        id,
+        objective,
+        ...(sessionId ? { session_id: sessionId } : {}),
+        ...(workspace ? { workspace } : {}),
+        options: toStoredOptions(options),
+        status: "running",
+        revision: 1,
+        created_at: timestamp,
+        updated_at: timestamp,
+        runtime_id: this.runtimeId,
+        runtime_pid: process.pid,
+      };
+      this.writeStoreFile(file, [...baseRecords, stored]);
+      this.activeTaskIds.add(id);
+      return toPublicRecord(stored, true);
+    });
   }
 
   transition(
@@ -637,59 +659,60 @@ export class TaskStore {
     if (typeof id !== "string" || !id.trim()) {
       throw new Error("Task ID is required.");
     }
-    const records = this.readStoreFile();
-    const index = records.findIndex((candidate) => candidate.id === id);
-    if (index < 0) {
-      throw new Error(`Task record not found: ${id}`);
-    }
-    const current = records[index]!;
-    if (details.expectedRevision !== undefined) {
-      validatePositiveInt(details.expectedRevision, "expectedRevision");
-      if (current.revision !== details.expectedRevision) {
-        throw new StaleTaskRecordError(
-          `Stale task record update for ${id}: expected revision ${details.expectedRevision}, current revision is ${current.revision}.`,
+    return this.mutateStore((file, records) => {
+      const index = records.findIndex((candidate) => candidate.id === id);
+      if (index < 0) {
+        throw new Error(`Task record not found: ${id}`);
+      }
+      const current = records[index]!;
+      if (details.expectedRevision !== undefined) {
+        validatePositiveInt(details.expectedRevision, "expectedRevision");
+        if (current.revision !== details.expectedRevision) {
+          throw new StaleTaskRecordError(
+            `Stale task record update for ${id}: expected revision ${details.expectedRevision}, current revision is ${current.revision}.`,
+          );
+        }
+      }
+      if (current.status !== "running" || !["completed", "failed", "cancelled", "interrupted"].includes(nextStatus)) {
+        throw new TaskTransitionError(
+          `Invalid task status transition for ${id}: cannot transition from "${current.status}" to "${nextStatus}".`,
         );
       }
-    }
-    if (current.status !== "running" || !["completed", "failed", "cancelled", "interrupted"].includes(nextStatus)) {
-      throw new TaskTransitionError(
-        `Invalid task status transition for ${id}: cannot transition from "${current.status}" to "${nextStatus}".`,
-      );
-    }
-    if (nextStatus !== "interrupted" && !this.isRecordActive(current)) {
-      throw new StaleTaskRecordError(
-        `Stale task record update for ${id}: task is no longer active in this runtime.`,
-      );
-    }
-    if (details.mode !== undefined && details.mode !== "single" && details.mode !== "toa") {
-      throw new Error(`Invalid task mode: ${String(details.mode)}.`);
-    }
-    if (details.partial !== undefined && typeof details.partial !== "boolean") {
-      throw new Error("Invalid task partial flag.");
-    }
-    if (details.error !== undefined && typeof details.error !== "string") {
-      throw new Error("Invalid task error message.");
-    }
+      if (nextStatus !== "interrupted" && !this.isRecordActive(current)) {
+        throw new StaleTaskRecordError(
+          `Stale task record update for ${id}: task is no longer active in this runtime.`,
+        );
+      }
+      if (details.mode !== undefined && details.mode !== "single" && details.mode !== "toa") {
+        throw new Error(`Invalid task mode: ${String(details.mode)}.`);
+      }
+      if (details.partial !== undefined && typeof details.partial !== "boolean") {
+        throw new Error("Invalid task partial flag.");
+      }
+      if (details.error !== undefined && typeof details.error !== "string") {
+        throw new Error("Invalid task error message.");
+      }
 
-    const sanitizedError = details.error !== undefined ? redactSecrets(details.error) : undefined;
-    const timestamp = nextTimestamp(this.now, current.updated_at);
-    const { runtime_id: _runtimeId, ...rest } = current;
-    const updated: StoredTaskRecord = {
-      ...rest,
-      status: nextStatus,
-      revision: current.revision + 1,
-      updated_at: timestamp,
-      ended_at: timestamp,
-      ...(nextStatus === "completed" ? { completed_at: timestamp } : {}),
-      ...(details.mode ? { mode: details.mode } : {}),
-      ...(details.partial !== undefined ? { partial: details.partial } : {}),
-      ...(sanitizedError !== undefined && sanitizedError.length > 0 ? { error: sanitizedError } : {}),
-    };
-    const nextRecords = [...records];
-    nextRecords[index] = updated;
-    this.writeStoreFile(nextRecords);
-    this.activeTaskIds.delete(id);
-    return toPublicRecord(updated, false);
+      const sanitizedError = details.error !== undefined ? redactSecrets(details.error) : undefined;
+      const timestamp = nextTimestamp(this.now, current.updated_at);
+      const { runtime_id: _runtimeId, runtime_pid: _runtimePid, ...rest } = current;
+      const updated: StoredTaskRecord = {
+        ...rest,
+        status: nextStatus,
+        revision: current.revision + 1,
+        updated_at: timestamp,
+        ended_at: timestamp,
+        ...(nextStatus === "completed" ? { completed_at: timestamp } : {}),
+        ...(details.mode ? { mode: details.mode } : {}),
+        ...(details.partial !== undefined ? { partial: details.partial } : {}),
+        ...(sanitizedError !== undefined && sanitizedError.length > 0 ? { error: sanitizedError } : {}),
+      };
+      const nextRecords = [...records];
+      nextRecords[index] = updated;
+      this.writeStoreFile(file, nextRecords);
+      this.activeTaskIds.delete(id);
+      return toPublicRecord(updated, false);
+    });
   }
 
   read(id: string): TaskRecord | undefined {
@@ -700,7 +723,7 @@ export class TaskStore {
     if (typeof id !== "string" || !id.trim()) return undefined;
     const record = this.readStoreFile().find((candidate) => candidate.id === id);
     if (!record) return undefined;
-    return toPublicRecord(record, this.isRecordActive(record));
+    return toPublicRecord(record, this.isRecordRunning(record));
   }
 
   list(options: ListTasksOptions = {}): TaskRecord[] {
@@ -718,7 +741,7 @@ export class TaskStore {
       }
     }
     const records = this.readStoreFile().map((record) =>
-      toPublicRecord(record, this.isRecordActive(record)),
+      toPublicRecord(record, this.isRecordRunning(record)),
     );
     return records.filter((record) => {
       if (allowedStatuses && !allowedStatuses.has(record.status)) return false;
