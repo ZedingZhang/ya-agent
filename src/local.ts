@@ -71,9 +71,9 @@ export interface EditResult {
 export type ConfirmEdit = (previous: string, content: string, count: number, path: string) => Promise<boolean>;
 
 export interface ScopedFolderIO {
-  list(directory: string, signal?: AbortSignal): Promise<string>;
-  read(file: string, signal?: AbortSignal): Promise<string>;
-  search(directory: string, query: string, signal?: AbortSignal): Promise<string>;
+  list(directory: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
+  read(file: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
+  search(directory: string, query: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
   write(file: string, content: string, confirm: (previous: string | undefined, path: string) => Promise<boolean>, signal?: AbortSignal): Promise<{ approved: boolean; previous?: string }>;
   mkdir(path: string, confirm: (path: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean>;
   edit(path: string, revision: string, edits: unknown, confirm: ConfirmEdit, signal?: AbortSignal): Promise<EditResult>;
@@ -405,6 +405,10 @@ export function listDirectory(path: string, displayPath: string): string {
   return JSON.stringify({ path: displayPath, entries, limited: allEntries.length > MAX_LIST_ENTRIES });
 }
 
+function outsideWorkspace(relativePath: string): boolean {
+  return relativePath === ".." || relativePath.startsWith(".." + sep) || isAbsolute(relativePath);
+}
+
 export function physicalWorkspacePath(root: string, input: string, resolveAncestor: (path: string) => string = realpathSync): string {
   const candidate = resolve(root, input);
   let ancestor = candidate;
@@ -418,7 +422,7 @@ export function physicalWorkspacePath(root: string, input: string, resolveAncest
   const physicalAncestor = resolveAncestor(ancestor);
   const physical = resolve(physicalAncestor, relative(ancestor, candidate));
   const fromRoot = relative(root, physical);
-  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+  if (outsideWorkspace(fromRoot)) {
     throw new Error("Path must remain inside the authorized workspace.");
   }
   return physical;
@@ -446,6 +450,8 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     this.confirm = confirm;
     this.onActivity = onActivity;
   }
+
+  get folderScoped(): boolean { return Boolean(this.options.scopedFolder); }
 
   get commandsEnabled(): boolean { return this.options.commandsEnabled === true; }
 
@@ -500,11 +506,17 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
     const expanded = expandHome(value);
     const candidate = resolve(isAbsolute(expanded) ? expanded : join(this.root, expanded));
     if (!this.options.scopedFolder) return physicalWorkspacePath(this.root, candidate);
+    if (isAbsolute(expanded)) return candidate; // The worker checks the physical root, including filesystem aliases.
     const fromRoot = relative(this.root, candidate);
-    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+    if (outsideWorkspace(fromRoot)) {
       throw new Error("Path must remain inside the authorized workspace.");
     }
     return candidate;
+  }
+
+  private scopedPath(path: string): string {
+    const rel = this.relativePath(path);
+    return outsideWorkspace(rel) ? path : rel;
   }
 
   private relativePath(path: string): string {
@@ -587,7 +599,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
   list(this: LocalWorkspace<undefined>, arguments_: ToolArguments, signal?: AbortSignal): string;
   list(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string>;
   list(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string> {
-    const path = this.resolveInput(arguments_.path ?? ".");
+    let path = this.resolveInput(arguments_.path ?? ".");
     if (isSensitive(path)) throw new Error("Listing sensitive directories is blocked in local mode.");
     const relative = this.relativePath(path);
     const finish = (result: string): string => {
@@ -595,7 +607,8 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       this.options.assertAccess?.();
       return result;
     };
-    if (this.options.scopedFolder) return this.options.scopedFolder.list(relative, this.operationSignal(signal)).then(finish);
+    if (this.options.scopedFolder) return this.options.scopedFolder.list(this.scopedPath(path), this.operationSignal(signal),
+      (resolved) => { path = join(this.root, resolved); }).then(finish);
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Not a directory: ${path}`);
     return finish(listDirectory(path, relative));
   }
@@ -603,7 +616,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
   read(this: LocalWorkspace<undefined>, arguments_: ToolArguments, signal?: AbortSignal): string;
   read(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string>;
   read(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string> {
-    const path = this.resolveInput(arguments_.path);
+    let path = this.resolveInput(arguments_.path);
     if (isSensitive(path)) throw new Error("Reading sensitive files is blocked in local mode.");
     const finish = (content: string): string => {
       this.activity("read", [path], "success");
@@ -611,7 +624,8 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       return JSON.stringify({ path: this.relativePath(path), content, revision: textRevision(content) });
     };
     return this.options.scopedFolder
-      ? this.options.scopedFolder.read(this.relativePath(path), this.operationSignal(signal)).then(finish)
+      ? this.options.scopedFolder.read(this.scopedPath(path), this.operationSignal(signal),
+        (resolved) => { path = join(this.root, resolved); }).then(finish)
       : finish(readText(path));
   }
 
@@ -620,11 +634,12 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
   search(arguments_: ToolArguments, signal?: AbortSignal): string | Promise<string> {
     const query = arguments_.query;
     if (typeof query !== "string" || !query.trim()) throw new Error("A non-empty search query is required.");
-    const root = this.resolveInput(arguments_.path ?? ".");
+    let root = this.resolveInput(arguments_.path ?? ".");
     if (isSensitive(root)) throw new Error("Searching sensitive directories is blocked in local mode.");
     if (this.options.scopedFolder) {
       const active = this.operationSignal(signal);
-      return this.options.scopedFolder.search(this.relativePath(root), query, active).then((result) => {
+      return this.options.scopedFolder.search(this.scopedPath(root), query, active,
+        (resolved) => { root = join(this.root, resolved); }).then((result) => {
         active?.throwIfAborted();
         return this.finishSearch(root, result);
       });
@@ -651,7 +666,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
         return this.confirmed({ operation: "mkdir", paths: [path], summary: `Create directory: ${path}` });
       };
       const approved = this.options.scopedFolder
-        ? await this.options.scopedFolder.mkdir(this.relativePath(path), confirm, this.options.signal)
+        ? await this.options.scopedFolder.mkdir(this.scopedPath(path), confirm, this.options.signal)
         : await this.mkdirUnscoped(path, confirm);
       if (!approved) return JSON.stringify({ status: "denied", operation: "mkdir", path: this.relativePath(path), reason: "User declined this action." });
       this.audit("mkdir", [path], "success");
@@ -694,7 +709,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       let previous: string | undefined;
       let approved: boolean;
       if (this.options.scopedFolder) {
-        ({ approved, previous } = await this.options.scopedFolder.write(this.relativePath(path), content, confirm, this.options.signal));
+        ({ approved, previous } = await this.options.scopedFolder.write(this.scopedPath(path), content, confirm, this.options.signal));
       } else {
         if (existsSync(path) && statSync(path).isDirectory()) throw new Error(`Path is a directory: ${path}`);
         if (!existsSync(dirname(path)) || !statSync(dirname(path)).isDirectory()) throw new Error("Parent directory does not exist; create it first.");
@@ -735,7 +750,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
         });
       };
       const { approved, previous, content, count } = this.options.scopedFolder
-        ? await this.options.scopedFolder.edit(this.relativePath(path), revision, arguments_.edits, confirm, this.options.signal)
+        ? await this.options.scopedFolder.edit(this.scopedPath(path), revision, arguments_.edits, confirm, this.options.signal)
         : await this.editUnscoped(path, arguments_.path, revision, arguments_.edits, confirm);
       if (!approved) {
         return JSON.stringify({ status: "denied", operation: "edit", path: this.relativePath(path), reason: "User declined this action." });
@@ -794,7 +809,7 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
         return this.confirmed({ operation: "move", paths: [source, destination], summary: `Move: ${source} -> ${destination}` });
       };
       const approved = this.options.scopedFolder
-        ? await this.options.scopedFolder.move(this.relativePath(source), this.relativePath(destination), confirm, this.options.signal)
+        ? await this.options.scopedFolder.move(this.scopedPath(source), this.scopedPath(destination), confirm, this.options.signal)
         : await this.moveUnscoped(arguments_, source, destination, confirm);
       if (!approved) {
         return JSON.stringify({ status: "denied", operation: "move", path: this.relativePath(source), reason: "User declined this action." });

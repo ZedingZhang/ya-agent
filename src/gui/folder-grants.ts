@@ -1,6 +1,6 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, mkdirSync, readFileSync, realpath, renameSync, rmSync, writeFileSync } from "node:fs";
+import { constants, mkdirSync, readFileSync, realpath, rmSync, writeFileSync } from "node:fs";
 import { open, stat, type FileHandle } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, resolve, sep, toNamespacedPath } from "node:path";
@@ -25,12 +25,14 @@ export interface FolderGrant {
   identity: string;
 }
 
-export function folderIdentityExecutable(): string {
+function nativeExecutable(name: string): string {
   const packaged = process.resourcesPath && __dirname.startsWith(join(process.resourcesPath, "app.asar") + sep);
   const dist = basename(dirname(__dirname)) === "src" ? resolve(__dirname, "../../dist") : resolve(__dirname, "../..");
   return join(packaged ? process.resourcesPath : dist, "gui-native",
-    process.platform === "win32" ? "ya-folder-identity.exe" : "ya-folder-identity");
+    process.platform === "win32" ? name + ".exe" : name);
 }
+
+export function folderIdentityExecutable(): string { return nativeExecutable("ya-folder-identity"); }
 
 export function nativeIdentity(path: string, create: boolean, binary = folderIdentityExecutable()): string | undefined {
   try {
@@ -87,17 +89,38 @@ export class FolderGrants {
     return pin.directoryId;
   }
 
-  grant(botId: string, folder: string, checkSelection?: () => void): Promise<FolderGrant> {
-    const deadline = AbortSignal.timeout(FOLDER_CHECK_TIMEOUT_MS);
-    // A mount can stall even before identification, or while opening a fallback handle.
-    return abortable(this.verifyAndGrant(botId, folder, deadline, checkSelection), deadline);
+  snapshot(botId: string): Buffer | null {
+    try { return readFileSync(this.recordPath(botId)); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
   }
 
-  private async verifyAndGrant(botId: string, folder: string, deadline: AbortSignal, checkSelection?: () => void): Promise<FolderGrant> {
-    const path = await resolveGrantPath(folder);
-    deadline.throwIfAborted();
+  private commit(botId: string, value: { version: string }, expected?: Buffer | null): void {
     const record = this.recordPath(botId);
     const temp = record + "." + randomUUID();
+    mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(temp, JSON.stringify(value), { mode: 0o600, flag: "wx" });
+      const mode = expected === undefined ? "revoke" : expected === null ? "missing" : "compare";
+      const result = spawnSync(nativeExecutable("ya-grant-commit"), [mode, ...[record, temp, record + ".lock"].map(toNamespacedPath)], {
+        input: expected ?? undefined, timeout: 3_000, windowsHide: true,
+      });
+      if (result.status === 2) throw new Error("Folder selection is no longer current.");
+      if (result.status !== 0) throw new Error("Could not save folder access.");
+    } finally { rmSync(temp, { force: true }); }
+  }
+
+  grant(botId: string, folder: string, checkSelection?: () => void, expected = this.snapshot(botId)): Promise<FolderGrant> {
+    const deadline = AbortSignal.timeout(FOLDER_CHECK_TIMEOUT_MS);
+    // A mount can stall even before identification, or while opening a fallback handle.
+    return abortable(this.verifyAndGrant(botId, folder, expected, deadline, checkSelection), deadline);
+  }
+
+  private async verifyAndGrant(botId: string, folder: string, expected: Buffer | null, deadline: AbortSignal, checkSelection?: () => void): Promise<FolderGrant> {
+    const path = await resolveGrantPath(folder);
+    deadline.throwIfAborted();
     let handle: FileHandle | undefined;
     let directoryId: { dev: string; ino: string } | undefined;
     try {
@@ -117,21 +140,18 @@ export class FolderGrants {
       deadline.throwIfAborted();
       checkSelection?.();
       const grant = { path, identity, version: randomUUID() };
-      mkdirSync(dirname(record), { recursive: true, mode: 0o700 });
-      writeFileSync(temp, JSON.stringify(grant), { mode: 0o600, flag: "wx" });
-      renameSync(temp, record);
+      this.commit(botId, grant, expected);
       this.release(botId);
       if (handle && directoryId) this.pins.set(botId, { handle, identity, directoryId });
       return grant;
     } catch (error) {
       await handle?.close();
-      rmSync(temp, { force: true });
       throw error;
     }
   }
 
   revoke(botId: string): void {
-    rmSync(this.recordPath(botId), { force: true });
+    this.commit(botId, { version: randomUUID() });
     this.release(botId);
   }
 

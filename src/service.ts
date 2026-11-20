@@ -123,7 +123,6 @@ export async function runTask(
   const record = store.create({
     objective: task,
     sessionId: options.sessionId,
-    workspace: localWorkspace?.root,
     config,
     options: {
       model: config.model,
@@ -140,7 +139,7 @@ export async function runTask(
       imageCount: images.length,
       historyLength: history.length,
     },
-  });
+  }, localWorkspace);
   const taskId = record.id;
   const initialRevision = record.revision;
   options.onTaskCreated?.(structuredClone(record));

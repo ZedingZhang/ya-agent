@@ -52,6 +52,7 @@ interface LocalAction {
 }
 
 interface LocalActivity {
+  id?: string;
   operation: string;
   paths: string[];
   status: string;
@@ -91,6 +92,8 @@ interface YaRendererBridge {
   cancelDeepSeekLogin(): Promise<void>;
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask: import("./shared").YaBridge["runTask"];
+  pendingOutcomes: import("./shared").YaBridge["pendingOutcomes"];
+  acknowledgeOutcome: import("./shared").YaBridge["acknowledgeOutcome"];
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<Array<{ card: MemoryCard; score: number | null }>>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
@@ -221,6 +224,8 @@ interface ConversationCommand {
   result?: CommandResult;
 }
 interface ConversationTurn {
+  turnId?: string;
+  committedActivities?: LocalActivity[];
   taskId?: string;
   task: string;
   images: SelectedImage[];
@@ -348,14 +353,16 @@ function renderPageTitle(): void {
     : page === "memory" ? t("memory") : currentBot?.title ?? "Ya";
 }
 
-function persistSessions(): void {
+function persistSessions(): boolean {
   if (sessionSaveTimer !== undefined) window.clearTimeout(sessionSaveTimer);
   sessionSaveTimer = undefined;
   try {
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentBot.id, sessions: bots,
       sidebarCollapsed: document.body.classList.contains("sidebar-collapsed") }));
+    return true;
   } catch {
     setStatus(t("historySaveError"), "error");
+    return false;
   }
 }
 
@@ -398,6 +405,12 @@ function validSavedFileChange(value: unknown): value is FileChange {
   return lines <= 2_000 && characters <= 128 * 1_024;
 }
 
+function savedActivities(value: unknown): LocalActivity[] {
+  return Array.isArray(value) ? value.filter((activity): activity is LocalActivity =>
+    isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
+    && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
+}
+
 async function loadSessionHistory(): Promise<string | undefined> {
   let saved: unknown;
   try {
@@ -424,6 +437,8 @@ async function loadSessionHistory(): Promise<string | undefined> {
         isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
         && typeof image.size === "number" && typeof image.mimeType === "string") : [];
       turns.push({
+        ...(typeof turn.turnId === "string" ? { turnId: turn.turnId } : {}),
+        ...(Array.isArray(turn.committedActivities) ? { committedActivities: savedActivities(turn.committedActivities) } : {}),
         ...(typeof turn.taskId === "string" && turn.taskId.trim() ? { taskId: turn.taskId.trim() } : {}),
         task: turn.task, answer: turn.answer, images,
         status: turn.status === "running" ? "interrupted" : turn.status as ConversationTurn["status"],
@@ -432,14 +447,11 @@ async function loadSessionHistory(): Promise<string | undefined> {
         changes: Array.isArray(turn.changes) ? turn.changes.filter(validSavedFileChange) : [],
       });
     }
-    const savedActivities = Array.isArray(value.activities) ? value.activities.filter((activity): activity is LocalActivity =>
-      isRecord(activity) && typeof activity.operation === "string" && typeof activity.status === "string"
-      && Array.isArray(activity.paths) && activity.paths.every((path) => typeof path === "string")) : [];
     const id = ids[index]!;
     if (activeId === undefined && savedIds[index] === saved.activeId) activeId = id;
     bots.push({ id, title: value.title.trim() || "Ya",
       instructions: typeof value.instructions === "string" ? value.instructions : "", updatedAt: value.updatedAt, draft: value.draft,
-      turns, activities: savedActivities });
+      turns, activities: savedActivities(value.activities) });
   }
   return activeId;
 }
@@ -846,13 +858,14 @@ async function runTask(): Promise<void> {
     return messages;
   });
   // Commit the draft and its attachments only after the main process accepts the task.
+  const turnId = crypto.randomUUID();
   const beginTurn = () => {
     if (activeTurn && activeAnswer) return { turn: activeTurn, answer: activeAnswer };
     input.value = "";
     resizeTaskInput();
     currentBot.draft = "";
     currentBot.updatedAt = Date.now();
-    activeTurn = { task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
+    activeTurn = { turnId, task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
     currentBot.turns.push(activeTurn);
     activeAnswer = appendTask(task, taskImages);
     activeAnswerText = "";
@@ -876,6 +889,7 @@ async function runTask(): Promise<void> {
   try {
     const options: import("./shared").RendererTaskOptions = {
       sessionId: currentBot.id,
+      turnId,
       task,
       botProfile: { name: currentBot.title, instructions: currentBot.instructions },
       history,
@@ -1644,6 +1658,34 @@ function tableSeparator(line: string): boolean {
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
 }
 
+function applyCommittedOutcome(outcome: import("./shared").CommittedOutcome): void {
+  const bot = bots.find((item) => item.id === outcome.botId);
+  const turn = bot?.turns.find((item) => item.turnId === outcome.turnId);
+  if (!bot || !turn) return;
+  const event = outcome.event;
+  if (event.type === "file-change") {
+    if (!turn.changes.some((change) => change.id === event.change.id)) {
+      turn.changes.push(event.change);
+      if (turn === activeTurn) {
+        activeAnswer?.parentElement?.append(fileChangeCard(event.change, true));
+        renderChanges();
+        void renderFiles();
+      }
+    }
+  } else {
+    const history = turn.committedActivities ??= [];
+    if (!history.some((activity) => activity.id === outcome.id)) {
+      const activity = { ...event.activity, id: outcome.id };
+      history.push(activity);
+      if (turn === bot.turns.at(-1)) {
+        bot.activities.push(activity);
+        if (bot === currentBot) renderActivities();
+      }
+    }
+  }
+  if (persistSessions()) void bridge.acknowledgeOutcome(outcome.id).catch(() => undefined);
+}
+
 function registerEvents(): void {
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((button) => {
     button.addEventListener("click", () => switchPage(button.dataset.page as "workspace" | "memory" | "settings"));
@@ -1737,7 +1779,9 @@ function registerEvents(): void {
   element<HTMLButtonElement>("learn-button").addEventListener("click", learnFromAnswer);
 
   bridge.onTaskEvent((event) => {
-    if (event.type === "started") {
+    if (event.type === "committed") {
+      applyCommittedOutcome(event.outcome);
+    } else if (event.type === "started") {
       onTaskStarted?.();
     } else if (event.type === "content" && activeAnswer) {
       activeAnswerText += event.content;
@@ -1786,6 +1830,7 @@ async function initialize(): Promise<void> {
   currentBot = bots.find((bot) => bot.id === activeId) ?? bots[0] ?? createBot();
   Object.assign(state, await bridge.selectBot(currentBot.id));
   registerEvents();
+  for (const outcome of await bridge.pendingOutcomes()) applyCommittedOutcome(outcome);
   applyLanguage();
   fillSettings();
   renderMemory();

@@ -41,6 +41,8 @@ const bridge: YaBridge = {
       await flushTaskEvents();
     }
   },
+  pendingOutcomes: () => ipcRenderer.invoke("task:pending-outcomes"),
+  acknowledgeOutcome: (id) => ipcRenderer.invoke("task:ack-outcome", id),
   cancelTask: () => ipcRenderer.invoke("task:cancel"),
   relevantCards: (task: string) => ipcRenderer.invoke("memory:relevant", task),
   createMemory: (text, evidence, kind) => ipcRenderer.invoke("memory:create", { text, evidence, kind }),

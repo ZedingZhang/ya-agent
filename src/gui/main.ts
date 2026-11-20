@@ -33,12 +33,13 @@ import { createFileChange } from "../file-diff";
 import { search } from "../web";
 import { loginDeepSeek, logoutDeepSeek } from "../account";
 import { accountCredentialPath, clearAccountCredential, loadAccountCredential, type DeepSeekCredential } from "../credentials";
-import { GuiController, LANGUAGES, type Language } from "./controller";
+import { GuiController, LANGUAGES, type GuiRunCallbacks, type GuiTaskOptions, type Language } from "./controller";
 import { FolderAccessChangedError } from "./folder-grants";
 import { initialWindowGeometry } from "./layout";
 import { installApplicationMenu } from "./menu";
 import type {
   AppState,
+  CommittedOutcome,
   RendererTaskOptions,
   SelectedImage,
   SettingsUpdate,
@@ -53,6 +54,8 @@ let mainWindow: BrowserWindow | undefined;
 let taskRunning = false;
 let activeTaskController: AbortController | undefined;
 let rendererGeneration = 0;
+// Survives renderer replacement until the owning turn is saved to its history.
+const pendingOutcomes = new Map<string, CommittedOutcome>();
 let folderBrowserRequest: AbortController | undefined;
 let folderSelectionRevision = 0;
 let activeTaskPromise: Promise<RunResult> | undefined;
@@ -167,6 +170,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
     }
     sessionId = value.sessionId.trim();
   }
+  if (value.turnId !== undefined && !validBotId(value.turnId)) throw new Error("Invalid turn ID.");
   let botProfile: RendererTaskOptions["botProfile"];
   if (value.botProfile !== undefined) {
     const profile = value.botProfile;
@@ -197,6 +201,7 @@ function validateTaskOptions(value: unknown): RendererTaskOptions {
   });
   return {
     ...(sessionId ? { sessionId } : {}),
+    ...(typeof value.turnId === "string" ? { turnId: value.turnId } : {}),
     ...(botProfile ? { botProfile } : {}),
     task: value.task.trim(),
     history: messages,
@@ -265,6 +270,7 @@ function registerIpc(): void {
     controller.assertActiveBot(botId);
     if (!mainWindow) return undefined;
     const revision = ++folderSelectionRevision;
+    const expected = controller.folderSelectionSnapshot(botId);
     const chinese = controller.language === "zh-CN";
     const selection = await dialog.showOpenDialog(mainWindow, {
       properties: ["openDirectory", "createDirectory"],
@@ -276,7 +282,7 @@ function registerIpc(): void {
     if (selection.canceled || !path) return undefined;
     return controller.grantFolder(botId, path, () => {
       if (taskRunning || revision !== folderSelectionRevision) throw new Error("Folder selection is no longer current.");
-    });
+    }, expected);
   });
 
   ipcMain.handle("bot:select", (event, botId: unknown) => {
@@ -403,6 +409,15 @@ function registerIpc(): void {
     return { state: appState(), revoked };
   });
 
+  ipcMain.handle("task:pending-outcomes", (event) => {
+    assertTrustedSender(event);
+    return Array.from(pendingOutcomes.values());
+  });
+  ipcMain.handle("task:ack-outcome", (event, id: string) => {
+    assertTrustedSender(event);
+    pendingOutcomes.delete(id);
+  });
+
   ipcMain.handle("task:run", async (event, raw: unknown) => {
     assertTrustedSender(event);
     if (activeLoginPromise) throw new Error("Finish or cancel DeepSeek sign-in before starting a task.");
@@ -414,11 +429,17 @@ function registerIpc(): void {
     activeTaskController = taskController;
     const taskRendererGeneration = rendererGeneration;
     const send = (value: TaskEvent): void => {
-      if (activeTaskController !== taskController || rendererGeneration !== taskRendererGeneration) return;
+      if (activeTaskController !== taskController) return;
       // Stop lets an already approved mutation finish. Its outcome still belongs to this turn.
       const committed = value.type === "file-change" || (value.type === "activity"
         && value.activity.status === "success" && ["write", "edit", "mkdir", "move"].includes(value.activity.operation));
-      if (!taskController.signal.aborted || committed) sendTaskEvent(value);
+      let outgoing = value;
+      if (committed && options.turnId && options.sessionId) {
+        const outcome = { id: randomUUID(), botId: options.sessionId, turnId: options.turnId, event: value };
+        pendingOutcomes.set(outcome.id, outcome);
+        outgoing = { type: "committed", outcome };
+      }
+      if (rendererGeneration === taskRendererGeneration && (!taskController.signal.aborted || committed)) sendTaskEvent(outgoing);
     };
     try {
       activeTaskPromise = controller.run(options, {
@@ -1296,21 +1317,27 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
   let finished!: () => void;
   const stopping = new Promise<void>((resolve) => { release = resolve; });
   const stopped = new Promise<void>((resolve) => { finished = resolve; });
-  controller = new GuiController(async (_apiKey, task, _config, options = {}) => {
-    if (task === "smoke-reload") {
-      taskStarted = true;
-      signal = options.signal;
-      options.onContent?.("Reply before reload");
-      try {
-        await stopping;
-        options.onContent?.(" late reply from the old task");
-        signal?.throwIfAborted();
-      } finally {
-        finished();
+  controller = new class extends GuiController {
+    override async run(options: GuiTaskOptions, callbacks: GuiRunCallbacks = {}): Promise<RunResult> {
+      callbacks.onStarted?.();
+      if (options.task === "smoke-reload") {
+        taskStarted = true;
+        signal = callbacks.signal;
+        callbacks.onContent?.("Reply before reload");
+        try {
+          await stopping;
+          // An approved operation can finish after the initiating renderer detached.
+          callbacks.onFileChange?.(createFileChange("note.txt", "draft", "final", "edit"));
+          callbacks.onLocalActivity?.({ operation: "edit", paths: ["note.txt"], status: "success" });
+          callbacks.onContent?.(" late reply from the old task");
+          signal?.throwIfAborted();
+        } finally {
+          finished();
+        }
       }
+      return { content: "Reply after reload", mode: "single", usage: {} };
     }
-    return { content: "Reply after reload", mode: "single", usage: {} };
-  });
+  }();
   controller.setSessionApiKey("smoke-only-key");
   const fixture = await window.webContents.executeJavaScript(`(async () => {
     const originalId = currentBot.id;
@@ -1352,15 +1379,24 @@ async function verifyReloadDuringTask(window: BrowserWindow): Promise<void> {
     await verifyRenderer(window);
     const recovered = await window.webContents.executeJavaScript(`(async () => {
       const source = bots.find((session) => session.id === '${fixture.sourceId}');
-      const interrupted = currentBot.id === source.id && source.turns.at(-1).status === 'interrupted'
-        && source.turns.at(-1).answer === 'Reply before reload';
+      const turn = source.turns.at(-1);
+      const interrupted = currentBot.id === source.id && turn.status === 'interrupted'
+        && turn.answer === 'Reply before reload' && turn.changes.length === 1 && turn.changes[0].path === 'note.txt'
+        && turn.committedActivities.length === 1 && source.activities.length === 1 && source.activities[0].operation === 'edit';
+      const outcome = { id: source.activities[0].id, botId: source.id, turnId: turn.turnId,
+        event: { type: 'activity', activity: source.activities[0] } };
       await selectBot(bots.find((session) => session.id === '${fixture.nextId}'));
+      applyCommittedOutcome(outcome);
+      applyCommittedOutcome({ ...outcome, id: crypto.randomUUID(), event: { type: 'file-change', change: turn.changes[0] } });
+      const saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY)).sessions.find((bot) => bot.id === source.id);
+      const durable = saved.activities.length === 1 && saved.turns.at(-1).changes.length === 1
+        && saved.turns.at(-1).changes[0].id === turn.changes[0].id;
       const isolated = currentBot.id === '${fixture.nextId}' && currentBot.activities.length === 0
         && currentBot.turns.length === 0 && pendingAction === undefined && document.querySelector('#stop-button').hidden;
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#task-input').value = 'smoke-reload-next';
       await runTask();
-      return interrupted && isolated && currentBot.turns.at(-1).status === 'complete'
+      return interrupted && durable && isolated && currentBot.turns.at(-1).status === 'complete'
         && currentBot.turns.at(-1).answer === 'Reply after reload';
     })()`) as boolean;
     if (!recovered) throw new Error("Reload lost task ownership, mixed session history, or blocked the next task.");

@@ -175,12 +175,17 @@ export class GuiController {
     return describeFolderAccess(grant, valid ? grant.path : undefined);
   }
 
-  async grantFolder(botId: string, folder: string, beforeCommit?: () => void): Promise<FolderAccess> {
+  folderSelectionSnapshot(botId: string): Buffer | null {
+    this.assertActiveBot(botId);
+    return this.grants.snapshot(botId);
+  }
+
+  async grantFolder(botId: string, folder: string, beforeCommit?: () => void, expected = this.folderSelectionSnapshot(botId)): Promise<FolderAccess> {
     this.assertActiveBot(botId);
     const grant = await this.grants.grant(botId, folder, () => {
       this.assertActiveBot(botId);
       beforeCommit?.();
-    });
+    }, expected);
     this.verifiedGrants.set(botId, grant.version);
     return describeFolderAccess(grant, grant.path);
   }

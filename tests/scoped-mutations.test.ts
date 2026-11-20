@@ -1,5 +1,5 @@
-import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { textRevision } from "../src/edits";
 import { FolderGrants } from "../src/gui/folder-grants";
@@ -34,6 +34,24 @@ describe("desktop folder mutations", () => {
   afterEach(() => {
     grants.revoke("bot");
     home.cleanup();
+  });
+
+  it("accepts absolute aliases of the authorized root and returns relative result and approval paths", async () => {
+    const alias = root + "-alias";
+    symlinkSync(root, alias, process.platform === "win32" ? "junction" : "dir");
+    try {
+      const check = async (spelling: string): Promise<void> => {
+        expect(JSON.parse(await workspace.read({ path: join(spelling, note) }))).toMatchObject({ path: note, content: "draft" });
+        expect(JSON.parse(await workspace.list({ path: join(spelling, "drafts") })).entries[0].path).toBe(note);
+        expect(JSON.parse(await workspace.search({ path: join(spelling, "drafts"), query: "draft" })).results[0].path).toBe(note);
+      };
+      await check(alias);
+      if (root.toUpperCase() !== root && existsSync(root.toUpperCase())) await check(root.toUpperCase());
+      const result = JSON.parse(await workspace.write({ path: join(alias, "new.txt"), content: "new" }));
+      expect(result.path).toBe("new.txt");
+      expect(confirm.mock.calls.at(-1)?.[0].paths).toEqual([join(root, "new.txt")]);
+      await expect(workspace.read({ path: dirname(root) })).rejects.toThrow("inside the authorized workspace");
+    } finally { unlinkSync(alias); }
   });
 
   it("publishes the approved edit, records its diff, and moves files and directories between parents", async () => {

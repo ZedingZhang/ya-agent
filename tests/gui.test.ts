@@ -1,4 +1,4 @@
-import { ChildProcess, fork } from "node:child_process";
+import { ChildProcess, execFileSync, fork } from "node:child_process";
 import { once } from "node:events";
 import { basename, join, resolve } from "node:path";
 import { constants, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -73,6 +73,30 @@ describe("GUI controller", () => {
     restarted.revokeFolder("first");
     controller.activeBotId = "first";
     expect((await controller.folderAccess()).validWorkspace).toBeUndefined();
+  });
+
+  it.each(["revoke", "regrant"])("keeps a later %s from a second store when a slow selection completes", async (operation) => {
+    let finish!: (identity: string) => void;
+    const pending = new Promise<string>((resolve) => { finish = resolve; });
+    const identify = vi.fn(() => pending);
+    const first = new FolderGrants(identify);
+    const second = new FolderGrants(() => "new");
+    if (operation === "regrant") await second.grant("bot", home.path);
+    const stale = first.grant("bot", home.path);
+    await vi.waitFor(() => expect(identify).toHaveBeenCalledOnce());
+    // The other app instance edits the shared record using its own JS runtime.
+    execFileSync(process.execPath, ["-e", `
+      const { FolderGrants } = require("./dist/typescript/gui/folder-grants");
+      const store = new FolderGrants(() => "replacement");
+      store.revoke("bot");
+      if (process.argv[1] === "regrant") store.grant("bot", process.env.YA_HOME).catch(() => { process.exitCode = 1; });
+    `, operation]);
+    const expected = second.read("bot");
+    if (operation === "regrant") expect(expected?.identity).toBe("replacement");
+    else expect(expected).toBeUndefined();
+    finish("stale");
+    await expect(stale).rejects.toThrow("no longer current");
+    expect(first.read("bot")).toEqual(expected);
   });
 
   it("times out a stalled folder selection and discards its late identity", async () => {
@@ -558,6 +582,26 @@ describe("GUI controller", () => {
     expect(await options.localWorkspace?.confirm({ operation: "mkdir", paths: [join(workspace, "notes")], summary: "Create" })).toBe(true);
   });
 
+  it("creates a task record without reopening a mount after the GUI verified its grant", async () => {
+    const folder = join(home.path, "selected");
+    mkdirSync(folder);
+    const controller = new GuiController((key, task, config, options) => {
+      // The verified mount becomes unavailable just as the real service starts.
+      renameSync(folder, folder + "-detached");
+      return runTask(key, task, config, {
+        ...options, clientFactory: (credential) => new DeepSeekClient(credential, async () =>
+          Response.json({ choices: [{ message: { role: "assistant", content: "done" } }] })),
+      });
+    });
+    controller.setSessionApiKey("test-key");
+    controller.activeBotId = "bot";
+    const { workspace, folderGrantVersion } = await controller.grantFolder("bot", folder);
+    const result = await controller.run({ task: "chat", sessionId: "bot", local: true, webMode: "off", folderGrantVersion });
+    expect(controller.task(result.taskId!)?.workspace).toBe(workspace);
+    expect(() => new TaskStore().create({ objective: "direct", workspace })).toThrow("does not exist");
+    controller.revokeFolder("bot");
+  });
+
   it("binds local tools to the active bot and rechecks grants after approval", async () => {
     const first = join(home.path, "first");
     const second = join(home.path, "second");
@@ -575,7 +619,7 @@ describe("GUI controller", () => {
     await controller.run(task, { onLocalAction: () => { controller.revokeFolder("a"); return true; } });
     const files = runner.mock.calls[0]![3]!.localWorkspace!;
     expect(files.commandsEnabled).toBe(false);
-    expect(() => files.list({ path: second })).toThrow("inside the authorized workspace");
+    await expect(files.list({ path: second })).rejects.toThrow("inside the authorized workspace");
     await expect(files.write({ path: "note", content: "hi" })).rejects.toThrow("Folder access has changed");
     await expect(Promise.resolve().then(() => files.list({ path: "." }))).rejects.toThrow("Folder access has changed");
     await controller.grantFolder("a", second);

@@ -26,7 +26,8 @@ interface FolderRequest {
 type EditPreview = Pick<EditResult, "content" | "count">;
 type PreviewPaths = [path: string, destination?: string];
 type ConfirmWorker = (paths: PreviewPaths, previous?: string, edit?: EditPreview) => Promise<boolean>;
-type WorkerMessage = { type: "preview"; paths: PreviewPaths; previous?: string; edit?: EditPreview } | { type: "result"; value: string } | { type: "error"; message: string };
+type FolderResult = { value: string; path?: string };
+type WorkerMessage = { type: "preview"; paths: PreviewPaths; previous?: string; edit?: EditPreview } | ({ type: "result" } & FolderResult) | { type: "error"; message: string };
 
 const worker = __filename.endsWith(".js") ? __filename : resolve(__dirname, "../../dist/typescript/gui/folder-io.js");
 function workerEnv(): NodeJS.ProcessEnv {
@@ -53,16 +54,16 @@ export class GrantedFolderIO implements ScopedFolderIO {
     }
   }
 
-  list(path: string, signal?: AbortSignal): Promise<string> {
-    return runWorker(this.request({ kind: "list", path }), signal);
+  list(path: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string> {
+    return runWorker(this.request({ kind: "list", path }), signal, undefined, onResolved);
   }
 
-  read(path: string, signal?: AbortSignal): Promise<string> {
-    return runWorker(this.request({ kind: "read", path }), signal);
+  read(path: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string> {
+    return runWorker(this.request({ kind: "read", path }), signal, undefined, onResolved);
   }
 
-  search(path: string, query: string, signal?: AbortSignal): Promise<string> {
-    return runWorker(this.request({ kind: "search", path, query }), signal);
+  search(path: string, query: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string> {
+    return runWorker(this.request({ kind: "search", path, query }), signal, undefined, onResolved);
   }
 
   async write(path: string, content: string, confirm: (previous: string | undefined, path: string) => Promise<boolean>, signal?: AbortSignal): Promise<{ approved: boolean; previous?: string }> {
@@ -98,7 +99,7 @@ export class GrantedFolderIO implements ScopedFolderIO {
   }
 }
 
-async function runWorker(request: FolderRequest, signal?: AbortSignal, confirm?: ConfirmWorker): Promise<string> {
+async function runWorker(request: FolderRequest, signal?: AbortSignal, confirm?: ConfirmWorker, onResolved?: (path: string) => void): Promise<string> {
   signal?.throwIfAborted();
   const child = fork(worker, [], { env: workerEnv(), execArgv: [], stdio: ["ignore", "ignore", "ignore", "ipc"] });
   return new Promise((resolveResult, reject) => {
@@ -130,6 +131,7 @@ async function runWorker(request: FolderRequest, signal?: AbortSignal, confirm?:
         } else if (message.type === "error") {
           error = new Error(message.message);
         } else {
+          if (message.path !== undefined) onResolved?.(message.path);
           result = message.value;
         }
       } catch (reason) { failed(reason); }
@@ -216,13 +218,19 @@ async function editInDirectory(name: string, operation: Extract<Operation, { kin
 
 type Mutation = Extract<Operation, { kind: "write" | "mkdir" | "edit" | "move" }>;
 
+function checkSubmittedPath(path: string): void {
+  if (!path || (parse(path).root && !isAbsolute(path)) || normalize(path).split(sep).includes("..")) {
+    throw new Error("Invalid workspace path.");
+  }
+}
+
 async function mutate(operation: Mutation, root: string, identityExecutable: string, verifyCwd: (directory: string) => void, checkAccess: () => void, confirm: ConfirmWorker): Promise<string> {
   // Preserve in-scope aliases, binding their original spelling to the physical
   // path used for approval. Mutations can never operate on the granted root.
   const resolvePath = (submitted: string): string => {
-    if (!submitted || parse(submitted).root || normalize(submitted).split(sep).includes("..")) throw new Error("Invalid workspace path.");
+    checkSubmittedPath(submitted);
     const physical = physicalWorkspacePath(root, submitted, realpathSync.native);
-    if (isSensitive(join(root, submitted)) || isSensitive(physical)) throw new Error("Access to sensitive paths is blocked.");
+    if (isSensitive(resolve(root, submitted)) || isSensitive(physical)) throw new Error("Access to sensitive paths is blocked.");
     const path = relative(root, physical);
     if (!path) throw new Error("Cannot change the granted root directory.");
     return path;
@@ -261,11 +269,11 @@ async function mutate(operation: Mutation, root: string, identityExecutable: str
   }
 }
 
-async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise<string> {
+async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise<FolderResult> {
   const { botId, grant, operation, sessionDirectoryId, identityExecutable } = request;
-  const displayPath = normalize(operation.path);
+  let displayPath = normalize(operation.path);
   let path = displayPath;
-  if (!operation.path || parse(path).root || path.split(sep).includes("..")) throw new Error("Invalid workspace path.");
+  checkSubmittedPath(operation.path);
 
   process.chdir(grant.path);
   const fd = openSync(".", constants.O_RDONLY | (constants.O_DIRECTORY ?? 0));
@@ -288,11 +296,13 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     };
     if (operation.kind === "probe") {
       checkAccess();
-      return "valid";
+      return { value: "valid" };
     }
     const root = realpathSync.native(".");
     if (operation.kind === "list" || operation.kind === "read" || operation.kind === "search") {
+      if (isSensitive(resolve(root, path))) throw new Error("Access to sensitive paths is blocked.");
       path = relative(root, physicalWorkspacePath(root, path, realpathSync.native)) || ".";
+      if (isAbsolute(displayPath)) displayPath = path;
     }
     const verifyCwd = (directory: string): void => {
       const actual = realpathSync.native(".");
@@ -316,7 +326,7 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     checkAccess();
     if (operation.kind === "write" || operation.kind === "edit" || operation.kind === "mkdir" || operation.kind === "move") {
       if (!confirm) throw new Error("File approval is required.");
-      return await mutate(operation, root, identityExecutable, verifyCwd, checkAccess, confirm);
+      return { value: await mutate(operation, root, identityExecutable, verifyCwd, checkAccess, confirm) };
     }
     const file = operation.kind === "read";
     const directory = file ? dirname(path) : path;
@@ -324,14 +334,11 @@ async function execute(request: FolderRequest, confirm?: ConfirmWorker): Promise
     const check = (): void => { verifyCwd(directory); checkAccess(); };
     check();
     if (isSensitive(file ? join(realpathSync.native("."), basename(path)) : realpathSync.native("."))) throw new Error("Access to sensitive paths is blocked.");
-    switch (operation.kind) {
-      case "search": return searchFiles(path, operation.query, (entry) => join(displayPath, relative(path, entry)), checkAccess, verifyCwd);
-      default: {
-        const result = file ? readRegularText(basename(path)) : listDirectory(".", displayPath);
-        check();
-        return result;
-      }
-    }
+    const value = operation.kind === "search"
+      ? searchFiles(path, operation.query, (entry) => join(displayPath, relative(path, entry)), checkAccess, verifyCwd)
+      : file ? readRegularText(basename(path)) : listDirectory(".", displayPath);
+    check();
+    return { path: displayPath, value };
   } finally { closeSync(fd); }
 }
 
@@ -353,7 +360,7 @@ if (require.main === module && process.send) {
       process.send!({ type: "preview", paths, previous, edit }, (error: Error | null) => { if (error) disconnected(); });
     });
     let reply: WorkerMessage;
-    try { reply = { type: "result", value: await execute(request, confirm) }; }
+    try { reply = { type: "result", ...await execute(request, confirm) }; }
     catch (error) { reply = { type: "error", message: error instanceof Error ? error.message : String(error) }; }
     if (process.connected) {
       process.send!(reply, () => { if (process.connected) process.disconnect(); });

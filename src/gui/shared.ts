@@ -61,6 +61,7 @@ export interface SettingsUpdate {
 }
 
 export interface RendererTaskOptions {
+  turnId?: string;
   sessionId?: string;
   botProfile?: BotProfile;
   task: string;
@@ -83,12 +84,21 @@ export interface SelectedImage {
   mimeType: string;
 }
 
+type FileOutcome = { type: "activity"; activity: LocalActivity } | { type: "file-change"; change: FileChange };
+
+export interface CommittedOutcome {
+  id: string;
+  botId: string;
+  turnId: string;
+  event: FileOutcome;
+}
+
 export type TaskEvent =
   | { type: "started" }
   | { type: "content"; content: string }
-  | { type: "activity"; activity: LocalActivity }
+  | FileOutcome
   | { type: "command"; event: CommandEvent }
-  | { type: "file-change"; change: FileChange }
+  | { type: "committed"; outcome: CommittedOutcome }
   | { type: "local-action"; id: string; action: LocalAction }
   | { type: "local-action-expired"; id: string }
   | { type: "local-action-resolved"; id: string };
@@ -112,6 +122,8 @@ export interface YaBridge {
   cancelDeepSeekLogin(): Promise<void>;
   logoutDeepSeek(): Promise<{ state: AppState; revoked: boolean }>;
   runTask(options: RendererTaskOptions): Promise<RunResult | { folderAccessChanged: FolderAccess }>;
+  pendingOutcomes(): Promise<CommittedOutcome[]>;
+  acknowledgeOutcome(id: string): Promise<void>;
   cancelTask(): Promise<void>;
   relevantCards(task: string): Promise<MemoryMatch[]>;
   createMemory(text: string, evidence: string, kind: MemoryKind): Promise<MemoryCard>;
