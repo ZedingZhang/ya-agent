@@ -2,24 +2,24 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya (丫丫) is a consent-first coding and research agent built specifically for DeepSeek, offering both a native desktop application and a command-line interface on a shared TypeScript core.
+Ya (丫丫) is a desktop and CLI agent for DeepSeek built around **persistent named bots instead of disposable sessions**.
 
-It defaults to `DeepSeek-V4.1-Flash-1017` (with native vision) and supports switching to `DeepSeek-V4-Pro-0813`. Long-term memory lives locally in SQLite via Octop Memory, bounded Tree of Agents (ToA) starts only after explicit confirmation, file edits show diffs before approval, and shell execution is opt-in per CLI task.
+Rather than opening throwaway chat sessions, you keep dedicated bots for recurring jobs—each with its own name, optional standing instructions, ongoing conversation history, drafts, and folder access. Ya defaults to `DeepSeek-V4.1-Flash-1017` (with vision) and supports `DeepSeek-V4-Pro-0813`, stores long-term memory locally in SQLite via Octop Memory, shows diffs before changing files, and offers a CLI for one-off tasks and shell verification (`--local --exec`).
 
 ## Desktop preview
 
-Start with the default **Ya** bot or create persistent named bots for recurring jobs. Select any bot in the sidebar to resume its conversation; inspect files, applied diffs, relevant memory, tool activity, and pending approvals in the details panel.
+Work directly with the default **Ya** bot or create named bots for ongoing projects and roles. Pick any bot in the sidebar to continue right where you left off; inspect its folder, file diffs, recalled memory, tool activity, and pending approvals in the right-hand panel.
 
 ![Ya desktop workspace: bot navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
 ## Highlights
 
-- **Built for DeepSeek:** supports `deepseek-flash` (`DeepSeek-V4.1-Flash-1017`, native vision) and `deepseek-v4-pro` (`DeepSeek-V4-Pro-0813`), configurable thinking effort (`low`, `high`, `max`), browser platform-account sign-in (PKCE), and API keys.
-- **Consent-first safety:** desktop bots begin with zero directory access and use explicit per-folder grants; file tools cannot delete files and require diff approval; CLI command execution (`--local --exec`) and ToA require separate opt-in authorization.
-- **Persistent desktop bots:** give named bots optional standing instructions, keep drafts and histories across restarts, and review inline and session-wide file diffs without requiring Git.
-- **Controlled long-term memory (SEA):** explicit user feedback creates candidate cards in local SQLite (`octop-memory==1.0.4`); only approved cards can enter future prompts.
-- **Bounded research loops:** ICM performs at most one bounded source-seeking follow-up for a material evidence gap; ToA pairs one root coordinator with at most two temporary workers under explicit token and timeout budgets.
-- **Shared typed core & isolated renderer:** CLI and desktop share configuration, API, memory, orchestration, local-workspace, and durable cross-process task tracking; the Electron renderer runs with no Node.js or direct filesystem access behind a narrow preload IPC bridge.
+- **Bots instead of sessions:** create named bots with optional standing instructions, keep each bot's drafts, conversation history, and file diffs across restarts, and switch between bots instead of starting throwaway chats.
+- **Built for DeepSeek:** supports `deepseek-flash` (`DeepSeek-V4.1-Flash-1017`, vision) and `deepseek-v4-pro` (`DeepSeek-V4-Pro-0813`), thinking effort (`low`, `high`, `max`), browser platform-account sign-in (PKCE), and API keys.
+- **Per-bot folder access & diff approval:** desktop bots start with no filesystem access until you grant one folder; file tools cannot delete files and show diffs before writing; CLI shell execution (`--local --exec`) and ToA require separate confirmation.
+- **Reviewable local memory:** feedback after an answer creates candidate memory cards in local SQLite (`octop-memory==1.0.4`); only cards you approve are recalled in future tasks.
+- **Web search & Tree of Agents (ToA):** optional web search runs at most one follow-up pass when key evidence is missing, and ToA coordinates up to two temporary workers under explicit token and timeout limits after confirmation.
+- **Desktop app & CLI:** both interfaces share config, auth, memory, and cross-process task history; the Electron renderer has no direct Node.js or filesystem access and talks to the main process over a narrow preload bridge.
 
 ## Quick start
 
@@ -58,7 +58,7 @@ ya ask --local --exec --workspace "$PWD" "Fix the bug and run the relevant tests
 
 ## Desktop app
 
-- **Persistent named bots:** start with **Ya** or press `Ctrl/⌘+N` (**New bot**) to set a name and standing instructions; update profiles anytime via **Edit bot**.
+- **Bots, not sessions:** start with **Ya** or press `Ctrl/⌘+N` (**New bot**) to give a bot a name and standing instructions; each keeps its own conversation history and draft, and you can edit its profile anytime via **Edit bot**.
 - **Per-bot folder grants:** open **Files → Choose folder… → Grant access** to scope file tools to one directory and its subfolders, backed by native directory-identity checks where supported; replace or **Revoke access** anytime.
 - **File diffs without Git:** successful `local_write` and `local_edit` actions render expandable inline diff cards and record per-operation history in **Changes**.
 - **Workspace controls:** `Ctrl/⌘+B` toggles the sidebar, `Ctrl/⌘+Enter` sends a task, model and reasoning selectors save immediately, and **Task options** manages local tools, web search, ToA, and image detail. Bilingual **English / 简体中文** UI and **Memory** review are built in.
@@ -94,7 +94,7 @@ ya ask --format markdown "Create a concise table" > answer.md
 # Vision input (deepseek-flash)
 ya ask --image ./chart.png --image-detail high "Read this chart"
 
-# Bounded Tree of Agents (prompts for preflight; --yes for non-interactive)
+# Tree of Agents (prompts before starting; --yes for non-interactive)
 ya ask --toa --toa-workers 2 "Evaluate this architecture trade-off"
 
 # Local workspace tools and verified shell execution
@@ -168,7 +168,7 @@ npm run package:gui        # package Electron app for the current host
 
 ```text
 src/
-  cli.ts                   CLI entry point and consent flows
+  cli.ts                   CLI entry point and approval prompts
   config.ts                validated persistent model configuration
   account.ts               DeepSeek platform browser PKCE sign-in and revocation
   credentials.ts           Keychain and file-backed credential storage
@@ -190,7 +190,7 @@ src/
   task-store-lock.ts       cross-process file locking for task store
   service.ts               shared CLI/GUI task service
   terminal.ts              safe terminal Markdown renderer
-  web.ts                   bounded web search tool and result parser
+  web.ts                   web search tool and result parser
   types.ts / version.ts    shared types, public index.ts exports, package version
   gui/
     main.ts                Electron main process and validated IPC

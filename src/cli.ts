@@ -496,7 +496,7 @@ async function auditClear(yes: boolean, io: CliIo): Promise<void> {
 export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   const program = new Command()
     .name("ya")
-    .description("Ya coding and research agent")
+    .description("Ya CLI agent for DeepSeek")
     .version(VERSION)
     .showHelpAfterError()
     .configureOutput({
@@ -508,12 +508,12 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
   program.exitOverride();
 
   program.command("ask")
-    .description("Run a coding or research task")
+    .description("Run a task")
     .argument("<task>")
     .addOption(new Option("--model <model>").choices(["flash", "pro"]))
     .addOption(new Option("--thinking <state>").choices(["on", "off"]))
     .addOption(new Option("--reasoning-effort <effort>").choices([...REASONING_EFFORTS]))
-    .option("--toa", "Use the bounded Tree of Agents", false)
+    .option("--toa", "Use Tree of Agents", false)
     .option("--yes", "Authorize this ToA run in a non-interactive shell", false)
     .addOption(new Option("--toa-workers <count>").choices(["1", "2"]).default("2"))
     .option("--toa-token-budget <tokens>")

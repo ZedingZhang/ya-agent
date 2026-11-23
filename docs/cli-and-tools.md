@@ -88,7 +88,7 @@ ya ask --toa --yes "Evaluate this strategic decision"
 
 ## Local workspace tools (`--local`)
 
-Local mode grants Ya a deliberately limited filesystem capability for one workspace:
+Local mode gives Ya scoped file tools for one workspace:
 
 ```sh
 ya ask --local --workspace "$PWD" "Create notes/summary.md from the text files here"
@@ -170,7 +170,7 @@ ya memory prune          # supports --include-candidates and --yes
 
 Ya uses [Octop Memory](https://github.com/TencentCloud/octop-memory) `1.0.4` backed by SQLite at `~/.ya/memory.sqlite` (or `$YA_HOME/memory.sqlite`), in namespace `ya`:
 
-- **SEA controlled lifecycle:** explicit user feedback creates native candidates with evidence. Approval creates canonical atoms (`AtomCard`), and task context uses `MemoryService.recall()` for multilingual search, ranking, deduplication, and prompt budgeting. Rejection and revocation retire the corresponding atoms. Pruning removes selected cards and their native evidence records.
+- **Approval lifecycle:** explicit user feedback creates native candidates with evidence. Approval creates canonical atoms (`AtomCard`), and task context uses `MemoryService.recall()` for multilingual search, ranking, deduplication, and prompt budgeting. Rejection and revocation retire the corresponding atoms. Pruning removes selected cards and their native evidence records.
 - **Bounds:** Ya stores at most **100** cards and deterministically selects up to **3** approved cards per task. Pass `--show-memory` to `ya ask` to inspect the selection before an answer.
 - **Python runtime setup:** install `octop-memory==1.0.4` into a **Python 3.12+** environment accessible to Ya:
 

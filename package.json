@@ -1,7 +1,7 @@
 {
   "name": "ya-agent",
   "version": "0.8.0",
-  "description": "A consent-first personal research agent with a CLI and desktop GUI",
+  "description": "A DeepSeek desktop and CLI agent built around persistent named bots",
   "author": "Zeding Zhang",
   "license": "MIT",
   "private": false,

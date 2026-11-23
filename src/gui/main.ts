@@ -1967,8 +1967,8 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   const size = process.env.YA_SMOKE_SIZE?.match(/^(\d+)x(\d+)$/u);
   if (size) window.setSize(Number(size[1]), Number(size[2]));
   const settingsTab = process.env.YA_SMOKE_SETTINGS_TAB ?? "general";
-  await window.webContents.executeJavaScript(`switchPage('${page === "changes" || page === "files" ? "workspace" : page}');
-    ${page === "settings" ? `selectSettingsTab('${settingsTab}');` : ""}
+  await window.webContents.executeJavaScript(`${page === "settings" ? `selectSettingsTab('${settingsTab}');` : ""}
+    switchPage('${page === "changes" || page === "files" ? "workspace" : page}');
     ${page === "files" ? "setDrawer('files');" : ""}
     ${page === "changes" ? "setDrawer('changes'); document.querySelector('#change-list .file-change')?.setAttribute('open', '');" : ""}`);
   await new Promise((resolve) => setTimeout(resolve, 250));
