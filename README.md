@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya (丫丫) is a desktop and CLI agent for DeepSeek built around **persistent named bots instead of disposable sessions**.
+Ya is a desktop and CLI agent for DeepSeek built around **persistent named bots instead of disposable sessions**.
 
 Rather than opening throwaway chat sessions, you keep dedicated bots for recurring jobs—each with its own name, optional standing instructions, ongoing conversation history, drafts, and folder access. Ya defaults to `DeepSeek-V4.1-Flash-1017` (with vision) and supports `DeepSeek-V4-Pro-0813`, stores long-term memory locally in SQLite via Octop Memory, shows diffs before changing files, and offers a CLI for one-off tasks and shell verification (`--local --exec`).
 
