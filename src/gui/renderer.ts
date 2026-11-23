@@ -115,7 +115,7 @@ const TEXT = {
     createBot: "Create bot", saveBot: "Save changes", cancel: "Cancel",
     welcome: "What would you like to work on?", welcomeHint: "Send a message to get started.",
     folderChanged: "Folder access changed to {folder}. Review it and send again.", chatWithoutFolder: "Folder unavailable. Send this message without local tools?",
-    toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel", sendShortcut: "Ctrl / ⌘ Enter to send",
+    toggleSidebar: "Toggle sidebar", taskOptions: "Task options", closePanel: "Close panel",
     mutationPending: "Waiting for the file operation", mutationDone: "File operation completed", mutationFailed: "File operation failed",
     interrupted: "This task was interrupted. You can send it again.", historySaveError: "Bot history could not be saved. Local storage may be full.",
     workspace: "Workspace", memory: "Memory", settings: "Settings", files: "Files", allowedFolder: "Allowed folder", folderMissing: "Folder unavailable", chooseFolder: "Choose folder…", revokeFolder: "Revoke access", choose: "Choose…", refresh: "Refresh",
@@ -147,6 +147,7 @@ const TEXT = {
     accountRevokeFailed: "Signed out locally. The platform session could not be revoked.",
     accountInvalid: "Saved sign-in is invalid. Sign in again or clear it.", accountClear: "Clear saved sign-in",
     approvalExpired: "Approval expired; the action was not approved.",
+    activityPending: "Activity, 1 action awaiting approval", approvalAnnouncement: "1 action awaiting approval.",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
     confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
@@ -161,7 +162,7 @@ const TEXT = {
     editBot: "编辑 Bot", botName: "名称", botNameRequired: "请输入 Bot 名称。", botInstructions: "职责说明（可选）",
     createBot: "创建 Bot", saveBot: "保存修改", cancel: "取消",
     welcome: "今天想做些什么？", welcomeHint: "发条消息，开始对话。",
-    toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板", sendShortcut: "Ctrl / ⌘ Enter 发送",
+    toggleSidebar: "展开或收起侧栏", taskOptions: "任务选项", closePanel: "关闭面板",
     mutationPending: "正在等待文件操作结果", mutationDone: "文件操作已完成", mutationFailed: "文件操作失败",
     interrupted: "此任务已中断，可以重新发送。", historySaveError: "无法保存 Bot 记录，本地存储空间可能已满。",
     workspace: "工作区", memory: "记忆", settings: "设置", files: "文件", allowedFolder: "已授权目录", folderMissing: "文件夹不可用", chooseFolder: "选择文件夹…", revokeFolder: "撤销授权", choose: "选择…", refresh: "刷新",
@@ -193,6 +194,7 @@ const TEXT = {
     accountRevokeFailed: "已在本机退出，未能撤销平台会话。",
     accountInvalid: "保存的登录信息无效，请重新登录或清除。", accountClear: "清除登录信息",
     approvalExpired: "批准已过期，此操作未获批准。",
+    activityPending: "活动，有 1 项操作等待批准", approvalAnnouncement: "有 1 项操作等待批准。",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
     confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
@@ -212,6 +214,7 @@ let onTaskStarted: (() => void) | undefined;
 let activeAnswer: HTMLElement | undefined;
 let activeAnswerText = "";
 let pendingAction: { id: string; action: LocalAction; responding?: boolean } | undefined;
+let approvalReturnFocus: HTMLElement | undefined;
 let actionExpired = false;
 let activities: LocalActivity[] = [];
 let lastAnswer = "";
@@ -982,8 +985,7 @@ async function runTask(): Promise<void> {
     }
     if (local && drawerPage === "files") void renderFiles();
   } finally {
-    pendingAction = undefined;
-    renderPendingAction();
+    clearPendingAction();
     onTaskStarted = undefined;
     if (activeTurn) {
       selectedImages = [];
@@ -1296,7 +1298,14 @@ function renderPendingAction(): void {
   const content = element<HTMLDivElement>("action-content");
   element<HTMLButtonElement>("action-approve").disabled = Boolean(pendingAction?.responding);
   element<HTMLButtonElement>("action-deny").disabled = Boolean(pendingAction?.responding);
-  element<HTMLButtonElement>("toggle-activity").classList.toggle("has-pending", Boolean(pendingAction));
+  const toggle = element<HTMLButtonElement>("toggle-activity");
+  toggle.classList.toggle("has-pending", Boolean(pendingAction));
+  const label = t(pendingAction ? "activityPending" : "activity");
+  toggle.setAttribute("aria-label", label);
+  toggle.title = label;
+  const announcement = element<HTMLParagraphElement>("approval-announcement");
+  const message = pendingAction ? t("approvalAnnouncement") : actionExpired ? t("approvalExpired") : "";
+  if (announcement.textContent !== message) announcement.textContent = message;
   if (!pendingAction) {
     empty.hidden = false;
     empty.textContent = t(actionExpired ? "approvalExpired" : "noAction");
@@ -1309,6 +1318,23 @@ function renderPendingAction(): void {
   element<HTMLDivElement>("action-paths").textContent = pendingAction.action.paths.join("\n");
   element<HTMLPreElement>("action-diff").textContent = pendingAction.action.diff ?? "";
   element<HTMLPreElement>("action-diff").hidden = !pendingAction.action.diff;
+}
+
+function clearPendingAction(expired = actionExpired): void {
+  const restore = Boolean(pendingAction) && (element<HTMLElement>("approval-panel").contains(document.activeElement)
+    || document.activeElement === document.body);
+  const target = approvalReturnFocus;
+  pendingAction = undefined;
+  approvalReturnFocus = undefined;
+  actionExpired = expired;
+  renderPendingAction();
+  if (restore) {
+    if (target && target !== document.body && target.isConnected && !target.matches(":disabled") && target.getClientRects().length > 0) {
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target) return;
+    }
+    element<HTMLButtonElement>("toggle-activity").focus({ preventScroll: true });
+  }
 }
 
 function decideLocalAction(approved: boolean): void {
@@ -1839,6 +1865,13 @@ function registerEvents(): void {
       element<HTMLButtonElement>("sidebar-toggle").click();
     } else if (event.key === "Escape") {
       element<HTMLDetailsElement>("task-options").open = false;
+      if (pendingAction) {
+        event.preventDefault();
+        switchPage("workspace");
+        setDrawer("activity");
+        element<HTMLElement>(pendingAction.responding ? "action-summary" : "action-deny").focus({ preventScroll: true });
+        return;
+      }
       const previous = drawerPage;
       setDrawer(undefined);
       if (previous) element<HTMLButtonElement>(`toggle-${previous}`).focus();
@@ -1895,21 +1928,19 @@ function registerEvents(): void {
       persistSessions();
       void renderFiles();
     } else if (event.type === "local-action") {
+      if (!pendingAction) approvalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       actionExpired = false;
       pendingAction = { id: event.id, action: event.action };
       renderPendingAction();
       switchPage("workspace");
       setDrawer("activity");
       setStatus(t("waiting"), "busy");
+      element<HTMLButtonElement>("action-deny").focus({ preventScroll: true });
     } else if (event.type === "local-action-expired" && pendingAction?.id === event.id) {
-      pendingAction = undefined;
-      actionExpired = true;
-      renderPendingAction();
+      clearPendingAction(true);
       setStatus(t("approvalExpired"), "error");
     } else if (event.type === "local-action-resolved" && pendingAction?.id === event.id) {
-      pendingAction = undefined;
-      actionExpired = false;
-      renderPendingAction();
+      clearPendingAction(false);
       if (document.body.classList.contains("task-running")) setStatus(t("working"), "busy");
     }
   });
