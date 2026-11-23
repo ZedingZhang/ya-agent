@@ -14,6 +14,12 @@ Start with the default **Ya** bot, or click **New bot** (`Ctrl/⌘+N`) to create
 
 Existing sessions from earlier versions appear one-for-one as individual bots with their original titles and history; untitled sessions open as **Ya**.
 
+### Manage local history
+
+In **Settings → Storage management**, choose **Bot conversations**, **Task records (desktop and CLI)**, or **Action audit logs**. Select records older than 30 or 90 days, or enter a custom range. Both dates are included in your local time zone. To clean up one day, use the same start and end date.
+
+Review the matching count and estimated size, then choose **Delete selected records…** and confirm. Deleting a conversation turn also removes its saved diffs and command output. Older turns use their linked task's date when available. Choose **Unknown date** to review the count and size of records that lack a date.
+
 Each bot keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that bot's earlier user messages and completed replies—including requests that failed before an answer, so you can configure an API key or sign in and ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
 
 ## Per-bot folder grants and scoped file tools

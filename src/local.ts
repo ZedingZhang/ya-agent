@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import {
   accessSync,
   appendFileSync,
@@ -13,6 +14,7 @@ import {
   readSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -32,6 +34,8 @@ import { BOT_PERMISSIONS_DIR, dataHome } from "./config";
 import { abortable } from "./cancellation";
 import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
 import { publishEdit } from "./publish-edit";
+import type { HistoryEntry } from "./history";
+import { withTaskStoreLock } from "./task-store-lock";
 import { createFileChange, type FileChange } from "./file-diff";
 import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_LINES, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
@@ -207,19 +211,76 @@ export function auditLogFiles(): string[] {
   const paths: string[] = [];
   for (let index = 0; index <= MAX_AUDIT_ARCHIVES; index += 1) {
     const path = auditLogPath(index);
-    if (existsSync(path) && statSync(path).isFile()) paths.push(path);
+    if (lstatSync(path, { throwIfNoEntry: false })?.isFile()) paths.push(path);
   }
   return paths;
 }
 
 export function auditLogTotalBytes(): number {
-  return auditLogFiles().reduce((total, path) => total + statSync(path).size, 0);
+  return auditLogFiles().reduce((total, path) => total + (lstatSync(path, { throwIfNoEntry: false })?.size ?? 0), 0);
 }
 
 export function clearAuditLogs(): string[] {
-  const removed = auditLogFiles();
-  for (const path of removed) unlinkSync(path);
-  return removed;
+  return withTaskStoreLock(auditLogPath(), () => {
+    const removed = auditLogFiles();
+    for (const path of removed) unlinkSync(path);
+    return removed;
+  });
+}
+
+function* auditLines(path: string) {
+  // A rotated file keeps its identity. A replacement file can contain identical JSON at the same offset.
+  const { dev, ino, birthtimeNs } = statSync(path, { bigint: true });
+  const data = readFileSync(path);
+  for (let start = 0; start < data.length;) {
+    const newline = data.indexOf(0x0a, start);
+    const end = newline < 0 ? data.length : newline + 1;
+    const line = data.subarray(start, end);
+    const id = createHash("sha256").update(`${dev}:${ino}:${birthtimeNs}:${start}:`).update(line).digest("hex");
+    yield { line, id };
+    start = end;
+  }
+}
+
+export function auditHistoryEntries(): HistoryEntry[] {
+  return withTaskStoreLock(auditLogPath(), () => {
+    const entries: HistoryEntry[] = [];
+    for (const path of auditLogFiles()) {
+      for (const { line, id } of auditLines(path)) {
+        let timestamp = NaN;
+        try {
+          const record = JSON.parse(line.toString("utf8"));
+          if (typeof record?.timestamp === "string") timestamp = Date.parse(record.timestamp);
+        } catch { /* Keep undated or damaged lines available for explicit cleanup. */ }
+        entries.push({ id, timestamp: Number.isFinite(timestamp) ? timestamp : null, bytes: line.length });
+      }
+    }
+    return entries;
+  });
+}
+
+export function deleteAuditHistory(ids: readonly string[]): number {
+  const selected = new Set(ids);
+  return withTaskStoreLock(auditLogPath(), () => {
+    let removed = 0;
+    for (const path of auditLogFiles()) {
+      const kept: Buffer[] = [];
+      let changed = false;
+      for (const { line, id } of auditLines(path)) {
+        if (!selected.has(id)) { kept.push(line); continue; }
+        changed = true;
+        removed++;
+      }
+      if (!changed) continue;
+      if (!kept.length) { unlinkSync(path); continue; }
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      try {
+        writeFileSync(temporary, Buffer.concat(kept), { flag: "wx", mode: 0o600 });
+        renameSync(temporary, path);
+      } finally { rmSync(temporary, { force: true }); }
+    }
+    return removed;
+  });
 }
 
 function tailCompleteLines(data: Buffer, limit: number): Buffer {
@@ -250,9 +311,10 @@ function rotateAuditLogs(): void {
 export function appendAuditRecord(record: Record<string, unknown>): void {
   const encoded = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
   const active = auditLogPath();
-  mkdirSync(dirname(active), { recursive: true });
-  if (existsSync(active) && statSync(active).size + encoded.byteLength > AUDIT_LOG_MAX_BYTES) rotateAuditLogs();
-  appendFileSync(active, encoded);
+  withTaskStoreLock(active, () => {
+    if (existsSync(active) && statSync(active).size + encoded.byteLength > AUDIT_LOG_MAX_BYTES) rotateAuditLogs();
+    appendFileSync(active, encoded);
+  });
 }
 
 function errorMessage(error: unknown): string {
@@ -806,7 +868,9 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   private async editUnscoped(path: string, input: unknown, revision: string, edits: unknown, confirm: ConfirmEdit): Promise<EditResult> {
     const previous = readText(path);
-    const identity = statSync(path);
+    // Filesystem IDs can exceed Number.MAX_SAFE_INTEGER on Windows.
+    const identity = statSync(path, { bigint: true });
+    if (identity.ino === 0n) throw new Error(`Cannot verify file identity before editing: ${path}`);
     if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
     // Publishing replaces the file, and a rename needs only directory write permission, so without
     // this check Ya would silently rewrite files the user marked read-only.
@@ -822,13 +886,14 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       if (this.resolveInput(input) !== path || this.resolveInput(path) !== path) {
         throw new Error("File path changed during approval. Read again before editing.");
       }
-      const current = statSync(path);
+      const current = statSync(path, { bigint: true });
       if (current.dev !== identity.dev || current.ino !== identity.ino || current.mode !== identity.mode || readText(path) !== previous) {
         throw new Error("File changed during approval. Read again before editing.");
       }
     };
     checkUnchanged();
-    publishEdit(path, content, identity, checkUnchanged);
+    const metadata = { uid: Number(identity.uid), gid: Number(identity.gid), mode: Number(identity.mode) };
+    publishEdit(path, content, metadata, checkUnchanged);
     return { approved, previous, content, count };
   }
 

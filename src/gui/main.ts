@@ -26,7 +26,9 @@ import {
 } from "../images";
 import { DuplicateMemoryError, MemoryLimitError, memoryPath, type MemoryKind } from "../memory";
 import type { RunResult } from "../orchestrator";
-import { runTask } from "../service";
+import { runTask, TaskStore } from "../service";
+import { appendAuditRecord } from "../local";
+import { deleteStoredHistory, listStoredHistory } from "../history";
 import { VERSION } from "../version";
 import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
@@ -558,6 +560,19 @@ function registerIpc(): void {
     assertTrustedSender(event);
     return controller.clearAuditLogs().length;
   });
+  ipcMain.handle("history:list", (event, kind: unknown) => {
+    assertTrustedSender(event);
+    if (kind !== "tasks" && kind !== "audit") throw new Error("Invalid history category.");
+    return listStoredHistory(kind);
+  });
+  ipcMain.handle("history:delete", (event, kind: unknown, ids: unknown) => {
+    assertTrustedSender(event);
+    if (kind !== "tasks" && kind !== "audit") throw new Error("Invalid history category.");
+    if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id.length > 0 && id.length <= 128)) {
+      throw new Error("Invalid history selection.");
+    }
+    return deleteStoredHistory(kind, ids);
+  });
   ipcMain.handle("external:open", async (event, raw: unknown) => {
     assertTrustedSender(event);
     if (typeof raw !== "string") throw new Error("Invalid URL.");
@@ -1003,6 +1018,61 @@ async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
   nativeTheme.themeSource = originalTheme;
   window.setSize(originalSize.width, originalSize.height);
   await window.webContents.executeJavaScript(`state.language = '${originalLanguage}'; applyLanguage(); fillSettings();`);
+}
+
+async function verifyStorageManagement(window: BrowserWindow): Promise<void> {
+  const day = new Date(2004, 3, 4);
+  const store = new TaskStore({ now: () => day, reconcileOnStartup: false });
+  const legacyTask = store.create({ objective: "Cleanup fixture" });
+  store.transition(legacyTask.id, "completed");
+  appendAuditRecord({ timestamp: day.toISOString(), operation: "read" });
+  await window.webContents.executeJavaScript(`(async () => {
+    const original = currentBot;
+    const confirm = window.confirm;
+    const fixture = createBot({ title: 'Cleanup fixture', instructions: 'Keep this profile' });
+    const turn = (task, createdAt) => ({ task, createdAt, images: [], answer: task, status: 'complete', commands: [], changes: [] });
+    fixture.turns.push(turn('undated'), turn('previous day', new Date(2004, 3, 3, 23, 59, 59).getTime()),
+      { ...turn('midnight'), taskId: '${legacyTask.id}' }, turn('late', new Date(2004, 3, 4, 23, 59, 59, 999).getTime()));
+    fixture.draft = 'Keep this draft';
+    fixture.activities.push({ operation: 'read', paths: ['old.txt'], status: 'success' });
+    try {
+      await selectBot(fixture);
+      element('settings-tab').click();
+      element('storage-period').value = 'custom';
+      element('storage-period').dispatchEvent(new Event('change'));
+      element('storage-from').value = '2004-04-04';
+      element('storage-to').value = '2004-04-03';
+      element('storage-to').dispatchEvent(new Event('input'));
+      if (!element('storage-delete').disabled) throw new Error('Reversed dates enabled deletion.');
+      element('storage-to').value = '2004-04-04';
+      element('storage-to').dispatchEvent(new Event('input'));
+      await refreshStorage();
+      if (element('storage-delete').disabled || storageSelection().length !== 2) throw new Error('Single-day selection missed a boundary.');
+      let prompted = false;
+      window.confirm = (message) => { prompted = message.includes('2004-04-04'); return false; };
+      element('storage-delete').click();
+      if (!prompted || fixture.turns.length !== 4) throw new Error('Cancelled deletion changed chat history.');
+      window.confirm = () => true;
+      await deleteSelectedHistory();
+      const saved = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY)).sessions.find((bot) => bot.id === fixture.id);
+      if (saved.turns.map((entry) => entry.task).join('|') !== 'undated|previous day' || saved.activities.length
+        || saved.draft !== fixture.draft || saved.instructions !== fixture.instructions || !element('storage-delete').disabled
+        || document.querySelectorAll('#timeline .turn').length !== 2) throw new Error('Cleanup did not persist the expected turns and bot profile.');
+      for (const kind of ['tasks', 'audit']) {
+        element('storage-kind').value = kind;
+        await refreshStorage();
+        if (storageSelection().length !== 1) throw new Error('Missing dated ' + kind + ' record in preview.');
+        await deleteSelectedHistory();
+        if (!element('storage-delete').disabled || storageSelection().length) throw new Error('Deletion failed for ' + kind);
+      }
+    } finally {
+      window.confirm = confirm;
+      element('storage-kind').value = 'chats';
+      element('storage-period').value = '30';
+      bots = bots.filter((bot) => bot !== fixture);
+      await selectBot(original);
+    }
+  })()`);
 }
 
 async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
@@ -2018,6 +2088,7 @@ app.whenReady().then(async () => {
     await verifyPendingFolderChat(window, smokeRoot!);
     await verifyBotIdRecovery(window, smokeRoot!);
     await verifyTaskHistory(window);
+    await verifyStorageManagement(window);
     await verifyApprovalLifecycle(window);
     await verifyApprovalAccessibility(window);
     await verifyConversationContext(window);

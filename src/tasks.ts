@@ -12,6 +12,7 @@ import {
 } from "./config";
 import type { DeepSeekCredential } from "./credentials";
 import type { TaskWorkspace } from "./local";
+import type { HistoryEntry } from "./history";
 import { isProcessAlive, withTaskStoreLock, withTaskStoreLockAsync } from "./task-store-lock";
 import type { WebMode } from "./types";
 
@@ -738,6 +739,23 @@ export class TaskStore {
 
   read(id: string): TaskRecord | undefined {
     return this.get(id);
+  }
+
+  historyEntries(): HistoryEntry[] {
+    return this.readStoreFile().filter((record) => record.status !== "running").map((record) => ({
+      id: record.id,
+      timestamp: Date.parse(record.created_at),
+      bytes: Buffer.byteLength(JSON.stringify(record, null, 2)),
+    }));
+  }
+
+  deleteHistory(ids: readonly string[]): number {
+    const selected = new Set(ids);
+    return this.mutateStore((file, records) => {
+      const kept = records.filter((record) => record.status === "running" || !selected.has(record.id));
+      if (kept.length !== records.length) this.writeStoreFile(file, kept);
+      return records.length - kept.length;
+    });
   }
 
   get(id: string): TaskRecord | undefined {

@@ -1,6 +1,7 @@
 import type { ModelId, ReasoningEffort } from "../config";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
+import type { HistoryEntry, StoredHistoryKind } from "../history";
 import type { LocalAction, LocalActivity } from "../local";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
@@ -131,6 +132,8 @@ export interface YaBridge {
   prunePreview(includeCandidates: boolean): Promise<MemoryCard[]>;
   pruneMemory(includeCandidates: boolean): Promise<MemoryCard[]>;
   clearAudit(): Promise<number>;
+  historyEntries(kind: StoredHistoryKind): Promise<HistoryEntry[]>;
+  deleteHistory(kind: StoredHistoryKind, ids: string[]): Promise<number>;
   respondLocalAction(id: string, approved: boolean): void;
   openExternal(url: string): Promise<void>;
   onTaskEvent(listener: (event: TaskEvent) => void): () => void;

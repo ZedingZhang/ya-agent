@@ -100,7 +100,8 @@ interface YaRendererBridge {
   setMemoryStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): Promise<MemoryCard>;
   prunePreview(includeCandidates: boolean): Promise<MemoryCard[]>;
   pruneMemory(includeCandidates: boolean): Promise<MemoryCard[]>;
-  clearAudit(): Promise<number>;
+  historyEntries: import("./shared").YaBridge["historyEntries"];
+  deleteHistory: import("./shared").YaBridge["deleteHistory"];
   respondLocalAction(id: string, approved: boolean): void;
   openExternal(url: string): Promise<void>;
   onTaskEvent(listener: (event: TaskEvent) => void): () => void;
@@ -138,7 +139,7 @@ const TEXT = {
     memoryLoading: "Loading memory…", memoryUnavailable: "Memory is unavailable.", retryMemory: "Retry memory",
     language: "Language", stream: "Stream simple answers", reasoning: "Reasoning effort", budget: "ToA token budget",
     timeout: "ToA timeout (seconds)", apiKey: "DeepSeek API key", apiPlaceholder: "Leave blank to keep the current key",
-    keychain: "Save in macOS Keychain", saveSettings: "Save settings", clearAudit: "Clear audit history", apiReady: "API key available",
+    keychain: "Save in macOS Keychain", saveSettings: "Save settings", apiReady: "API key available",
     apiMissing: "No API key configured", saved: "Saved.", about: "About Ya", partial: "Some ToA worker results were unavailable.",
     deepseekAccount: "DeepSeek platform account", accountHint: "Sign in and authorize Ya in your browser to use your DeepSeek platform account.",
     accountLogin: "Sign in with DeepSeek", accountCancel: "Cancel sign-in", accountLogout: "Sign out",
@@ -149,7 +150,18 @@ const TEXT = {
     approvalExpired: "Approval expired; the action was not approved.",
     activityPending: "Activity, 1 action awaiting approval", approvalAnnouncement: "1 action awaiting approval.",
     taskError: "Ya error", confirmToa: "Start Tree of Agents?", confirmPrune: "Permanently delete {count} memory card(s)?",
-    confirmAudit: "Permanently delete {count} audit log file(s) ({bytes} bytes)?", auditEmpty: "No audit logs to delete.",
+    storage: "Storage management", storageCategory: "History to manage", chatHistory: "Bot conversations",
+    taskHistory: "Task records (desktop and CLI)", auditHistory: "Action audit logs", dateRange: "Date range",
+    older30: "Older than 30 days", older90: "Older than 90 days", customDates: "Custom dates", unknownDates: "Unknown date", allDates: "All dates",
+    dateFrom: "From", dateTo: "Through", deleteSelected: "Delete selected records…",
+    chatScope: "Select turns across all bots, including their messages, saved file diffs and command output.",
+    taskScope: "Finished task records are grouped by the day the task started.",
+    auditScope: "Actions are selected by the day they occurred, including actions in archived logs.",
+    storageSummary: "{count} selected (≈ {bytes}) · {total} total (≈ {size})", storageLoading: "Loading history…",
+    undatedHint: "{count} records have an unknown date.",
+    invalidDates: "Choose a start date and an end date on or after it.",
+    confirmHistory: "Permanently delete {count} records from {kind} (≈ {bytes})?\n{range}",
+    historyDeleted: "Deleted {count} records.", storageBusy: "Conversation cleanup is available when the task finishes.",
     explicitFeedback: "Explicit user feedback after Ya task", sourceHint: "For knowledge, include a source URL in the evidence.",
     attachImages: "Attach images…", clearImages: "Clear", imageDetail: "Image detail", images: "Images",
     lowApiKeyOnly: "low (API key only)",
@@ -185,7 +197,7 @@ const TEXT = {
     memoryLoading: "正在加载记忆…", memoryUnavailable: "记忆暂时无法加载。", retryMemory: "重试加载记忆",
     language: "语言", stream: "简单回答使用流式输出", reasoning: "推理强度", budget: "ToA Token 预算",
     timeout: "ToA 超时（秒）", apiKey: "DeepSeek API 密钥", apiPlaceholder: "留空以保留当前密钥",
-    keychain: "保存到 macOS 钥匙串", saveSettings: "保存设置", clearAudit: "清除操作审计", apiReady: "API 密钥可用",
+    keychain: "保存到 macOS 钥匙串", saveSettings: "保存设置", apiReady: "API 密钥可用",
     apiMissing: "尚未配置 API 密钥", saved: "已保存。", about: "关于 Ya", partial: "部分 ToA 工作 Agent 未返回结果。",
     deepseekAccount: "DeepSeek 开放平台账号", accountHint: "在浏览器中登录 DeepSeek 并授权 Ya，即可使用开放平台账号。",
     accountLogin: "登录 DeepSeek", accountCancel: "取消登录", accountLogout: "退出登录",
@@ -196,7 +208,18 @@ const TEXT = {
     approvalExpired: "批准已过期，此操作未获批准。",
     activityPending: "活动，有 1 项操作等待批准", approvalAnnouncement: "有 1 项操作等待批准。",
     taskError: "Ya 错误", confirmToa: "启动 Tree of Agents？", confirmPrune: "永久删除 {count} 条记忆？",
-    confirmAudit: "永久删除 {count} 个操作审计日志（{bytes} 字节）？", auditEmpty: "没有可删除的操作审计日志。",
+    storage: "存储管理", storageCategory: "记录类型", chatHistory: "Bot 对话记录",
+    taskHistory: "任务记录（桌面端和 CLI）", auditHistory: "操作审计日志", dateRange: "日期范围",
+    older30: "30 天以前", older90: "90 天以前", customDates: "自定义日期", unknownDates: "日期未知", allDates: "全部日期",
+    dateFrom: "开始日期", dateTo: "结束日期（含当天）", deleteSelected: "删除所选记录…",
+    chatScope: "按对话发生日期筛选所有 Bot 的对话轮次，每轮包含消息、文件变更快照和命令输出。",
+    taskScope: "按任务开始日期筛选已结束的任务记录。",
+    auditScope: "按操作发生日期筛选审计记录，包含已归档的日志。",
+    storageSummary: "已选 {count} 条（约 {bytes}） · 共 {total} 条（约 {size}）", storageLoading: "正在读取记录…",
+    undatedHint: "其中 {count} 条可通过「日期未知」筛选。",
+    invalidDates: "请选择开始和结束日期，结束日期须为同一天或更晚。",
+    confirmHistory: "永久删除「{kind}」中的 {count} 条记录（约 {bytes}）？\n{range}",
+    historyDeleted: "已删除 {count} 条记录。", storageBusy: "当前任务结束后即可清理对话记录。",
     explicitFeedback: "Ya 任务后的显式用户反馈", sourceHint: "知识类记忆请在依据中附上来源 URL。",
     attachImages: "添加图片…", clearImages: "清除", imageDetail: "图片细节", images: "图片",
     lowApiKeyOnly: "low（仅 API Key）",
@@ -235,6 +258,7 @@ interface ConversationCommand {
   result?: CommandResult;
 }
 interface ConversationTurn {
+  createdAt?: number;
   turnId?: string;
   committedActivities?: LocalActivity[];
   taskId?: string;
@@ -343,6 +367,8 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
   element<HTMLDivElement>("workspace-actions").hidden = page !== "workspace";
   renderPageTitle();
   if (page === "memory") void refreshMemory();
+  if (page === "settings") void refreshStorage();
+  else { ++storageRequest; storageItems = undefined; }
   if (returningToWorkspace) void refreshActivityMemory();
 }
 
@@ -366,11 +392,11 @@ function renderPageTitle(): void {
     : page === "memory" ? t("memory") : currentBot?.title ?? "Ya";
 }
 
-function persistSessions(): boolean {
+function persistSessions(sessions = bots): boolean {
   if (sessionSaveTimer !== undefined) window.clearTimeout(sessionSaveTimer);
   sessionSaveTimer = undefined;
   try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentBot.id, sessions: bots,
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ activeId: currentBot.id, sessions,
       sidebarCollapsed: document.body.classList.contains("sidebar-collapsed") }));
     return true;
   } catch {
@@ -450,6 +476,7 @@ async function loadSessionHistory(): Promise<string | undefined> {
         isRecord(image) && typeof image.id === "string" && typeof image.name === "string"
         && typeof image.size === "number" && typeof image.mimeType === "string") : [];
       turns.push({
+        ...(typeof turn.createdAt === "number" && Number.isFinite(new Date(turn.createdAt).getTime()) ? { createdAt: turn.createdAt } : {}),
         ...(typeof turn.turnId === "string" ? { turnId: turn.turnId } : {}),
         ...(Array.isArray(turn.committedActivities) ? { committedActivities: savedActivities(turn.committedActivities) } : {}),
         ...(typeof turn.taskId === "string" && turn.taskId.trim() ? { taskId: turn.taskId.trim() } : {}),
@@ -889,7 +916,7 @@ async function runTask(): Promise<void> {
     resizeTaskInput();
     currentBot.draft = "";
     currentBot.updatedAt = Date.now();
-    activeTurn = { turnId, task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
+    activeTurn = { turnId, createdAt: currentBot.updatedAt, task, images: taskImages, answer: "", status: "running", commands: [], changes: [] };
     currentBot.turns.push(activeTurn);
     activeAnswer = appendTask(task, taskImages);
     activeAnswer.parentElement!.dataset.turnId = turnId;
@@ -1006,6 +1033,7 @@ function setRunning(running: boolean): void {
   syncWorkspaceControls();
   renderImages();
   renderNavigation();
+  if (element("page-settings").classList.contains("active")) void refreshStorage();
 }
 
 function renderCommand(event: ShellCommandEvent): void {
@@ -1461,7 +1489,7 @@ function fillSettings(): void {
   element<HTMLSpanElement>("api-state").textContent = state.accountError ? t("accountInvalid")
     : state.accountSignedIn ? t("accountActive") : state.hasApiKey ? t("apiReady") : t("apiMissing");
   renderAccount();
-  element<HTMLSpanElement>("audit-state").textContent = `${state.auditLogCount} · ${state.auditLogBytes} bytes`;
+  if (element("page-settings").classList.contains("active")) renderStorage();
   renderImages();
 }
 
@@ -1580,18 +1608,157 @@ async function saveSettings(): Promise<void> {
   }
 }
 
-async function clearAudit(): Promise<void> {
-  if (state.auditLogCount === 0) {
-    window.alert(t("auditEmpty"));
-    return;
+type StoredHistoryKind = import("../history").StoredHistoryKind;
+type HistoryEntry = import("../history").HistoryEntry;
+type StorageItem = Omit<HistoryEntry, "id"> & { id: string | ConversationTurn };
+let storageItems: StorageItem[] | undefined;
+let storageRequest = 0;
+let storageError = "";
+let deletingHistory = false;
+
+function storageKind(): StoredHistoryKind | "chats" {
+  return element<HTMLSelectElement>("storage-kind").value as StoredHistoryKind | "chats";
+}
+
+function restoreTurnDates(tasks: HistoryEntry[]): void {
+  const dates = new Map(tasks.map((entry) => [entry.id, entry.timestamp]));
+  let changed = false;
+  for (const bot of bots) {
+    for (const turn of bot.turns) {
+      if (turn.createdAt !== undefined || !turn.taskId) continue;
+      const timestamp = dates.get(turn.taskId);
+      if (timestamp != null) {
+        turn.createdAt = timestamp;
+        changed = true;
+      }
+    }
   }
-  if (!window.confirm(interpolate(t("confirmAudit"), { count: state.auditLogCount, bytes: state.auditLogBytes }))) return;
+  if (changed) persistSessions();
+}
+
+async function refreshStorage(): Promise<void> {
+  const request = ++storageRequest;
+  const kind = storageKind();
+  storageItems = undefined;
+  storageError = "";
+  renderStorage();
   try {
-    await bridge.clearAudit();
-    state = await bridge.state();
-    fillSettings();
+    let items: StorageItem[];
+    if (kind === "chats") {
+      if (bots.some((bot) => bot.turns.some((turn) => turn.taskId && turn.createdAt === undefined))) {
+        // Chat history is still manageable if the separate task store is unavailable.
+        restoreTurnDates(await bridge.historyEntries("tasks").catch(() => []));
+      }
+      const encoder = new TextEncoder();
+      items = bots.flatMap((bot) => bot.turns.filter((turn) => turn.status !== "running").map((turn) => ({
+        id: turn, timestamp: turn.createdAt ?? null,
+        bytes: encoder.encode(JSON.stringify(turn)).length
+          + (turn === bot.turns.at(-1) ? encoder.encode(JSON.stringify(bot.activities)).length - 2 : 0),
+      })));
+    } else {
+      const entries = await bridge.historyEntries(kind);
+      if (kind === "tasks") restoreTurnDates(entries);
+      items = entries;
+    }
+    if (request === storageRequest) storageItems = items;
   } catch (error) {
-    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+    if (request === storageRequest) storageError = errorText(error);
+  }
+  if (request === storageRequest) renderStorage();
+}
+
+function localDay(date: Date): string {
+  return [String(date.getFullYear()).padStart(4, "0"), String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+function storageSelection(): StorageItem[] | undefined {
+  const period = element<HTMLSelectElement>("storage-period").value;
+  if (period === "all") return storageItems;
+  if (period === "undated") return storageItems?.filter((item) => item.timestamp === null);
+  let start = -Infinity;
+  let end: Date;
+  if (period === "custom") {
+    // Date inputs contain calendar days. Construct both midnights in the local timezone, including across DST.
+    start = new Date(element<HTMLInputElement>("storage-from").value + "T00:00:00").getTime();
+    end = new Date(element<HTMLInputElement>("storage-to").value + "T00:00:00");
+    if (!Number.isFinite(start) || !Number.isFinite(end.getTime()) || start > end.getTime()) return undefined;
+    end.setDate(end.getDate() + 1);
+  } else {
+    end = new Date();
+    end.setHours(0, 0, 0, 0);
+    end.setDate(end.getDate() - Number(period));
+  }
+  return storageItems?.filter(({ timestamp }) => timestamp !== null && timestamp >= start && timestamp < end.getTime());
+}
+
+function historySize(items: StorageItem[]): string {
+  return formatBytes(items.reduce((total, item) => total + item.bytes, 0));
+}
+
+function renderStorage(): void {
+  const kind = storageKind();
+  const custom = element<HTMLSelectElement>("storage-period").value === "custom";
+  element("storage-from-field").hidden = !custom;
+  element("storage-to-field").hidden = !custom;
+  const scope = t(kind === "chats" ? "chatScope" : kind === "tasks" ? "taskScope" : "auditScope");
+  const undated = storageItems?.filter((item) => item.timestamp === null).length;
+  element("storage-scope").textContent = undated ? scope + " " + interpolate(t("undatedHint"), { count: undated }) : scope;
+  const selected = storageSelection();
+  const busy = kind === "chats" && document.body.classList.contains("task-running");
+  const summary = element("storage-summary");
+  if (storageError) summary.textContent = storageError;
+  else if (busy) summary.textContent = t("storageBusy");
+  else if (!storageItems) summary.textContent = t("storageLoading");
+  else if (!selected) summary.textContent = t("invalidDates");
+  else summary.textContent = interpolate(t("storageSummary"), {
+      count: selected.length, bytes: historySize(selected), total: storageItems.length, size: historySize(storageItems),
+  });
+  element<HTMLButtonElement>("storage-delete").disabled = deletingHistory || busy || !selected?.length;
+}
+
+function deleteConversationTurns(selected: StorageItem[]): number {
+  const turns = new Set(selected.map((item) => item.id));
+  const next = bots.map((bot) => {
+    const kept = bot.turns.filter((turn) => !turns.has(turn));
+    if (kept.length === bot.turns.length) return bot;
+    return { ...bot, turns: kept, activities: kept.at(-1) === bot.turns.at(-1) ? bot.activities : [] };
+  });
+  if (!persistSessions(next)) throw new Error(t("historySaveError"));
+  // Keep bot references used by navigation and any open editor.
+  const currentChanged = next[bots.indexOf(currentBot)] !== currentBot;
+  next.forEach((bot, index) => Object.assign(bots[index]!, bot));
+  if (currentChanged) {
+    const local = element<HTMLInputElement>("local-enabled").checked;
+    renderBot();
+    element<HTMLInputElement>("local-enabled").checked = local;
+  }
+  renderNavigation();
+  return turns.size;
+}
+
+async function deleteSelectedHistory(): Promise<void> {
+  if (element<HTMLButtonElement>("storage-delete").disabled) return;
+  const kind = storageKind();
+  const selected = storageSelection();
+  if (!selected?.length) return;
+  const period = element<HTMLSelectElement>("storage-period");
+  const range = period.value === "custom"
+    ? `${element<HTMLInputElement>("storage-from").value} – ${element<HTMLInputElement>("storage-to").value}`
+    : period.selectedOptions[0]!.text;
+  if (!window.confirm(interpolate(t("confirmHistory"), { kind: element<HTMLSelectElement>("storage-kind").selectedOptions[0]!.text,
+    range, count: selected.length, bytes: historySize(selected) }))) return;
+  deletingHistory = true;
+  renderStorage();
+  try {
+    const count = kind === "chats" ? deleteConversationTurns(selected)
+      : await bridge.deleteHistory(kind, selected.flatMap(({ id }) => typeof id === "string" ? [id] : []));
+    setStatus(interpolate(t("historyDeleted"), { count }));
+  } catch (error) {
+    setStatus(errorText(error), "error");
+  } finally {
+    deletingHistory = false;
+    if (element("page-settings").classList.contains("active")) await refreshStorage();
   }
 }
 
@@ -1900,7 +2067,15 @@ function registerEvents(): void {
     void bridge.cancelDeepSeekLogin().catch((error: unknown) => setStatus(`${t("taskError")}: ${errorText(error)}`, "error"));
   });
   element<HTMLButtonElement>("account-logout").addEventListener("click", () => void signOutDeepSeek());
-  element<HTMLButtonElement>("audit-clear").addEventListener("click", () => void clearAudit());
+  const today = localDay(new Date());
+  element("storage-kind").addEventListener("change", () => void refreshStorage());
+  element("storage-period").addEventListener("change", renderStorage);
+  for (const id of ["storage-from", "storage-to"]) {
+    const input = element<HTMLInputElement>(id);
+    input.value = today;
+    input.addEventListener("input", renderStorage);
+  }
+  element("storage-delete").addEventListener("click", () => void deleteSelectedHistory());
   element<HTMLButtonElement>("learn-button").addEventListener("click", learnFromAnswer);
 
   bridge.onTaskEvent((event) => {

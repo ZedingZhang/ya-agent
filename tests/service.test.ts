@@ -172,6 +172,23 @@ describe("durable task identity and lifecycle records", () => {
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
+  it("deletes only previewed finished tasks, including when new tasks arrive or cleanup is retried", () => {
+    const store = new TaskStore();
+    const first = store.create({ objective: "old task" });
+    store.transition(first.id, "completed");
+    const [entry] = store.historyEntries();
+    expect(entry).toMatchObject({ id: first.id, timestamp: Date.parse(first.createdAt) });
+    expect(entry!.bytes).toBeGreaterThan(0);
+    const later = store.create({ objective: "later" });
+    store.transition(later.id, "failed");
+    const active = store.create({ objective: "still running" });
+    expect(store.historyEntries().map((item) => item.id)).not.toContain(active.id);
+    expect(store.deleteHistory([entry!.id, active.id])).toBe(1);
+    expect(store.deleteHistory([entry!.id])).toBe(0);
+    store.transition(active.id, "completed");
+    expect(store.list().map((task) => task.id)).toEqual([later.id, active.id]);
+  });
+
   it.each([
     [null, "EOF"],
     ["aborted", "EOF"],
