@@ -110,10 +110,17 @@ describe("durable task identity and lifecycle records", () => {
   beforeEach(() => { home = tempHome(); });
   afterEach(() => home.cleanup());
 
-  it("records a prematurely closed API stream as a failed task", async () => {
-    const fetcher = vi.fn<FetchLike>(async () => new Response(
-      'data: {"choices":[{"delta":{"content":"Partial answer"},"finish_reason":null}]}\n\n',
-    ));
+  it.each([
+    [null, "EOF"],
+    ["aborted", "EOF"],
+    ["aborted", "[DONE]"],
+    ["insufficient_system_resource", "EOF"],
+    ["insufficient_system_resource", "[DONE]"],
+  ] as const)("records a failed task for finish reason %s followed by %s", async (reason, ending) => {
+    let body = 'data: {"choices":[{"delta":{"content":"Partial answer"},"finish_reason":null}]}\n\n';
+    if (reason) body += `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: reason }] })}\n\n`;
+    if (ending === "[DONE]") body += "data: [DONE]\n\n";
+    const fetcher = vi.fn<FetchLike>(async () => new Response(body));
     const onContent = vi.fn();
     const taskStore = new TaskStore();
     await expect(runTask("test-key", "Stream an answer", new ModelConfig(), {
@@ -121,7 +128,7 @@ describe("durable task identity and lifecycle records", () => {
       webMode: "off",
       onContent,
       clientFactory: (key) => new DeepSeekClient(key, fetcher),
-    })).rejects.toThrow("DeepSeek API stream ended before completion.");
+    })).rejects.toThrow(reason ?? "DeepSeek API stream ended before completion.");
 
     expect(onContent).toHaveBeenCalledExactlyOnceWith("Partial answer");
     expect(fetcher).toHaveBeenCalledTimes(1);

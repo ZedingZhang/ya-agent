@@ -329,10 +329,12 @@ export class DeepSeekClient {
           markDelivered();
           onContent(delta.content);
         }
-        // The API can send usage in a separate chunk after the final choice.
-        if (typeof first?.finish_reason === "string" && first.finish_reason.trim()) {
-          receivedFinishReason = true;
+        const finishReason = typeof first?.finish_reason === "string" ? first.finish_reason.trim() : "";
+        if (finishReason === "aborted" || finishReason === "insufficient_system_resource") {
+          throw new DeepSeekError(`DeepSeek API stream interrupted: ${finishReason}.`);
         }
+        // The API can send usage in a separate chunk after the final choice.
+        if (finishReason) receivedFinishReason = true;
         return false;
       }, signal, onActivity);
       if (!done && !receivedFinishReason) {
