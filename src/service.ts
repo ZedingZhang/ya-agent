@@ -168,7 +168,7 @@ export async function runTask(
     const terminalStatus = options.signal?.aborted ? "cancelled" : "failed";
     const rawMessage = error instanceof Error ? error.message : String(error);
     try {
-      store.transition(taskId, terminalStatus, {
+      await store.finish(taskId, terminalStatus, {
         expectedRevision: initialRevision,
         error: redactSecrets(rawMessage, apiKey),
       });
@@ -180,7 +180,7 @@ export async function runTask(
     throw error;
   }
 
-  store.transition(taskId, "completed", {
+  await store.finish(taskId, "completed", {
     expectedRevision: initialRevision,
     mode: result.mode,
     partial: Boolean(result.partial),

@@ -12,7 +12,7 @@ import {
 } from "./config";
 import type { DeepSeekCredential } from "./credentials";
 import type { TaskWorkspace } from "./local";
-import { isProcessAlive, withTaskStoreLock } from "./task-store-lock";
+import { isProcessAlive, withTaskStoreLock, withTaskStoreLockAsync } from "./task-store-lock";
 import type { WebMode } from "./types";
 
 export const TASK_STORE_VERSION = 1;
@@ -516,6 +516,10 @@ export class TaskStore {
       && record.runtime_pid !== process.pid && isProcessAlive(record.runtime_pid));
   }
 
+  private isRecordStale(record: StoredTaskRecord): boolean {
+    return record.status === "running" && !this.isRecordRunning(record);
+  }
+
   private readStoreFile(file = this.path): StoredTaskRecord[] {
     if (!existsSync(file)) return [];
     let parsed: unknown;
@@ -566,7 +570,7 @@ export class TaskStore {
   private interruptStaleRecords(records: readonly StoredTaskRecord[]): { records: StoredTaskRecord[]; changed: boolean } {
     let changed = false;
     const updated = records.map((record): StoredTaskRecord => {
-      if (record.status !== "running" || this.isRecordRunning(record)) return record;
+      if (!this.isRecordStale(record)) return record;
       changed = true;
       const timestamp = nextTimestamp(this.now, record.updated_at);
       const { runtime_id: _runtimeId, runtime_pid: _runtimePid, ...rest } = record;
@@ -587,14 +591,17 @@ export class TaskStore {
    */
   reconcileInterrupted(): TaskRecord[] {
     const file = this.path;
-    if (!existsSync(file)) return [];
-    return this.mutateStore((path, records) => {
-      const { records: updated, changed } = this.interruptStaleRecords(records);
-      if (changed) this.writeStoreFile(path, updated);
-      return updated
-        .filter((record) => record.status === "interrupted")
-        .map((record) => toPublicRecord(record, false));
-    }, file);
+    let records = this.readStoreFile(file);
+    if (records.some((record) => this.isRecordStale(record))) {
+      records = this.mutateStore((path, current) => {
+        const { records: updated, changed } = this.interruptStaleRecords(current);
+        if (changed) this.writeStoreFile(path, updated);
+        return updated;
+      }, file);
+    }
+    return records
+      .filter((record) => record.status === "interrupted")
+      .map((record) => toPublicRecord(record, false));
   }
 
   create(input: CreateTaskInput, taskWorkspace?: TaskWorkspace): TaskRecord {
@@ -655,11 +662,25 @@ export class TaskStore {
     nextStatus: Exclude<TaskStatus, "running">,
     details: TransitionTaskInput = {},
   ): TaskRecord {
+    return this.mutateStore(this.transitionMutation(id, nextStatus, details));
+  }
+
+  finish(
+    id: string,
+    status: "completed" | "failed" | "cancelled",
+    details: TransitionTaskInput,
+  ): Promise<TaskRecord> {
+    const file = this.path;
+    const update = this.transitionMutation(id, status, details);
+    return withTaskStoreLockAsync(file, () => update(file, this.readStoreFile(file)));
+  }
+
+  private transitionMutation(id: string, nextStatus: Exclude<TaskStatus, "running">, details: TransitionTaskInput) {
     assertNoSecretFields(details, "transitionTask");
     if (typeof id !== "string" || !id.trim()) {
       throw new Error("Task ID is required.");
     }
-    return this.mutateStore((file, records) => {
+    return (file: string, records: StoredTaskRecord[]): TaskRecord => {
       const index = records.findIndex((candidate) => candidate.id === id);
       if (index < 0) {
         throw new Error(`Task record not found: ${id}`);
@@ -712,7 +733,7 @@ export class TaskStore {
       this.writeStoreFile(file, nextRecords);
       this.activeTaskIds.delete(id);
       return toPublicRecord(updated, false);
-    });
+    };
   }
 
   read(id: string): TaskRecord | undefined {

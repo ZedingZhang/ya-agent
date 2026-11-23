@@ -1,5 +1,5 @@
 import { execFileSync, fork, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -30,6 +30,8 @@ interface TaskWorkerReply {
   type: "attempting" | "holding" | "pending" | "result";
   task?: TaskRecord;
   content?: string;
+  providerCalls?: number;
+  interrupted?: TaskRecord[];
   error?: { name: string; message: string };
 }
 
@@ -82,6 +84,12 @@ const history: ConversationMessage[] = [
   { role: "user", content: "新建一个 md 文件，内容是 Ya 的介绍" },
   { role: "assistant", content: "准备在工作区中创建 ya.md。" },
 ];
+
+function waitForLockContender(home: string): Promise<void> {
+  return vi.waitFor(() => {
+    expect(readdirSync(home).some((entry) => entry.startsWith(".ya-task-lock-"))).toBe(true);
+  });
+}
 
 describe("conversation context in model requests", () => {
   let home: TempHome;
@@ -472,19 +480,81 @@ describe("durable task identity and lifecycle records", () => {
     }
   }, 15_000);
 
-  it("keeps the buffered CLI task live while the desktop controller starts", async () => {
+  it("delivers the buffered answer after a busy terminal write and accepts the next request", async () => {
     const cli = taskWorker(compiled, home.path);
+    const writer = taskWorker(compiled, home.path);
+    const observer = new TaskStore({ reconcileOnStartup: false });
     try {
       const { task } = await cli.send({ action: "buffered" }, "pending");
+      await writer.send({ action: "create", objective: "Peer holding the lock", hold: true }, "holding");
+      const reply = cli.send({ action: "release-reply" });
+      // Hold past the synchronous writer's two-second timeout after the terminal write starts.
+      const release = waitForLockContender(home.path).then(() => delay(2_300)).finally(() => writer.release());
+      const [result] = await Promise.all([reply, release]);
+
+      expect(result).toMatchObject({ content: "Buffered answer", providerCalls: 1 });
+      expect(observer.get(task!.id)).toMatchObject({ status: "completed", revision: 2, mode: "single" });
+      const next = await cli.send({ action: "buffered", objective: "Next question" }, "pending");
+      expect(await cli.send({ action: "release-reply" })).toMatchObject({ content: "Buffered answer", providerCalls: 1 });
+      expect(observer.get(next.task!.id)).toMatchObject({ objective: "Next question", status: "completed", revision: 2 });
+    } finally {
+      await Promise.all([cli.stop(), writer.stop()]);
+    }
+  }, 15_000);
+
+  it("opens the desktop with a live CLI task while another writer holds the lock", async () => {
+    const cli = taskWorker(compiled, home.path);
+    const writer = taskWorker(compiled, home.path);
+    try {
+      const { task } = await cli.send({ action: "buffered" }, "pending");
+      await writer.send({ action: "create", objective: "Peer holding the lock", hold: true }, "holding");
       new GuiController();
       const observer = new TaskStore({ reconcileOnStartup: false });
       expect(observer.get(task!.id)).toMatchObject({ status: "running", revision: 1 });
 
+      writer.release();
       const result = await cli.send({ action: "release-reply" });
       expect(result.content).toBe("Buffered answer");
       expect(observer.get(task!.id)).toMatchObject({ status: "completed", revision: 2 });
     } finally {
-      await cli.stop();
+      await Promise.all([cli.stop(), writer.stop()]);
+    }
+  }, 15_000);
+
+  it.skipIf(process.platform === "win32")("opens completed history in a read-only directory", () => {
+    const store = new TaskStore();
+    const task = store.create({ objective: "Finished before startup" });
+    const completed = store.transition(task.id, "completed");
+    chmodSync(home.path, 0o500);
+    try {
+      new GuiController();
+      expect(listTasks()).toEqual([completed]);
+    } finally {
+      chmodSync(home.path, 0o700);
+    }
+  });
+
+  it("rechecks stale history under the lock and preserves the peer's intervening write", async () => {
+    const owner = taskWorker(compiled, home.path);
+    const writer = taskWorker(compiled, home.path);
+    const recovery = taskWorker(compiled, home.path);
+    try {
+      const { task } = await owner.send({ action: "create", objective: "Abandoned task" });
+      await owner.stop();
+      const created = writer.waitFor("result");
+      await writer.send({ action: "create", objective: "Peer task", hold: true }, "holding");
+
+      const reconciled = recovery.send({ action: "reconcile" });
+      // Release the writer once recovery has seen the old snapshot and started taking the lock.
+      const release = waitForLockContender(home.path).finally(() => writer.release());
+      const [peer, result] = await Promise.all([created, reconciled, release]);
+      const observer = new TaskStore({ reconcileOnStartup: false });
+      const interrupted = observer.get(task!.id);
+      expect(interrupted).toMatchObject({ status: "interrupted", revision: 2 });
+      expect(result.interrupted).toEqual([interrupted]);
+      expect(observer.get(peer.task!.id)).toEqual(peer.task);
+    } finally {
+      await Promise.all([owner.stop(), writer.stop(), recovery.stop()]);
     }
   }, 15_000);
 

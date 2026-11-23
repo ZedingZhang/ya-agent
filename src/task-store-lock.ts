@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 const LOCK_WAIT_MS = 2000;
 const RETRY_INTERVAL_MS = 20;
@@ -49,7 +50,8 @@ function removeEmptyLock(path: string): void {
   }
 }
 
-function clearAbandonedLock(path: string): void {
+/** Reclaim abandoned locks and report whether the contention has a live owner. */
+function clearAbandonedLock(path: string): boolean {
   try {
     if (!lstatSync(path).isDirectory()) {
       throw new Error(`Invalid Ya task store lock at "${path}".`);
@@ -57,7 +59,7 @@ function clearAbandonedLock(path: string): void {
     const entries = readdirSync(path, { withFileTypes: true });
     if (entries.length === 0) {
       removeEmptyLock(path);
-      return;
+      return false;
     }
     const owner = entries[0]!;
     const match = OWNER_MARKER.exec(owner.name);
@@ -65,46 +67,77 @@ function clearAbandonedLock(path: string): void {
     if (entries.length !== 1 || !owner.isFile() || !Number.isInteger(pid) || pid > 0x7fffffff) {
       throw new Error(`Invalid Ya task store lock owner at "${path}".`);
     }
-    if (!isProcessAlive(pid)) {
-      removeOwnerMarker(join(path, owner.name));
-      removeEmptyLock(path);
-    }
+    if (isProcessAlive(pid)) return true;
+    removeOwnerMarker(join(path, owner.name));
+    removeEmptyLock(path);
   } catch (error) {
     if (!hasCode(error, "ENOENT") && !isWindowsContention(error)) throw error;
   }
+  return false;
 }
 
 /**
  * Publish a nonempty owner directory atomically. Releasing or reclaiming a
  * lock removes only its unique marker, so another writer's lock stays intact.
  */
-export function withTaskStoreLock<T>(file: string, action: () => T): T {
+function prepareTaskStoreLock(file: string) {
   const parent = dirname(file);
   mkdirSync(parent, { recursive: true });
   const lock = `${file}.lock`;
   const owner = `owner-${process.pid}-${randomUUID()}`;
   let directory = mkdtempSync(join(parent, ".ya-task-lock-"));
+  function release(): void {
+    removeOwnerMarker(join(directory, owner));
+    removeEmptyLock(directory);
+  }
   try {
     writeFileSync(join(directory, owner), "", { flag: "wx", mode: 0o600 });
-    const deadline = performance.now() + LOCK_WAIT_MS;
-    while (true) {
-      try {
-        renameSync(directory, lock);
-        directory = lock;
-        break;
-      } catch (error) {
-        if (!hasCode(error, "EEXIST", "ENOTEMPTY") && !isWindowsContention(error)) throw error;
-        clearAbandonedLock(lock);
-        const remaining = deadline - performance.now();
-        if (remaining <= 0) {
-          throw new Error(`Ya task store is busy at "${file}". Retry the operation.`, { cause: error });
-        }
-        Atomics.wait(sleeper, 0, 0, Math.min(RETRY_INTERVAL_MS, remaining));
+  } catch (error) {
+    release();
+    throw error;
+  }
+  // Windows access errors can also mean a permanent permissions failure.
+  // Extend the terminal writer's wait only while a live holder is observed.
+  let deadline = performance.now() + LOCK_WAIT_MS;
+  function tryAcquire(waitForLiveOwner = false): boolean {
+    try {
+      renameSync(directory, lock);
+      directory = lock;
+      return true;
+    } catch (error) {
+      if (!hasCode(error, "EEXIST", "ENOTEMPTY") && !isWindowsContention(error)) throw error;
+      const liveOwner = clearAbandonedLock(lock);
+      if (waitForLiveOwner && liveOwner) deadline = performance.now() + LOCK_WAIT_MS;
+      if (performance.now() >= deadline) {
+        throw new Error(`Ya task store is busy at "${file}". Retry the operation.`, { cause: error });
       }
+      return false;
+    }
+  }
+  return { tryAcquire, release };
+}
+
+export function withTaskStoreLock<T>(file: string, action: () => T): T {
+  const lock = prepareTaskStoreLock(file);
+  try {
+    while (!lock.tryAcquire()) {
+      Atomics.wait(sleeper, 0, 0, RETRY_INTERVAL_MS);
     }
     return action();
   } finally {
-    removeOwnerMarker(join(directory, owner));
-    removeEmptyLock(directory);
+    lock.release();
+  }
+}
+
+// A finished execution can wait for persistence without blocking the desktop event loop.
+export async function withTaskStoreLockAsync<T>(file: string, action: () => T): Promise<T> {
+  const lock = prepareTaskStoreLock(file);
+  try {
+    while (!lock.tryAcquire(true)) {
+      await delay(RETRY_INTERVAL_MS);
+    }
+    return action();
+  } finally {
+    lock.release();
   }
 }

@@ -34,17 +34,24 @@ process.on("message", async (message) => {
       return;
     }
     if (message.action === "buffered") {
+      let providerCalls = 0;
       const gate = new Promise((resolve) => { releaseReply = resolve; });
-      const result = await runTask("test-key", "Pending CLI question", new ModelConfig(), {
+      const result = await runTask("test-key", message.objective ?? "Pending CLI question", new ModelConfig(), {
         taskStore: store,
         webMode: "off",
         onTaskCreated: (task) => process.send({ type: "pending", task }),
         clientFactory: (key) => new DeepSeekClient(key, async () => {
+          providerCalls++;
           await gate;
           return Response.json({ choices: [{ message: { role: "assistant", content: "Buffered answer" } }] });
         }),
       });
-      process.send({ type: "result", content: result.content });
+      process.send({ type: "result", content: result.content, providerCalls });
+      return;
+    }
+    if (message.action === "reconcile") {
+      const interrupted = store.reconcileInterrupted();
+      process.send({ type: "result", interrupted });
       return;
     }
     if (message.action === "create" || message.action === "transition") {
