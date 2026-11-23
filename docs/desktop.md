@@ -10,7 +10,7 @@ The desktop application uses a two-column workspace inspired by the [official De
 
 ## Persistent named bots
 
-Start with the default **Ya** bot, or click **New bot** (`Ctrl/⌘+N`) to create a named bot with optional standing instructions—for example, `"Review patches and suggest a regression test."` Each model request includes the selected bot's profile and conversation history. Click **Edit bot** in the chat header to update its name or instructions at any time.
+Instead of disposable chat sessions, the desktop app organizes work around persistent named bots. Start with the default **Ya** bot, or click **New bot** (`Ctrl/⌘+N`) to create a named bot with optional standing instructions—for example, `"Review patches and suggest a regression test."` Each model request includes the selected bot's profile and conversation history. Click **Edit bot** in the chat header to update its name or instructions at any time.
 
 Existing sessions from earlier versions appear one-for-one as individual bots with their original titles and history; untitled sessions open as **Ya**.
 
@@ -48,7 +48,7 @@ After a successful `local_write` or `local_edit`, the conversation shows an expa
 - Cards and change history are saved with the bot, so switching bots or restarting preserves the diff at the time of each operation without requiring Git.
 - Each preview retains at most **2,000 lines** and **128K characters**. Larger previews are marked as truncated while line statistics still cover the complete change; a diff calculation timeout displays an unavailable preview.
 - Sensitive-path writes are rejected before approval, and non-text writes do not retain content diffs.
-- The **Changes** history covers file-tool operations only (excluding changes made by shell commands) and records individual operations rather than a net session diff. Action audits and model-facing tool results continue to contain metadata only.
+- The **Changes** history covers file-tool operations only (excluding changes made by shell commands) and records individual operations rather than a single combined diff. Action audits and model-facing tool results continue to contain metadata only.
 
 ## Reloading, pending approvals, and atomic writes
 

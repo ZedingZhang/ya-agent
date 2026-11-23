@@ -2,24 +2,24 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-Ya（丫丫）是一个专门适配 DeepSeek 的 Coding 与研究 Agent，基于共享的 TypeScript 内核，同时提供原生桌面应用与命令行工具（CLI）。
+Ya（丫丫）是一个面向 DeepSeek 的桌面端与 CLI Agent，**用长期存在的具名 Bot 替代一次性会话（session）**。
 
-Ya 默认使用 `DeepSeek-V4.1-Flash-1017`（原生支持视觉），并支持切换至 `DeepSeek-V4-Pro-0813`。长期记忆通过 Octop Memory 存储在本地 SQLite 中；受限的 Tree of Agents（ToA）仅在明确确认后启动；文件修改需逐项确认 diff；Shell 命令执行仅在 CLI 中按次开启并单独授权。
+在桌面端，不用反复开新的临时对话：可以为常用项目或固定分工创建不同的 Bot，每个 Bot 各自保存名字、职责说明、对话历史、草稿和目录权限，重启后直接接着聊。默认使用 `DeepSeek-V4.1-Flash-1017`（支持看图），可切换至 `DeepSeek-V4-Pro-0813`；长期记忆通过 Octop Memory 存在本地 SQLite 中；文件修改前展示 diff 供确认；需要执行 Shell 命令时，可通过 CLI 按次开启 `--local --exec`。
 
 ## 桌面界面
 
-你可以直接向默认的 **Ya** Bot 发消息，或为常规任务创建具名 Bot。在侧栏点选任意 Bot 即可接着上次的对话继续，并在详情面板中查看文件、修改 diff、相关记忆、工具活动与待确认操作。
+可以直接向默认的 **Ya** Bot 发消息，也可以为不同项目或常规任务新建具名 Bot。在侧栏点选任意 Bot 就能接着上次的上下文继续，并在右侧面板查看它的授权目录、文件 diff、相关记忆、工具活动与待确认操作。
 
 ![Ya 桌面工作区：左侧 Bot 列表、右侧对话和输入框、左下角设置](assets/ya-gui-workspace-zh-CN.png)
 
 ## 核心特性
 
-- **深度适配 DeepSeek**：支持 `deepseek-flash`（`DeepSeek-V4.1-Flash-1017`，原生视觉）与 `deepseek-v4-pro`（`DeepSeek-V4-Pro-0813`），支持三档思考强度（`low`、`high`、`max`），兼容开放平台浏览器登录（PKCE）与 API Key。
-- **授权优先的安全边界**：桌面 Bot 默认没有任何本地目录访问权限，需按 Bot 显式授权目录；文件工具禁止删除文件且修改前必须批准 diff；CLI 命令执行（`--local --exec`）与 ToA 均需单独授权。
-- **持久化具名 Bot**：可为 Bot 设置长期职责指令，跨重启保留草稿与对话历史，无需 Git 即可查看内联及会话级文件变更 diff。
-- **受控长期记忆（SEA）**：显式用户反馈写入本地 SQLite（`octop-memory==1.0.4`）作为候选记忆；只有经用户批准的记忆才会进入后续任务上下文。
-- **受限研究循环**：ICM 在回答存在重要证据缺口时最多发起一次受限的溯源追问；ToA 由 1 个根协调 Agent 与最多 2 个临时工作 Agent 组成，受 Token 与超时预算约束。
-- **共享类型核心与隔离渲染器**：CLI 与桌面端共享配置、API、记忆、编排、本地工作区及跨进程任务生命周期记录；Electron 渲染进程没有 Node.js 或直接文件系统权限，通过窄化 preload IPC 桥接与主进程通信。
+- **用 Bot 替代 Session**：按角色或项目创建具名 Bot 并设置职责说明，各自保留草稿、对话历史和文件变更记录，重启后直接续聊，不用在一堆临时会话里翻找。
+- **适配 DeepSeek 模型与账号**：支持 `deepseek-flash`（`DeepSeek-V4.1-Flash-1017`，支持图片）与 `deepseek-v4-pro`（`DeepSeek-V4-Pro-0813`），支持三档思考强度（`low`、`high`、`max`），可用开放平台浏览器登录（PKCE）或 API Key。
+- **按 Bot 授权目录与 diff 确认**：桌面 Bot 默认无任何本地目录权限，需为单个 Bot 显式授权文件夹；文件工具不能删除文件，每次写入和编辑都会先展示 diff 等你确认；CLI 命令执行（`--local --exec`）与 ToA 也需单独确认。
+- **可审核的本地长期记忆**：回答后的用户反馈会写入本地 SQLite（`octop-memory==1.0.4`）作为候选记忆，只有经你批准的条目才会在后续任务中召回。
+- **联网检索与 Tree of Agents（ToA）**：可选联网检索在关键依据缺失时最多补查一次；ToA 由 1 个协调 Agent 与最多 2 个临时工作 Agent 协作，带 Token 和超时上限，启动前需确认。
+- **桌面端与 CLI 共用底层**：两端共享配置、认证、长期记忆与跨进程任务记录；Electron 渲染进程没有 Node.js 或直接文件访问权限，仅通过窄化 preload IPC 桥接与主进程通信。
 
 ## 快速开始
 
@@ -58,7 +58,7 @@ ya ask --local --exec --workspace "$PWD" "修复这个 bug 并运行相关测试
 
 ## 桌面应用
 
-- **持久化具名 Bot：** 默认提供 **Ya**，按 `Ctrl/⌘+N`（**新建 Bot**）可设置名称与长期职责；随时在对话顶部点击 **编辑 Bot** 修改。
+- **用 Bot 而非 Session：** 默认提供 **Ya**，按 `Ctrl/⌘+N`（**新建 Bot**）可按任务新建具名 Bot 并设置职责说明；每个 Bot 独立保存对话记录与草稿，随时可在顶部点击 **编辑 Bot** 修改。
 - **按 Bot 授权目录：** 打开 **文件 → 选择文件夹… → 授予访问权限** 将文件工具限制在单个目录及其子目录内，并在支持的文件系统上校验原生目录标识；可随时替换或 **撤销授权**。
 - **免 Git 文件差异：** `local_write` 与 `local_edit` 成功后会在对话中生成可展开的 diff 卡片，并在右上角 **变更** 面板按操作分别记录变更历史。
 - **工作区控制：** `Ctrl/⌘+B` 收起侧栏，`Ctrl/⌘+Enter` 发送任务；模型与推理强度选择即时保存；**任务选项**菜单集中管理本地工具、网页检索、ToA 与图片细节；内置 English / 简体中文界面与**记忆**管理页。
@@ -94,7 +94,7 @@ ya ask --format markdown "生成一个简洁表格" > answer.md
 # 视觉输入（deepseek-flash）
 ya ask --image ./chart.png --image-detail high "解读这张图表"
 
-# 受限 Tree of Agents（启动前展示预检；非交互环境需加 --yes）
+# Tree of Agents（启动前展示预检；非交互环境需加 --yes）
 ya ask --toa --toa-workers 2 "评估这项架构取舍"
 
 # 本地工作区工具与代码验证命令
@@ -128,8 +128,8 @@ ya history clear tasks --older-than 30 --dry-run  # 预览 30 天以前的已结
 
 | 功能 | 桌面 GUI | CLI |
 | --- | --- | --- |
-| 持久化具名 Bot 与本地对话记录 | 支持 | 单次任务调用（共享持久化任务记录） |
-| 受限工作区文件工具与审批 diff | 支持（按 Bot 目录授权） | 支持（`--local`，可选 `--approve`） |
+| 具名 Bot 与本地对话记录 | 支持 | 单次任务调用（共享任务记录） |
+| 目录范围内的文件工具与 diff 确认 | 支持（按 Bot 目录授权） | 支持（`--local`，可选 `--approve`） |
 | 已批准的 Shell 命令执行（`local_run`） | — | 支持（`--local --exec`，可选 `--approve-commands`） |
 | DeepSeek 平台账号登录与视觉输入 | 支持 | 支持 |
 | 网页检索、ToA 预检与思考强度控制 | 支持 | 支持 |
@@ -168,7 +168,7 @@ npm run package:gui        # 为当前平台打包 Electron 应用
 
 ```text
 src/
-  cli.ts                   CLI 入口与授权交互流程
+  cli.ts                   CLI 入口与确认交互流程
   config.ts                经校验的持久化模型配置
   account.ts               DeepSeek 平台浏览器 PKCE 登录与会话撤销
   credentials.ts           钥匙串与本地文件凭据存储
@@ -176,7 +176,7 @@ src/
   deepseek.ts              DeepSeek HTTP、SSE 流式传输、重试与工具循环
   messages.ts              账号登录使用的 DeepSeek Messages API 适配
   images.ts                经校验的视觉来源与内容块
-  local.ts                 受限本地文件系统工具与审计日志
+  local.ts                 目录范围内的本地文件工具与审计日志
   edits.ts                 带版本校验的精确文本替换引擎
   publish-edit.ts          保留权限与所有者的原子替换发布
   file-diff.ts             统一 diff 生成与预览截断
@@ -190,7 +190,7 @@ src/
   task-store-lock.ts       任务存储跨进程文件锁
   service.ts               CLI/GUI 共享任务服务
   terminal.ts              安全终端 Markdown 渲染器
-  web.ts                   受限网页检索工具与结果解析
+  web.ts                   网页检索工具与结果解析
   types.ts / version.ts    共享类型定义、index.ts 公开导出与版本号
   gui/
     main.ts                Electron 主进程与经校验的 IPC
