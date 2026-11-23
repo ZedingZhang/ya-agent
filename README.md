@@ -12,6 +12,12 @@ Start with the Ya bot, or create a named bot for a recurring job. Choose a bot i
 
 ![Ya desktop workspace: bot navigation on the left, conversation and composer on the right, and Settings at the bottom-left](assets/ya-gui-workspace-screenshot.png)
 
+## Contributing
+
+New to open source? We'd love to see your first pull request (PR) here. Clarifying a sentence in the docs, adding a test, or fixing a bug you ran into are all good ways to start. You're welcome to use AI tools to understand the code, write a patch, or improve the docs.
+
+If you're looking for a place to start, browse the [open issues](https://github.com/ZedingZhang/ya-agent/issues). When you open a PR, tell us what you changed, why, and how you checked it. The maintainers will review and respond to your PR as soon as they can.
+
 ## Architecture
 
 - **SEA controlled learning:** explicit user feedback becomes a candidate memory card. Only approved cards can influence later tasks.
