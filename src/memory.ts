@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter, extname, isAbsolute, join } from "node:path";
 import { dataHome } from "./config";
@@ -48,7 +48,10 @@ interface MemoryResponse<T> {
   error?: { message: string; code?: string; card?: MemoryCard };
 }
 
-function callMemory<T>(operation: string, params: Record<string, unknown> = {}): T {
+const pythonOptions = { encoding: "utf8", windowsHide: true, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 } as const;
+const missingPython = "Octop Memory requires Python 3.12+ and octop-memory==1.0.4. Install with python -m pip install octop-memory==1.0.4, then set YA_MEMORY_PYTHON to that interpreter if needed.";
+
+function* memoryCommands(operation: string, params: Record<string, unknown>) {
   // Reading the bundled script also works inside Electron ASAR and pkg snapshots.
   const script = readFileSync(join(__dirname, "octop-memory.py"), "utf8");
   const override = process.env.YA_MEMORY_PYTHON;
@@ -66,26 +69,51 @@ function callMemory<T>(operation: string, params: Record<string, unknown> = {}):
     }
     // Exclude workspace imports and inherited Python settings, including PYTHONPATH.
     const args = interpreter === "py" ? ["-3", "-E", "-P", "-X", "utf8", "-c", script] : ["-E", "-P", "-X", "utf8", "-c", script];
-    const response = spawnSync(executable, args, {
-      input: request,
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 30_000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    if (response.error && (response.error as NodeJS.ErrnoException).code === "ENOENT" && !override) continue;
+    yield { executable, args, request, allowFallback: !override };
+  }
+}
+
+function decodeMemoryResponse<T>(stdout: string): T {
+  let payload: MemoryResponse<T>;
+  try { payload = JSON.parse(stdout) as MemoryResponse<T>; }
+  catch { throw new Error("Octop Memory returned an invalid response."); }
+  if (payload.error?.code === "duplicate" && payload.error.card) throw new DuplicateMemoryError(payload.error.card);
+  if (payload.error?.code === "limit") throw new MemoryLimitError(payload.error.message);
+  if (payload.error) throw new Error(payload.error.message);
+  return payload.result as T;
+}
+
+function callMemory<T>(operation: string, params: Record<string, unknown> = {}): T {
+  for (const { executable, args, request, allowFallback } of memoryCommands(operation, params)) {
+    const response = spawnSync(executable, args, { ...pythonOptions, input: request });
+    if ((response.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" && allowFallback) continue;
     if (response.error || response.status !== 0) {
       throw new Error(`Octop Memory failed: ${response.error?.message ?? response.stderr.trim()}`);
     }
-    let payload: MemoryResponse<T>;
-    try { payload = JSON.parse(response.stdout) as MemoryResponse<T>; }
-    catch { throw new Error("Octop Memory returned an invalid response."); }
-    if (payload.error?.code === "duplicate" && payload.error.card) throw new DuplicateMemoryError(payload.error.card);
-    if (payload.error?.code === "limit") throw new MemoryLimitError(payload.error.message);
-    if (payload.error) throw new Error(payload.error.message);
-    return payload.result as T;
+    return decodeMemoryResponse<T>(response.stdout);
   }
-  throw new Error("Octop Memory requires Python 3.12+ and octop-memory==1.0.4. Install with python -m pip install octop-memory==1.0.4, then set YA_MEMORY_PYTHON to that interpreter if needed.");
+  throw new Error(missingPython);
+}
+
+async function readMemory<T>(operation: "list" | "recall", params: Record<string, unknown> = {}): Promise<T[]> {
+  if (!hasMemory()) return [];
+  for (const { executable, args, request, allowFallback } of memoryCommands(operation, params)) {
+    const output = await new Promise<string | undefined>((resolve, reject) => {
+      let inputError: Error | undefined;
+      const child = execFile(executable, args, pythonOptions, (error, stdout, stderr) => {
+        if (allowFallback && error?.code === "ENOENT") resolve(undefined);
+        else if (error) {
+          const reason = stderr.trim() || `${executable} (${error.code ?? (error.killed ? "timed out" : error.signal)})`;
+          reject(new Error(`Octop Memory failed: ${reason}`));
+        } else if (inputError) reject(new Error(`Octop Memory failed: ${inputError.message}`));
+        else resolve(stdout);
+      });
+      // An early exit can also break stdin. Prefer the interpreter's exit error and diagnostics.
+      child.stdin?.on("error", (error: Error) => { inputError = error; }).end(request);
+    });
+    if (output !== undefined) return decodeMemoryResponse<T[]>(output);
+  }
+  throw new Error(missingPython);
 }
 
 function hasMemory(): boolean {
@@ -108,6 +136,10 @@ export function listCards(status?: MemoryStatus): MemoryCard[] {
   return hasMemory() ? callMemory("list", { status }) : [];
 }
 
+export function listCardsAsync(): Promise<MemoryCard[]> {
+  return readMemory<MemoryCard>("list");
+}
+
 export function setStatus(cardId: string, status: Exclude<MemoryStatus, "candidate">): MemoryCard {
   if (!(["approved", "rejected", "revoked"] as const).includes(status)) throw new Error("invalid memory status");
   return callMemory("status", { cardId, status });
@@ -126,6 +158,11 @@ export function selectRelevantCards(task: string, limit = MAX_RELEVANT_MEMORY_CA
   if (!Number.isInteger(limit) || limit < 0) throw new Error("memory recall limit must be a non-negative integer.");
   if (!task.trim() || limit === 0 || !hasMemory()) return [];
   return callMemory("recall", { query: task, limit });
+}
+
+export async function selectRelevantCardsAsync(task: string): Promise<MemoryMatch[]> {
+  if (!task.trim()) return [];
+  return readMemory<MemoryMatch>("recall", { query: task, limit: MAX_RELEVANT_MEMORY_CARDS });
 }
 
 export function relevantContext(task: string, limit = MAX_RELEVANT_MEMORY_CARDS): string {

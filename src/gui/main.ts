@@ -24,7 +24,7 @@ import {
   MAX_IMAGES_PER_REQUEST,
   type ImageFileInfo,
 } from "../images";
-import { DuplicateMemoryError, MemoryLimitError, type MemoryKind } from "../memory";
+import { DuplicateMemoryError, MemoryLimitError, memoryPath, type MemoryKind } from "../memory";
 import type { RunResult } from "../orchestrator";
 import { runTask } from "../service";
 import { VERSION } from "../version";
@@ -1828,8 +1828,22 @@ async function verifyMemoryUnavailable(window: BrowserWindow, root: string, card
     else process.env.YA_MEMORY_PYTHON = originalPython;
   }
 
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(memoryPath());
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    const responsive = await window.webContents.executeJavaScript(`(async () => {
+      document.querySelector('#memory-retry').click();
+      document.querySelector('#settings-tab').click();
+      const state = await window.ya.state();
+      return Boolean(state.config.model) && document.querySelector('#page-settings').classList.contains('active')
+        && document.querySelector('#memory-create').disabled && document.querySelector('#memory-retry').hidden;
+    })()`);
+    if (!responsive) throw new Error("Settings IPC did not respond while the memory read was pending.");
+  } finally {
+    db.close();
+  }
   const recovered = await window.webContents.executeJavaScript(`(async () => {
-    document.querySelector('#memory-retry').click();
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline && document.querySelector('#memory-create').disabled) {
       await new Promise((resolve) => setTimeout(resolve, 25));
@@ -1846,18 +1860,29 @@ async function verifyMemory(window: BrowserWindow, root: string): Promise<void> 
   await verifyMemoryUnavailable(window, root, cardId);
   const passed = await window.webContents.executeJavaScript(`(async () => {
     const cardId = ${JSON.stringify(cardId)};
+    async function waitFor(condition) {
+      const deadline = Date.now() + 5000;
+      while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+      return Boolean(condition());
+    }
     if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
     await window.ya.setMemoryStatus(cardId, 'approved');
     const matches = await window.ya.relevantCards('PostgreSQL 索引');
     if (matches.length !== 1 || matches[0].card.id !== cardId) return false;
     document.querySelector('[data-page="workspace"]').click();
     document.querySelector('#toggle-activity').click();
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && !document.querySelector('#relevant-list .memory-chip')) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
+    const relevant = document.querySelector('#relevant-list');
+    if (!await waitFor(() => relevant.querySelector('.memory-chip')?.textContent.includes(matches[0].card.text))) return false;
+
+    document.querySelector('#memory-tab').click();
+    const cardRow = () => Array.from(document.querySelectorAll('#memory-body tr')).find(row => row.cells[0].textContent === cardId);
+    if (!await waitFor(() => cardRow()?.cells[1].textContent === 'approved')) return false;
+    cardRow().querySelector('button').click();
+    if (!await waitFor(() => cardRow()?.cells[1].textContent === 'revoked')) return false;
+    document.querySelector('#workspace-tab').click();
+    if (document.querySelector('#drawer-activity').hidden || !await waitFor(() => relevant.textContent === t('noRelevant'))) {
+      throw new Error("Activity still shows the revoked card after returning to Workspace.");
     }
-    if (!document.querySelector('#relevant-list .memory-chip')?.textContent.includes(matches[0].card.text)) return false;
-    await window.ya.setMemoryStatus(cardId, 'revoked');
     if ((await window.ya.relevantCards('PostgreSQL 索引')).length !== 0) return false;
     await window.ya.prunePreview(false);
     const removed = await window.ya.pruneMemory(false);

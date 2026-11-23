@@ -329,6 +329,7 @@ function applyLanguage(): void {
 }
 
 function switchPage(page: "workspace" | "memory" | "settings"): void {
+  const returningToWorkspace = page === "workspace" && !element("page-workspace").classList.contains("active");
   document.querySelectorAll<HTMLElement>(".page").forEach((node) => node.classList.toggle("active", node.id === `page-${page}`));
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((node) => {
     const active = node.dataset.page === page;
@@ -339,6 +340,7 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
   element<HTMLDivElement>("workspace-actions").hidden = page !== "workspace";
   renderPageTitle();
   if (page === "memory") void refreshMemory();
+  if (returningToWorkspace) void refreshActivityMemory();
 }
 
 function renderWorkspaceLabel(): void {
@@ -586,9 +588,9 @@ async function selectBot(bot: DesktopBot): Promise<void> {
     Object.assign(state, await bridge.selectBot(bot.id));
     currentBot = bot;
     currentDirectory = ".";
+    setDrawer(undefined);
     switchPage("workspace");
     renderBot();
-    setDrawer(undefined);
     void checkSelectedFolder();
     setStatus(t("ready"));
     persistSessions();
@@ -642,8 +644,7 @@ function setDrawer(page: "files" | "changes" | "activity" | undefined): void {
     button.classList.toggle("active", page === name);
     button.setAttribute("aria-expanded", String(page === name));
   }
-  const lastTask = openingActivity ? currentBot.turns.at(-1)?.task : undefined;
-  if (lastTask) void renderRelevant(lastTask);
+  if (openingActivity) void refreshActivityMemory();
   if (page === "files") void renderFiles();
 }
 
@@ -901,7 +902,7 @@ async function runTask(): Promise<void> {
     renderPageTitle();
     persistSessions();
     element<HTMLDetailsElement>("task-options").open = false;
-    if (drawerPage === "activity") void renderRelevant(task);
+    void refreshActivityMemory();
     setStatus(t("working"), "busy");
     return { turn: activeTurn, answer: activeAnswer };
   };
@@ -1060,7 +1061,10 @@ async function stopTask(): Promise<void> {
   catch (error) { button.disabled = false; setStatus(errorText(error), "error"); }
 }
 
-async function renderRelevant(task: string): Promise<void> {
+async function refreshActivityMemory(): Promise<void> {
+  if (drawerPage !== "activity" || !element("page-workspace").classList.contains("active")) return;
+  const task = currentBot.turns.at(-1)?.task;
+  if (!task) return;
   const panel = element<HTMLDivElement>("relevant-list");
   panel.replaceChildren();
   const request = ++relevantMemoryRequest;

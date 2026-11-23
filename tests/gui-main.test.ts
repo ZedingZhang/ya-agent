@@ -80,7 +80,7 @@ describe("GUI pending action lifecycle", () => {
     mocks.login.mockReset().mockResolvedValue(undefined);
     mocks.logout.mockReset().mockResolvedValue(true);
     mocks.accountCredential.mockReset().mockReturnValue(undefined);
-    mocks.cards.mockReset().mockReturnValue([]);
+    mocks.cards.mockReset().mockResolvedValue([]);
     mocks.saveWorkspaceModelSelection.mockReset();
     mocks.run.mockReset().mockImplementation(async (_options, callbacks) => {
       await callbacks.onLocalAction({ operation: "mkdir", paths: ["notes"], summary: "Create" });
@@ -119,14 +119,14 @@ describe("GUI pending action lifecycle", () => {
   });
 
   it("keeps startup state independent of memory and retries card reads on demand", async () => {
-    mocks.cards.mockImplementation(() => { throw new Error("Octop Memory failed"); });
+    mocks.cards.mockRejectedValueOnce(new Error("Octop Memory failed"));
     expect(await mocks.handlers.get("state:get")!(event)).toMatchObject({ config: { model: "deepseek-v4-pro" } });
     expect(mocks.cards).not.toHaveBeenCalled();
     const listCards = mocks.handlers.get("memory:cards")!;
-    expect(() => listCards(event)).toThrow("Octop Memory failed");
+    await expect(listCards(event)).rejects.toThrow("Octop Memory failed");
 
     const card = { id: "saved-memory", status: "candidate" };
-    mocks.cards.mockReturnValue([card]);
+    mocks.cards.mockResolvedValue([card]);
     expect(await listCards(event)).toEqual([card]);
     expect(mocks.cards).toHaveBeenCalledTimes(2);
   });
