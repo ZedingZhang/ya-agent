@@ -93,7 +93,7 @@ svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColo
 @keyframes pulse { 50% { opacity: .35; } }
 .page { display: none; min-width: 0; min-height: 0; height: 100%; }
 .page.active { display: block; }
-#page-memory, #page-settings { padding: 24px 28px; }
+#page-memory { padding: 24px 28px; }
 .workbench { position: relative; display: grid; min-width: 0; height: 100%; grid-template-columns: minmax(0, 1fr); }
 .workbench.drawer-open { grid-template-columns: minmax(0, 1fr) 320px; }
 .workbench.changes-open { grid-template-columns: minmax(0, 1fr) minmax(360px, 46%); }
@@ -270,8 +270,7 @@ button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 aut
 .action-panel:has(#action-content:not([hidden])) { background: color-mix(in srgb, var(--active-bg) 55%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); }
 #toggle-activity.has-pending { color: #fff; background: var(--accent); box-shadow: 0 2px 8px var(--focus-ring); }
 .panel { min-width: 0; min-height: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-sm); }
-.page-column, .settings-layout { width: min(1480px, 100%); height: 100%; margin: 0 auto; overflow: auto; }
-.page-column { display: flex; flex-direction: column; gap: 14px; }
+.page-column { width: min(1480px, 100%); height: 100%; margin: 0 auto; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
 .form-card, .table-card { padding: 18px; }
 .form-card { flex: 0 0 auto; }
 .table-card { flex: 1 1 0; min-height: 220px; }
@@ -281,7 +280,6 @@ button.send-button { display: grid; width: 30px; min-height: 30px; flex: 0 0 aut
 .form-grid label:not(.check) { display: grid; min-width: 0; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
 .form-grid label input, .form-grid label select { width: 100%; min-width: 0; color: var(--text); font-weight: 400; }
 .span-two { grid-column: 1 / -1; }
-.setting-check { min-height: 50px; align-self: end; justify-self: start; }
 .align-end { display: block; margin: 12px 0 0 auto; }
 .align-start { margin-top: 14px; }
 .section-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
@@ -293,15 +291,7 @@ td { max-width: 260px; padding: 9px 8px; overflow: hidden; vertical-align: top; 
 td.wide { white-space: normal; overflow-wrap: anywhere; }
 .row-actions { display: flex; gap: 5px; }
 .small-button { min-height: 26px; padding: 4px 7px; font-size: 11px; }
-.settings-layout { display: grid; align-content: start; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 14px; padding-bottom: 20px; }
-.settings-layout > :first-child { grid-row: span 2; }
-.storage-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
-#storage-scope, #storage-summary { font-size: 13px; }
-.settings-footer { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; padding: 4px 2px; }
-.state-pill { display: inline-block; margin-bottom: 12px; padding: 3px 10px; color: var(--active-text); background: var(--active-bg); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 999px; font-size: 12px; font-weight: 500; }
-.form-card > input[type="password"] { width: 100%; margin-bottom: 12px; }
 .muted, .empty { color: var(--muted); }
-.account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .empty { font-size: 12px; }
 .error-copy, .warning { color: var(--danger); }
 
@@ -352,8 +342,6 @@ td.wide { white-space: normal; overflow-wrap: anywhere; }
   .workbench.drawer-open { grid-template-columns: minmax(0, 1fr); }
   .details-drawer { position: absolute; z-index: 4; top: 0; right: 0; bottom: 0; width: 320px; box-shadow: -8px 0 24px rgb(0 0 0 / 12%); }
   .changes-open .details-drawer { width: min(560px, 100%); }
-  .settings-layout { grid-template-columns: 1fr; }
-  .settings-layout > :first-child { grid-row: auto; }
 }
 @media (max-width: 900px) {
   .shortcut { display: none; }

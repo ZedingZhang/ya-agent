@@ -64,7 +64,8 @@
     "assets": [
       "dist/typescript/octop-memory.py",
       "dist/typescript/gui/index.html",
-      "dist/typescript/gui/styles.css"
+      "dist/typescript/gui/styles.css",
+      "dist/typescript/gui/settings.css"
     ]
   },
   "build": {

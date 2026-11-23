@@ -167,6 +167,57 @@ const TEXT = {
     lowApiKeyOnly: "low (API key only)",
     visionOnly: "Image input requires the DeepSeek-V4.1-Flash-1017 model.", noImages: "No images attached.",
     defaultVisionTask: "Describe and analyze the attached image(s).", imagesToa: "re-sent to every worker, the root synthesis, and follow-up requests",
+    backToApp: "Back to app",
+    settingsTabGeneral: "General",
+    settingsTabProviders: "Account & API",
+    settingsTabStorage: "Storage",
+    settingsTabShortcuts: "Shortcuts",
+    settingsTabAbout: "About",
+    searchSettings: "Search settings",
+    clearSearch: "Clear search",
+    searchGroupPages: "Pages",
+    searchGroupSettings: "Settings",
+    searchEmpty: "No settings found for “{query}”.",
+    generalDescription: "Customize language, streaming behavior, and Tree of Agents reasoning limits.",
+    sectionInterface: "Interface",
+    languageDescription: "Change the display language and native application menu.",
+    streamDescription: "Stream plain chat replies incrementally when local tools, web search, and ToA are off.",
+    sectionReasoning: "Reasoning & Tree of Agents",
+    thinkingDescription: "Enable extended model thinking when supported by the selected model.",
+    budgetDescription: "Cumulative completion token budget across Tree of Agents workers (1,000–16,000).",
+    budgetError: "Enter a whole number between 1,000 and 16,000.",
+    timeoutDescription: "Maximum wall-clock time for a Tree of Agents run before aborting workers (30–180 s).",
+    timeoutError: "Enter a whole number between 30 and 180.",
+    secondsUnit: "s",
+    modelLocationNote: "Model and reasoning effort are selected directly in the workspace composer and save automatically.",
+    providersDescription: "Manage your DeepSeek platform account session and API key credentials.",
+    deepseekPlatform: "DeepSeek Platform",
+    apiKeyLabel: "API key",
+    apiKeyDescription: "Used when not signed in with a DeepSeek platform account. Environment variable DEEPSEEK_API_KEY is also supported.",
+    saveApiKey: "Save key",
+    showApiKey: "Show API key",
+    hideApiKey: "Hide API key",
+    keychainDescription: "Store the key in macOS Keychain across restarts; turn off to keep it in memory for this session only.",
+    storageDescription: "Preview and permanently delete older bot conversations, task records, or audit logs.",
+    storageFilterSection: "History cleanup",
+    dateRangeDescription: "Select a retention cutoff or inspect records within a custom local-date range.",
+    customDatesDescription: "Both start and end dates are inclusive in your local time zone.",
+    selectedRecords: "Selected records",
+    shortcutsDescription: "Keyboard shortcuts available across the workspace and settings.",
+    shortcutSendTask: "Send message",
+    shortcutCloseDrawer: "Close side panel or menu",
+    shortcutOpenSettings: "Open or close settings",
+    shortcutBackToApp: "Return to app (or clear search)",
+    aboutTagline: "A consent-first personal research agent with persistent named bots, scoped folder access, and local memory.",
+    aboutPlatformLabel: "Platform",
+    aboutIsolation: "Context-isolated Electron desktop shell with local IPC validation.",
+    aboutLicenseLabel: "License",
+    aboutLicenseDesc: "Open-source software distributed under the MIT License.",
+    aboutDocs: "Desktop guide",
+    aboutIssues: "Report issue",
+    copyVersion: "Copy version",
+    copiedVersion: "Copied",
+    copyFailed: "Could not copy version",
   },
   "zh-CN": {
     folderChanged: "授权目录已变更为 {folder}。请核对后重新发送。", chatWithoutFolder: "目录不可用。要关闭本地工具并发送这条消息吗？",
@@ -225,6 +276,57 @@ const TEXT = {
     lowApiKeyOnly: "low（仅 API Key）",
     visionOnly: "图片输入需要选择 DeepSeek-V4.1-Flash-1017 模型。", noImages: "尚未添加图片",
     defaultVisionTask: "描述并分析所附图片。", imagesToa: "将重复发送给每个工作 Agent、根协调 Agent 和后续请求",
+    backToApp: "返回应用",
+    settingsTabGeneral: "常规",
+    settingsTabProviders: "账号与密钥",
+    settingsTabStorage: "存储管理",
+    settingsTabShortcuts: "快捷键",
+    settingsTabAbout: "关于",
+    searchSettings: "搜索设置",
+    clearSearch: "清除搜索",
+    searchGroupPages: "页面",
+    searchGroupSettings: "设置项",
+    searchEmpty: "未找到与“{query}”相关的设置。",
+    generalDescription: "配置界面语言、流式输出与 Tree of Agents 推理限制。",
+    sectionInterface: "界面与交互",
+    languageDescription: "切换应用显示语言与原生菜单。",
+    streamDescription: "在未开启本地工具、联网搜索和 ToA 时逐字流式返回简单回答。",
+    sectionReasoning: "推理与 Tree of Agents",
+    thinkingDescription: "在所选模型支持时开启扩展思考过程。",
+    budgetDescription: "Tree of Agents 工作 Agent 的累计输出 Token 预算（1,000–16,000）。",
+    budgetError: "请输入 1,000 到 16,000 之间的整数。",
+    timeoutDescription: "Tree of Agents 单次运行的最大超时时间，超时后将中止工作 Agent（30–180 秒）。",
+    timeoutError: "请输入 30 到 180 之间的整数。",
+    secondsUnit: "秒",
+    modelLocationNote: "模型与推理强度可直接在工作区输入框下方切换，并会自动保存。",
+    providersDescription: "管理 DeepSeek 开放平台账号会话与 API 密钥凭据。",
+    deepseekPlatform: "DeepSeek 开放平台",
+    apiKeyLabel: "API 密钥",
+    apiKeyDescription: "未登录开放平台账号时使用此密钥；也支持通过环境变量 DEEPSEEK_API_KEY 提供。",
+    saveApiKey: "保存密钥",
+    showApiKey: "显示 API 密钥",
+    hideApiKey: "隐藏 API 密钥",
+    keychainDescription: "保存到 macOS 钥匙串以便重启后保留；关闭则仅在当前会话内存中保留。",
+    storageDescription: "预览并永久删除较早的 Bot 对话记录、任务记录或审计日志。",
+    storageFilterSection: "历史记录清理",
+    dateRangeDescription: "选择保留期限或按本地日期范围筛选需要清理的记录。",
+    customDatesDescription: "开始和结束日期均按本地时区包含当天。",
+    selectedRecords: "已选记录",
+    shortcutsDescription: "工作区与设置界面中可用的快捷键。",
+    shortcutSendTask: "发送消息",
+    shortcutCloseDrawer: "关闭侧边面板或菜单",
+    shortcutOpenSettings: "打开或关闭设置",
+    shortcutBackToApp: "返回应用（或清除搜索）",
+    aboutTagline: "以用户授权为核心的个人研究助手，支持持久化 Bot、受限目录访问与本地记忆。",
+    aboutPlatformLabel: "运行平台",
+    aboutIsolation: "基于上下文隔离与本地 IPC 校验的 Electron 桌面端。",
+    aboutLicenseLabel: "开源协议",
+    aboutLicenseDesc: "基于 MIT 协议分发的开源软件。",
+    aboutDocs: "桌面端指南",
+    aboutIssues: "反馈问题",
+    copyVersion: "复制版本号",
+    copiedVersion: "已复制",
+    copyFailed: "无法复制版本号",
   },
 } as const;
 
@@ -289,6 +391,18 @@ let sessionSaveTimer: number | undefined;
 let drawerPage: "files" | "changes" | "activity" | undefined;
 const commandLogs = new Map<string, { summary: HTMLElement; stdout: HTMLElement; stderr: HTMLElement; command: string; cwd: string }>();
 const VISION_MODEL = "deepseek-flash";
+type SettingsTab = "general" | "providers" | "storage" | "shortcuts" | "about";
+const SETTINGS_TABS: readonly SettingsTab[] = ["general", "providers", "storage", "shortcuts", "about"];
+let activeSettingsTab: SettingsTab = "general";
+let lastNonSettingsPage: "workspace" | "memory" = "workspace";
+let settingsSaveQueue: Promise<void> = Promise.resolve();
+let settingsFeedbackTimer: number | undefined;
+let aboutCopyTimer: number | undefined;
+let settingsHeaderObserver: ResizeObserver | undefined;
+let searchRevealTimer: number | undefined;
+let activeSearchTarget: HTMLElement | undefined;
+let highlightedSearchIndex = -1;
+let renderedSearchItems: Array<{ tab: SettingsTab; target?: string }> = [];
 
 function element<T extends HTMLElement>(id: string): T {
   const value = document.getElementById(id);
@@ -309,10 +423,49 @@ function errorText(error: unknown): string {
   return error.message.replace(/^Error invoking remote method '[^']+': Error:\s*/u, "");
 }
 
+function showSettingsFeedback(text: string, tone: "normal" | "busy" | "error" = "normal"): void {
+  const feedback = element<HTMLDivElement>("settings-feedback");
+  if (settingsFeedbackTimer !== undefined) window.clearTimeout(settingsFeedbackTimer);
+  settingsFeedbackTimer = undefined;
+  feedback.textContent = text;
+  feedback.dataset.tone = tone;
+  feedback.hidden = false;
+  if (tone === "normal") {
+    settingsFeedbackTimer = window.setTimeout(() => {
+      feedback.hidden = true;
+      settingsFeedbackTimer = undefined;
+    }, 2400);
+  }
+}
+
+function hideSettingsFeedback(): void {
+  if (settingsFeedbackTimer !== undefined) window.clearTimeout(settingsFeedbackTimer);
+  settingsFeedbackTimer = undefined;
+  element<HTMLDivElement>("settings-feedback").hidden = true;
+}
+
 function setStatus(text: string, tone: "normal" | "busy" | "error" = "normal"): void {
   const status = element<HTMLDivElement>("app-status");
   status.textContent = text;
   status.dataset.tone = tone;
+  if (element("page-settings").classList.contains("active") && text !== t("ready")) {
+    showSettingsFeedback(text, tone);
+  }
+}
+
+function updateAboutVersionLabel(copied = false): void {
+  const button = element<HTMLButtonElement>("about-version");
+  button.textContent = copied ? `Ya ${state.version} · ${t("copiedVersion")}` : `Ya ${state.version}`;
+}
+
+function renderShortcutsPlatform(): void {
+  const mod = state.platform === "darwin" ? "⌘" : "Ctrl";
+  document.querySelectorAll<HTMLElement>("[data-shortcut-mod]").forEach((node) => {
+    node.textContent = mod;
+  });
+  element<HTMLSpanElement>("settings-search-shortcut").textContent = state.platform === "darwin" ? "⌘F" : "Ctrl+F";
+  const osName = state.platform === "darwin" ? "macOS" : state.platform === "win32" ? "Windows" : state.platform;
+  element<HTMLSpanElement>("about-platform").textContent = `Electron · ${osName}`;
 }
 
 function applyLanguage(): void {
@@ -338,7 +491,15 @@ function applyLanguage(): void {
   element<HTMLSelectElement>("web-mode").options[0]!.text = t("auto");
   element<HTMLSelectElement>("web-mode").options[1]!.text = t("on");
   element<HTMLSelectElement>("web-mode").options[2]!.text = t("off");
-  element<HTMLSpanElement>("about-version").textContent = `Ya ${state.version}`;
+  if (aboutCopyTimer !== undefined) window.clearTimeout(aboutCopyTimer);
+  aboutCopyTimer = undefined;
+  updateAboutVersionLabel(false);
+  updateApiKeyToggleLabel();
+  renderShortcutsPlatform();
+  renderSettingsSearch();
+  if (element<HTMLInputElement>("setting-budget").getAttribute("aria-invalid") === "true") validateNumericField("budget");
+  if (element<HTMLInputElement>("setting-timeout").getAttribute("aria-invalid") === "true") validateNumericField("timeout");
+  if (element("page-settings").classList.contains("active")) renderStorage();
   renderWorkspaceLabel();
   renderActivities();
   renderChanges();
@@ -355,8 +516,95 @@ function applyLanguage(): void {
   if (!activeAnswer) setStatus(t("ready"));
 }
 
+function trackSettingsHeader(panel: HTMLElement): void {
+  settingsHeaderObserver?.disconnect();
+  settingsHeaderObserver = undefined;
+  const screen = document.querySelector<HTMLElement>(".settings-screen");
+  const header = panel.querySelector<HTMLElement>(".settings-tab-header");
+  if (!screen || !header) {
+    screen?.style.setProperty("--settings-tab-header-height", "0px");
+    return;
+  }
+  const update = () => screen.style.setProperty("--settings-tab-header-height", `${header.offsetHeight}px`);
+  update();
+  if (typeof ResizeObserver === "function") {
+    settingsHeaderObserver = new ResizeObserver(update);
+    settingsHeaderObserver.observe(header);
+  }
+}
+
+function clearSearchReveal(): void {
+  if (searchRevealTimer !== undefined) window.clearTimeout(searchRevealTimer);
+  searchRevealTimer = undefined;
+  if (activeSearchTarget) {
+    activeSearchTarget.removeAttribute("data-search-target");
+    activeSearchTarget = undefined;
+  }
+}
+
+function selectSettingsTab(tab: SettingsTab, options: { preserveSearch?: boolean; focusTab?: boolean } = {}): void {
+  activeSettingsTab = tab;
+  if (!options.preserveSearch) clearSearchReveal();
+  document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]").forEach((button) => {
+    const active = button.dataset.settingsTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+    if (active && options.focusTab) button.focus({ preventScroll: true });
+  });
+  let activePanel: HTMLElement | undefined;
+  document.querySelectorAll<HTMLElement>("[data-settings-panel]").forEach((panel) => {
+    const active = panel.dataset.settingsPanel === tab;
+    panel.hidden = !active;
+    if (active) activePanel = panel;
+  });
+  element<HTMLSelectElement>("settings-mobile-select").value = tab;
+  const shell = document.querySelector<HTMLElement>(".settings-shell");
+  if (shell) shell.scrollTop = 0;
+  if (activePanel) {
+    activePanel.scrollTop = 0;
+    trackSettingsHeader(activePanel);
+  }
+  if (tab === "storage" && element("page-settings").classList.contains("active")) void refreshStorage();
+}
+
+function clearSettingsSearch(focusInput = false): void {
+  const input = element<HTMLInputElement>("settings-search");
+  input.value = "";
+  renderSettingsSearch();
+  if (focusInput) input.focus({ preventScroll: true });
+}
+
+function resetApiKeyVisibility(): void {
+  const input = element<HTMLInputElement>("setting-api-key");
+  input.type = "password";
+  updateApiKeyToggleLabel();
+}
+
+function updateApiKeyToggleLabel(): void {
+  const input = element<HTMLInputElement>("setting-api-key");
+  const toggle = element<HTMLButtonElement>("toggle-api-key-visibility");
+  const shown = input.type === "text";
+  toggle.setAttribute("aria-pressed", String(shown));
+  const label = t(shown ? "hideApiKey" : "showApiKey");
+  toggle.setAttribute("aria-label", label);
+  toggle.title = label;
+  toggle.querySelector<SVGElement>(".icon-eye-open")?.toggleAttribute("hidden", shown);
+  toggle.querySelector<SVGElement>(".icon-eye-closed")?.toggleAttribute("hidden", !shown);
+}
+
+function closeSettings(): void {
+  switchPage(lastNonSettingsPage);
+  element<HTMLButtonElement>("settings-tab").focus({ preventScroll: true });
+}
+
 function switchPage(page: "workspace" | "memory" | "settings"): void {
+  const currentlySettings = element("page-settings").classList.contains("active");
+  if (page === "settings" && !currentlySettings) {
+    lastNonSettingsPage = element("page-memory").classList.contains("active") ? "memory" : "workspace";
+  }
   const returningToWorkspace = page === "workspace" && !element("page-workspace").classList.contains("active");
+  document.body.classList.toggle("settings-open", page === "settings");
   document.querySelectorAll<HTMLElement>(".page").forEach((node) => node.classList.toggle("active", node.id === `page-${page}`));
   document.querySelectorAll<HTMLButtonElement>(".tab").forEach((node) => {
     const active = node.dataset.page === page;
@@ -367,8 +615,20 @@ function switchPage(page: "workspace" | "memory" | "settings"): void {
   element<HTMLDivElement>("workspace-actions").hidden = page !== "workspace";
   renderPageTitle();
   if (page === "memory") void refreshMemory();
-  if (page === "settings") void refreshStorage();
-  else { ++storageRequest; storageItems = undefined; }
+  if (page === "settings") {
+    hideSettingsFeedback();
+    selectSettingsTab(activeSettingsTab);
+    fillSettings();
+  } else {
+    settingsHeaderObserver?.disconnect();
+    settingsHeaderObserver = undefined;
+    clearSearchReveal();
+    clearSettingsSearch(false);
+    resetApiKeyVisibility();
+    hideSettingsFeedback();
+    ++storageRequest;
+    storageItems = undefined;
+  }
   if (returningToWorkspace) void refreshActivityMemory();
 }
 
@@ -1477,18 +1737,56 @@ async function pruneMemory(): Promise<void> {
   }
 }
 
+function parseBoundedInteger(input: HTMLInputElement, min: number, max: number): number | undefined {
+  const raw = input.value.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= min && value <= max ? value : undefined;
+}
+
+function setFieldError(inputId: string, errorId: string, message?: string): void {
+  const input = element<HTMLInputElement>(inputId);
+  const error = element<HTMLParagraphElement>(errorId);
+  const invalid = Boolean(message);
+  input.setAttribute("aria-invalid", String(invalid));
+  error.textContent = message ?? "";
+  error.hidden = !invalid;
+}
+
+function validateNumericField(field: "budget" | "timeout"): number | undefined {
+  if (field === "budget") {
+    const input = element<HTMLInputElement>("setting-budget");
+    const value = parseBoundedInteger(input, 1_000, 16_000);
+    setFieldError("setting-budget", "setting-budget-error", value === undefined ? t("budgetError") : undefined);
+    return value;
+  }
+  const input = element<HTMLInputElement>("setting-timeout");
+  const value = parseBoundedInteger(input, 30, 180);
+  setFieldError("setting-timeout", "setting-timeout-error", value === undefined ? t("timeoutError") : undefined);
+  return value;
+}
+
 function fillSettings(): void {
   fillWorkspaceModelSelection();
   element<HTMLSelectElement>("setting-language").value = state.language;
   element<HTMLInputElement>("setting-thinking").checked = state.config.thinkingEnabled;
   element<HTMLInputElement>("setting-budget").value = String(state.config.toaTokenBudget);
   element<HTMLInputElement>("setting-timeout").value = String(state.config.toaTimeout);
+  setFieldError("setting-budget", "setting-budget-error");
+  setFieldError("setting-timeout", "setting-timeout-error");
   element<HTMLInputElement>("setting-stream").checked = state.stream;
-  element<HTMLInputElement>("setting-keychain").hidden = state.platform !== "darwin";
-  element<HTMLElement>("setting-keychain-label").hidden = state.platform !== "darwin";
-  element<HTMLSpanElement>("api-state").textContent = state.accountError ? t("accountInvalid")
+  const hideKeychain = state.platform !== "darwin";
+  element<HTMLElement>("setting-keychain-row").hidden = hideKeychain;
+  element<HTMLInputElement>("setting-keychain").hidden = hideKeychain;
+  element<HTMLElement>("setting-keychain-label").hidden = hideKeychain;
+  element<HTMLButtonElement>("settings-save").disabled = !element<HTMLInputElement>("setting-api-key").value.trim();
+  const apiState = element<HTMLSpanElement>("api-state");
+  apiState.textContent = state.accountError ? t("accountInvalid")
     : state.accountSignedIn ? t("accountActive") : state.hasApiKey ? t("apiReady") : t("apiMissing");
+  apiState.dataset.tone = state.accountError ? "error"
+    : state.accountSignedIn || state.hasApiKey ? "success" : "muted";
   renderAccount();
+  renderShortcutsPlatform();
   if (element("page-settings").classList.contains("active")) renderStorage();
   renderImages();
 }
@@ -1521,9 +1819,12 @@ function syncWorkspaceControls(): void {
 
 function renderAccount(): void {
   const running = document.body.classList.contains("task-running");
-  element<HTMLElement>("account-state").textContent = accountPending === "login" ? t("accountWaiting")
+  const badge = element<HTMLElement>("account-state");
+  badge.textContent = accountPending === "login" ? t("accountWaiting")
     : accountPending === "logout" ? t("accountLoggingOut") : state.accountError ? t("accountInvalid")
     : state.accountSignedIn ? t("accountSignedIn") : t("accountSignedOut");
+  badge.dataset.tone = accountPending ? "busy"
+    : state.accountError ? "error" : state.accountSignedIn ? "success" : "muted";
   element<HTMLButtonElement>("account-login").hidden = state.accountSignedIn || accountPending === "login";
   element<HTMLButtonElement>("account-login").disabled = running || Boolean(accountPending);
   element<HTMLButtonElement>("account-cancel").hidden = accountPending !== "login";
@@ -1586,26 +1887,381 @@ async function saveWorkspaceModelSelection(): Promise<void> {
   }
 }
 
-async function saveSettings(): Promise<void> {
-  const apiKey = element<HTMLInputElement>("setting-api-key").value;
-  try {
-    state = await bridge.saveSettings({
-      language: element<HTMLSelectElement>("setting-language").value,
-      thinkingEnabled: element<HTMLInputElement>("setting-thinking").checked,
-      toaTokenBudget: Number(element<HTMLInputElement>("setting-budget").value),
-      toaTimeout: Number(element<HTMLInputElement>("setting-timeout").value),
-      stream: element<HTMLInputElement>("setting-stream").checked,
-      ...(apiKey.trim() ? { apiKey, keyStorage: state.platform === "darwin" && element<HTMLInputElement>("setting-keychain").checked ? "keychain" : "session" } : {}),
+async function saveSettings(options: { includeApiKey?: boolean; validateField?: "budget" | "timeout" } = {}): Promise<void> {
+  if (options.validateField && validateNumericField(options.validateField) === undefined) return;
+  const run = settingsSaveQueue.then(async () => {
+    const budgetInput = element<HTMLInputElement>("setting-budget");
+    const timeoutInput = element<HTMLInputElement>("setting-timeout");
+    const validBudget = parseBoundedInteger(budgetInput, 1_000, 16_000);
+    const validTimeout = parseBoundedInteger(timeoutInput, 30, 180);
+    const preserveBudget = validBudget === undefined && budgetInput.getAttribute("aria-invalid") === "true";
+    const preserveTimeout = validTimeout === undefined && timeoutInput.getAttribute("aria-invalid") === "true";
+    const preserveBudgetValue = budgetInput.value;
+    const preserveTimeoutValue = timeoutInput.value;
+    const apiKeyInput = element<HTMLInputElement>("setting-api-key");
+    const apiKey = options.includeApiKey ? apiKeyInput.value : "";
+    try {
+      state = await bridge.saveSettings({
+        language: element<HTMLSelectElement>("setting-language").value,
+        thinkingEnabled: element<HTMLInputElement>("setting-thinking").checked,
+        toaTokenBudget: validBudget ?? state.config.toaTokenBudget,
+        toaTimeout: validTimeout ?? state.config.toaTimeout,
+        stream: element<HTMLInputElement>("setting-stream").checked,
+        ...(apiKey.trim()
+          ? {
+              apiKey,
+              keyStorage: state.platform === "darwin" && element<HTMLInputElement>("setting-keychain").checked
+                ? "keychain"
+                : "session",
+            }
+          : {}),
+      });
+      if (options.includeApiKey && apiKey.trim()) {
+        apiKeyInput.value = "";
+        resetApiKeyVisibility();
+      }
+      if (!visionEnabled() && selectedImages.length > 0) await clearImages();
+      applyLanguage();
+      fillSettings();
+      if (preserveBudget) {
+        budgetInput.value = preserveBudgetValue;
+        validateNumericField("budget");
+      }
+      if (preserveTimeout) {
+        timeoutInput.value = preserveTimeoutValue;
+        validateNumericField("timeout");
+      }
+      renderMemory();
+      setStatus(t("saved"));
+    } catch (error) {
+      fillSettings();
+      setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
+    }
+  });
+  settingsSaveQueue = run.catch(() => undefined);
+  return run;
+}
+
+interface SettingsSearchItem {
+  id: string;
+  kind: "page" | "setting";
+  tab: SettingsTab;
+  target?: string;
+  title: string;
+  pageLabel: string;
+  keywords: string;
+}
+
+function settingsSearchCatalog(): SettingsSearchItem[] {
+  const items: SettingsSearchItem[] = [
+    {
+      id: "page.general",
+      kind: "page",
+      tab: "general",
+      title: t("settingsTabGeneral"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "general interface reasoning toa preferences 常规 界面 推理",
+    },
+    {
+      id: "page.providers",
+      kind: "page",
+      tab: "providers",
+      title: t("settingsTabProviders"),
+      pageLabel: t("settingsTabProviders"),
+      keywords: "account api key deepseek login auth credentials 账号 密钥 开放平台 登录",
+    },
+    {
+      id: "page.storage",
+      kind: "page",
+      tab: "storage",
+      title: t("settingsTabStorage"),
+      pageLabel: t("settingsTabStorage"),
+      keywords: "storage history cleanup delete conversations tasks audit 存储 管理 清理 历史",
+    },
+    {
+      id: "page.shortcuts",
+      kind: "page",
+      tab: "shortcuts",
+      title: t("settingsTabShortcuts"),
+      pageLabel: t("settingsTabShortcuts"),
+      keywords: "shortcuts keybinds keyboard hotkeys 快捷键 键盘",
+    },
+    {
+      id: "page.about",
+      kind: "page",
+      tab: "about",
+      title: t("settingsTabAbout"),
+      pageLabel: t("settingsTabAbout"),
+      keywords: "about version license electron platform github 关于 版本 协议",
+    },
+    {
+      id: "setting.language",
+      kind: "setting",
+      tab: "general",
+      target: "language",
+      title: t("language"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "language locale english chinese zh-cn menu 语言 英文 中文 菜单",
+    },
+    {
+      id: "setting.stream",
+      kind: "setting",
+      tab: "general",
+      target: "stream",
+      title: t("stream"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "stream streaming answers simple chat replies 流式 输出 简单回答",
+    },
+    {
+      id: "setting.thinking",
+      kind: "setting",
+      tab: "general",
+      target: "thinking",
+      title: t("thinking"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "thinking reasoning extended deepseek 思考 推理",
+    },
+    {
+      id: "setting.budget",
+      kind: "setting",
+      tab: "general",
+      target: "budget",
+      title: t("budget"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "toa token budget limit workers 预算 限制 工作",
+    },
+    {
+      id: "setting.timeout",
+      kind: "setting",
+      tab: "general",
+      target: "timeout",
+      title: t("timeout"),
+      pageLabel: t("settingsTabGeneral"),
+      keywords: "toa timeout seconds duration abort 超时 秒",
+    },
+    {
+      id: "setting.account",
+      kind: "setting",
+      tab: "providers",
+      target: "account",
+      title: t("deepseekAccount"),
+      pageLabel: t("settingsTabProviders"),
+      keywords: "deepseek platform account oauth login sign in out 开放平台 账号 登录 退出",
+    },
+    {
+      id: "setting.api-key",
+      kind: "setting",
+      tab: "providers",
+      target: "api-key",
+      title: t("apiKey"),
+      pageLabel: t("settingsTabProviders"),
+      keywords: "api key secret token deepseek_api_key password 密钥",
+    },
+    {
+      id: "setting.storage-kind",
+      kind: "setting",
+      tab: "storage",
+      target: "storage-kind",
+      title: t("storageCategory"),
+      pageLabel: t("settingsTabStorage"),
+      keywords: "storage category chats conversations tasks audit logs 记录 类型 对话 任务 审计",
+    },
+    {
+      id: "setting.storage-period",
+      kind: "setting",
+      tab: "storage",
+      target: "storage-period",
+      title: t("dateRange"),
+      pageLabel: t("settingsTabStorage"),
+      keywords: "date range 30 90 days custom undated all delete cleanup 日期 范围 自定义 删除 清理",
+    },
+    {
+      id: "setting.shortcuts",
+      kind: "setting",
+      tab: "shortcuts",
+      target: "shortcut-open-settings",
+      title: t("shortcutOpenSettings"),
+      pageLabel: t("settingsTabShortcuts"),
+      keywords: "shortcut open settings cmd ctrl comma 快捷键 打开 设置",
+    },
+    {
+      id: "setting.version",
+      kind: "setting",
+      tab: "about",
+      title: t("about"),
+      pageLabel: t("settingsTabAbout"),
+      keywords: "version copy license github docs issues 版本 复制 开源协议 文档",
+    },
+  ];
+  if (state?.platform === "darwin") {
+    items.splice(12, 0, {
+      id: "setting.keychain",
+      kind: "setting",
+      tab: "providers",
+      target: "keychain",
+      title: t("keychain"),
+      pageLabel: t("settingsTabProviders"),
+      keywords: "macos keychain key storage persist restart 钥匙串 保存",
     });
-    element<HTMLInputElement>("setting-api-key").value = "";
-    if (!visionEnabled() && selectedImages.length > 0) await clearImages();
-    applyLanguage();
-    fillSettings();
-    renderMemory();
-    setStatus(t("saved"));
-  } catch (error) {
-    setStatus(`${t("taskError")}: ${errorText(error)}`, "error");
   }
+  return items;
+}
+
+function rankSettingsSearch(query: string, items: SettingsSearchItem[]): SettingsSearchItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  const tokens = normalized.split(/\s+/u).filter(Boolean);
+  const scored: Array<{ item: SettingsSearchItem; score: number }> = [];
+  for (const item of items) {
+    const title = item.title.toLowerCase();
+    const haystack = `${title} ${item.pageLabel.toLowerCase()} ${item.keywords.toLowerCase()}`;
+    if (!tokens.every((token) => haystack.includes(token))) continue;
+    let score = 0;
+    if (title === normalized) score += 100;
+    else if (title.startsWith(normalized)) score += 60;
+    else if (title.includes(normalized)) score += 40;
+    else if (tokens.every((token) => title.includes(token))) score += 25;
+    if (item.kind === "page" && title.includes(normalized)) score += 10;
+    scored.push({ item, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((entry) => entry.item);
+}
+
+function appendHighlightedText(parent: HTMLElement, text: string, query: string): void {
+  const needle = query.trim().split(/\s+/u)[0]?.toLowerCase() ?? "";
+  if (!needle) {
+    parent.append(document.createTextNode(text));
+    return;
+  }
+  const lower = text.toLowerCase();
+  let position = 0;
+  while (position < text.length) {
+    const index = lower.indexOf(needle, position);
+    if (index === -1) {
+      parent.append(document.createTextNode(text.slice(position)));
+      break;
+    }
+    if (index > position) parent.append(document.createTextNode(text.slice(position, index)));
+    const mark = document.createElement("mark");
+    mark.textContent = text.slice(index, index + needle.length);
+    parent.append(mark);
+    position = index + needle.length;
+  }
+}
+
+function settingsIconClone(tab: SettingsTab): SVGSVGElement | undefined {
+  const button = document.querySelector<HTMLButtonElement>(`[data-settings-tab="${tab}"]`);
+  const svg = button?.querySelector("svg");
+  if (!svg) return undefined;
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.classList.add("settings-search-result-icon");
+  return clone;
+}
+
+function setHighlightedSearchResult(index: number): void {
+  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("#settings-search-results .settings-search-result"));
+  if (buttons.length === 0) {
+    highlightedSearchIndex = -1;
+    return;
+  }
+  highlightedSearchIndex = ((index % buttons.length) + buttons.length) % buttons.length;
+  buttons.forEach((button, idx) => {
+    const active = idx === highlightedSearchIndex;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    if (active) button.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function revealSettingTarget(tab: SettingsTab, target?: string): void {
+  const narrow = (document.querySelector<HTMLElement>(".settings-screen")?.clientWidth ?? 1000) < 800;
+  selectSettingsTab(tab, { preserveSearch: !narrow });
+  if (narrow) clearSettingsSearch(false);
+  const panel = document.querySelector<HTMLElement>(`[data-settings-panel="${tab}"]`);
+  if (!panel) return;
+  const control = target
+    ? panel.querySelector<HTMLElement>(`[data-setting-id="${CSS.escape(target)}"]`)
+    : panel.querySelector<HTMLElement>(".settings-tab-header-row, .settings-about-intro");
+  if (!control) return;
+  clearSearchReveal();
+  control.scrollIntoView({ block: "center", inline: "nearest" });
+  control.setAttribute("data-search-target", target ? "row" : "header");
+  activeSearchTarget = control;
+  const finish = () => {
+    if (activeSearchTarget === control) clearSearchReveal();
+  };
+  control.addEventListener("animationend", (event) => {
+    if (event.target === control && event.animationName === "settings-search-reveal") finish();
+  }, { once: true });
+  searchRevealTimer = window.setTimeout(finish, 1900);
+}
+
+function renderSettingsSearch(): void {
+  const input = element<HTMLInputElement>("settings-search");
+  const container = input.closest<HTMLElement>(".settings-search");
+  const resultsEl = element<HTMLDivElement>("settings-search-results");
+  const clearBtn = element<HTMLButtonElement>("settings-search-clear");
+  const rawQuery = input.value;
+  const hasQuery = rawQuery.trim().length > 0;
+  if (container) container.dataset.hasQuery = String(hasQuery);
+  clearBtn.hidden = !hasQuery;
+  resultsEl.replaceChildren();
+  renderedSearchItems = [];
+  highlightedSearchIndex = -1;
+  if (!hasQuery) {
+    resultsEl.hidden = true;
+    return;
+  }
+  resultsEl.hidden = false;
+  const matches = rankSettingsSearch(rawQuery, settingsSearchCatalog());
+  if (matches.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "settings-search-empty";
+    empty.textContent = interpolate(t("searchEmpty"), { query: rawQuery.trim() });
+    resultsEl.append(empty);
+    return;
+  }
+  const pages = matches.filter((item) => item.kind === "page");
+  const settings = matches.filter((item) => item.kind === "setting");
+  const groups: Array<{ label: string; items: SettingsSearchItem[] }> = [];
+  if (pages.length > 0) groups.push({ label: t("searchGroupPages"), items: pages });
+  if (settings.length > 0) groups.push({ label: t("searchGroupSettings"), items: settings });
+  for (const group of groups) {
+    const heading = document.createElement("div");
+    heading.className = "settings-search-group-label";
+    heading.textContent = group.label;
+    resultsEl.append(heading);
+    for (const item of group.items) {
+      const index = renderedSearchItems.length;
+      renderedSearchItems.push({ tab: item.tab, target: item.target });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "settings-search-result";
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", "false");
+      button.dataset.searchResultTab = item.tab;
+      if (item.target) button.dataset.searchResultTarget = item.target;
+      const icon = settingsIconClone(item.tab);
+      if (icon) button.append(icon);
+      const title = document.createElement("span");
+      title.className = "settings-search-result-title";
+      appendHighlightedText(title, item.title, rawQuery);
+      button.append(title);
+      if (item.kind === "setting") {
+        const page = document.createElement("span");
+        page.className = "settings-search-result-page";
+        page.textContent = item.pageLabel;
+        button.append(page);
+      }
+      button.addEventListener("click", () => {
+        setHighlightedSearchResult(index);
+        revealSettingTarget(item.tab, item.target);
+      });
+      resultsEl.append(button);
+    }
+  }
+  setHighlightedSearchResult(0);
 }
 
 type StoredHistoryKind = import("../history").StoredHistoryKind;
@@ -1699,6 +2355,7 @@ function historySize(items: StorageItem[]): string {
 function renderStorage(): void {
   const kind = storageKind();
   const custom = element<HTMLSelectElement>("storage-period").value === "custom";
+  element("storage-custom-dates-row").hidden = !custom;
   element("storage-from-field").hidden = !custom;
   element("storage-to-field").hidden = !custom;
   const scope = t(kind === "chats" ? "chatScope" : kind === "tasks" ? "taskScope" : "auditScope");
@@ -2024,12 +2681,22 @@ function registerEvents(): void {
   });
   document.addEventListener("keydown", (event) => {
     if (element<HTMLDialogElement>("bot-editor").open || event.isComposing) return;
+    const settingsActive = element("page-settings").classList.contains("active");
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
       event.preventDefault();
       void showBotEditor();
     } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
       event.preventDefault();
       element<HTMLButtonElement>("sidebar-toggle").click();
+    } else if ((event.ctrlKey || event.metaKey) && event.key === ",") {
+      event.preventDefault();
+      if (settingsActive) closeSettings();
+      else switchPage("settings");
+    } else if (settingsActive && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      const search = element<HTMLInputElement>("settings-search");
+      search.focus({ preventScroll: true });
+      search.select();
     } else if (event.key === "Escape") {
       element<HTMLDetailsElement>("task-options").open = false;
       if (pendingAction) {
@@ -2037,6 +2704,19 @@ function registerEvents(): void {
         switchPage("workspace");
         setDrawer("activity");
         element<HTMLElement>(pendingAction.responding ? "action-summary" : "action-deny").focus({ preventScroll: true });
+        return;
+      }
+      if (settingsActive) {
+        event.preventDefault();
+        const search = element<HTMLInputElement>("settings-search");
+        if (search.value.trim()) {
+          clearSettingsSearch(true);
+        } else if (document.activeElement === search) {
+          search.blur();
+          document.querySelector<HTMLElement>(".settings-screen")?.focus({ preventScroll: true });
+        } else {
+          closeSettings();
+        }
         return;
       }
       const previous = drawerPage;
@@ -2061,7 +2741,97 @@ function registerEvents(): void {
   element<HTMLButtonElement>("memory-create").addEventListener("click", () => void createMemory());
   element<HTMLButtonElement>("memory-prune").addEventListener("click", () => void pruneMemory());
   element<HTMLButtonElement>("memory-retry").addEventListener("click", () => void refreshMemory());
-  element<HTMLButtonElement>("settings-save").addEventListener("click", () => void saveSettings());
+  element<HTMLButtonElement>("settings-back").addEventListener("click", closeSettings);
+  element<HTMLButtonElement>("settings-back-mobile").addEventListener("click", closeSettings);
+  element<HTMLSelectElement>("settings-mobile-select").addEventListener("change", (event) => {
+    selectSettingsTab((event.currentTarget as HTMLSelectElement).value as SettingsTab);
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-settings-tab]").forEach((button) => {
+    button.addEventListener("click", () => selectSettingsTab(button.dataset.settingsTab as SettingsTab));
+  });
+  document.querySelector(".settings-nav-groups")?.addEventListener("keydown", (event) => {
+    const keyEvent = event as KeyboardEvent;
+    const currentIndex = SETTINGS_TABS.indexOf(activeSettingsTab);
+    if (currentIndex === -1) return;
+    let nextIndex: number | undefined;
+    if (keyEvent.key === "ArrowDown") nextIndex = (currentIndex + 1) % SETTINGS_TABS.length;
+    else if (keyEvent.key === "ArrowUp") nextIndex = (currentIndex - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    else if (keyEvent.key === "Home") nextIndex = 0;
+    else if (keyEvent.key === "End") nextIndex = SETTINGS_TABS.length - 1;
+    if (nextIndex === undefined) return;
+    keyEvent.preventDefault();
+    selectSettingsTab(SETTINGS_TABS[nextIndex]!, { focusTab: true });
+  });
+  const searchInput = element<HTMLInputElement>("settings-search");
+  searchInput.addEventListener("input", renderSettingsSearch);
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedSearchResult(highlightedSearchIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedSearchResult(highlightedSearchIndex - 1);
+    } else if (event.key === "Enter" && renderedSearchItems.length > 0) {
+      event.preventDefault();
+      const target = renderedSearchItems[Math.max(0, highlightedSearchIndex)];
+      if (target) revealSettingTarget(target.tab, target.target);
+    }
+  });
+  element<HTMLButtonElement>("settings-search-clear").addEventListener("click", () => clearSettingsSearch(true));
+  element<HTMLSelectElement>("setting-language").addEventListener("change", () => void saveSettings());
+  element<HTMLInputElement>("setting-stream").addEventListener("change", () => void saveSettings());
+  element<HTMLInputElement>("setting-thinking").addEventListener("change", () => void saveSettings());
+  const budgetInput = element<HTMLInputElement>("setting-budget");
+  budgetInput.addEventListener("input", () => {
+    if (budgetInput.getAttribute("aria-invalid") === "true" && parseBoundedInteger(budgetInput, 1_000, 16_000) !== undefined) {
+      setFieldError("setting-budget", "setting-budget-error");
+    }
+  });
+  budgetInput.addEventListener("change", () => void saveSettings({ validateField: "budget" }));
+  const timeoutInput = element<HTMLInputElement>("setting-timeout");
+  timeoutInput.addEventListener("input", () => {
+    if (timeoutInput.getAttribute("aria-invalid") === "true" && parseBoundedInteger(timeoutInput, 30, 180) !== undefined) {
+      setFieldError("setting-timeout", "setting-timeout-error");
+    }
+  });
+  timeoutInput.addEventListener("change", () => void saveSettings({ validateField: "timeout" }));
+  const apiKeyInput = element<HTMLInputElement>("setting-api-key");
+  apiKeyInput.addEventListener("input", () => {
+    element<HTMLButtonElement>("settings-save").disabled = !apiKeyInput.value.trim();
+  });
+  apiKeyInput.addEventListener("keydown", (event) => {
+    if (!event.isComposing && event.key === "Enter" && apiKeyInput.value.trim()) {
+      event.preventDefault();
+      void saveSettings({ includeApiKey: true });
+    }
+  });
+  element<HTMLButtonElement>("toggle-api-key-visibility").addEventListener("click", () => {
+    apiKeyInput.type = apiKeyInput.type === "password" ? "text" : "password";
+    updateApiKeyToggleLabel();
+    apiKeyInput.focus({ preventScroll: true });
+  });
+  element<HTMLButtonElement>("settings-save").addEventListener("click", () => void saveSettings({ includeApiKey: true }));
+  element<HTMLButtonElement>("about-version").addEventListener("click", () => {
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(`Ya ${state.version}`);
+        if (aboutCopyTimer !== undefined) window.clearTimeout(aboutCopyTimer);
+        updateAboutVersionLabel(true);
+        aboutCopyTimer = window.setTimeout(() => {
+          updateAboutVersionLabel(false);
+          aboutCopyTimer = undefined;
+        }, 1800);
+      } catch {
+        setStatus(t("copyFailed"), "error");
+      }
+    })();
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-external-url]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const url = button.dataset.externalUrl;
+      if (url) void bridge.openExternal(url);
+    });
+  });
   element<HTMLButtonElement>("account-login").addEventListener("click", () => void signInDeepSeek());
   element<HTMLButtonElement>("account-cancel").addEventListener("click", () => {
     void bridge.cancelDeepSeekLogin().catch((error: unknown) => setStatus(`${t("taskError")}: ${errorText(error)}`, "error"));
