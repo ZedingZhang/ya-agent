@@ -844,11 +844,11 @@ describe("GUI controller", () => {
     expect(JSON.stringify(entries)).not.toContain("private note");
   });
 
-  it("manages memory and audit history", { timeout: 30_000 }, () => {
+  it("manages memory and audit history", { timeout: 30_000 }, async () => {
     const controller = new GuiController();
     const card = controller.createMemory("Use PostgreSQL indexes", "evidence", "procedure");
     controller.setMemoryStatus(card.id, "approved");
-    expect(controller.relevantCards("Explain PostgreSQL indexes").map((match) => match.card.id)).toEqual([card.id]);
+    expect((await controller.relevantCards("Explain PostgreSQL indexes")).map((match) => match.card.id)).toEqual([card.id]);
     controller.setMemoryStatus(card.id, "revoked");
     expect(controller.prunePreview().map((item) => item.id)).toEqual([card.id]);
     expect(controller.prune().map((item) => item.id)).toEqual([card.id]);
@@ -858,13 +858,13 @@ describe("GUI controller", () => {
     expect(controller.clearAuditLogs().map((path) => basename(path))).toEqual(["actions.jsonl"]);
   });
 
-  it("binds GUI pruning to the preview instead of newly prunable cards", { timeout: 30_000 }, () => {
+  it("binds GUI pruning to the preview instead of newly prunable cards", { timeout: 30_000 }, async () => {
     const controller = new GuiController();
     const shown = controller.createMemory("shown", "evidence", "procedure");
     expect(controller.prunePreview(true).map((card) => card.id)).toEqual([shown.id]);
     const unseen = controller.createMemory("unseen", "evidence", "procedure");
     expect(controller.prune(true).map((card) => card.id)).toEqual([shown.id]);
-    expect(controller.cards().map((card) => card.id)).toEqual([unseen.id]);
+    expect((await controller.cards()).map((card) => card.id)).toEqual([unseen.id]);
     expect(() => controller.prune(true)).toThrow(/Preview/u);
   });
 

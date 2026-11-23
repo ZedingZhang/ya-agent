@@ -16,9 +16,9 @@ import {
 import {
   cardsToPrune,
   createCandidate,
-  listCards,
+  listCardsAsync,
   pruneCards,
-  selectRelevantCards,
+  selectRelevantCardsAsync,
   setStatus,
   type MemoryCard,
   type MemoryKind,
@@ -280,12 +280,12 @@ export class GuiController {
     return listTasks(options);
   }
 
-  cards(): MemoryCard[] {
-    return listCards();
+  cards(): Promise<MemoryCard[]> {
+    return listCardsAsync();
   }
 
-  relevantCards(task: string): MemoryMatch[] {
-    return selectRelevantCards(task);
+  relevantCards(task: string): Promise<MemoryMatch[]> {
+    return selectRelevantCardsAsync(task);
   }
 
   private workspaceForBot(botId: string, grant: FolderGrant, callbacks: GuiRunCallbacks = {}): TaskWorkspace {
