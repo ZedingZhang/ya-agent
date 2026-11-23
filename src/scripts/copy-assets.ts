@@ -5,7 +5,7 @@ const source = resolve(__dirname, "../../../src/gui");
 const destination = resolve(__dirname, "../gui");
 
 mkdirSync(destination, { recursive: true });
-for (const file of ["index.html", "styles.css"]) {
+for (const file of ["index.html", "styles.css", "settings.css"]) {
   copyFileSync(join(source, file), join(destination, file));
 }
 copyFileSync(resolve(source, "../octop-memory.py"), resolve(destination, "../octop-memory.py"));

@@ -666,9 +666,11 @@ async function verifyRenderer(window: BrowserWindow): Promise<void> {
     const formOverflow = Math.max(evidenceOverflow, createOverflow);
     settingsTab?.click();
     const settingsActive = document.querySelector('#page-settings')?.classList.contains('active') === true;
+    document.querySelector('[data-settings-tab="providers"]')?.click();
     const keychainLabel = document.querySelector('#setting-keychain-label');
     const keychainVisible = keychainLabel instanceof HTMLElement && keychainLabel.getClientRects().length > 0;
     const legacySettingsModelControls = document.querySelector('#setting-model, #setting-reasoning') !== null;
+    document.querySelector('[data-settings-tab="general"]')?.click();
     workspaceTab?.click();
     const workspaceActive = document.querySelector('#page-workspace')?.classList.contains('active') === true;
     const model = document.querySelector('#task-model');
@@ -997,19 +999,53 @@ async function verifyResponsiveLayout(window: BrowserWindow): Promise<void> {
         if (!fits) throw new Error(`Desktop layout overflows at ${width}x${height}, ${language}, ${theme}.`);
         const settingsFit = await window.webContents.executeJavaScript(`(() => {
           switchPage('settings');
-          const container = document.querySelector('.settings-layout');
-          const cards = Array.from(container.querySelectorAll('.form-card'));
-          const fieldsInside = cards.every((card) => Array.from(card.querySelectorAll('input, select, button, .check'))
-            .filter((field) => !field.hidden && field.getClientRects().length > 0)
-            .every((field) => field.getBoundingClientRect().bottom <= card.getBoundingClientRect().bottom - 8));
-          const cardsApart = innerWidth > 1100 || cards.every((card, index) => index === 0
-            || card.getBoundingClientRect().top >= cards[index - 1].getBoundingClientRect().bottom);
-          container.scrollTop = container.scrollHeight;
-          const save = document.querySelector('#settings-save').getBoundingClientRect();
-          const reachableSave = save.bottom <= container.getBoundingClientRect().bottom + 1;
-          container.scrollTop = 0;
-          switchPage('workspace');
-          return fieldsInside && cardsApart && reachableSave;
+          const shell = document.querySelector('.settings-shell');
+          const sidebar = document.querySelector('.settings-sidebar');
+          const content = document.querySelector('.settings-content');
+          const hiddenShellChrome = document.body.classList.contains('settings-open')
+            && document.querySelector('.app-sidebar').getClientRects().length === 0;
+          let allTabsFit = hiddenShellChrome && document.documentElement.scrollWidth <= innerWidth;
+          if (innerWidth >= 800 && sidebar && content) {
+            const sRect = sidebar.getBoundingClientRect();
+            const cRect = content.getBoundingClientRect();
+            allTabsFit = allTabsFit && sRect.right <= cRect.left + 1;
+          }
+          const period = element('storage-period');
+          const priorPeriod = period.value;
+          for (const tab of ['general', 'providers', 'storage', 'shortcuts', 'about']) {
+            selectSettingsTab(tab);
+            const panel = document.querySelector('[data-settings-panel="' + tab + '"]');
+            if (!panel || panel.hidden) { allTabsFit = false; break; }
+            if (tab === 'storage') {
+              period.value = 'custom';
+              renderStorage();
+            }
+            const lists = Array.from(panel.querySelectorAll('[data-component="settings-list"]'));
+            for (const list of lists) {
+              const listRect = list.getBoundingClientRect();
+              const controls = Array.from(list.querySelectorAll('input, select, button, [data-component="switch"]'))
+                .filter((field) => !field.hidden && field.getClientRects().length > 0);
+              for (const field of controls) {
+                const rect = field.getBoundingClientRect();
+                if (rect.right > listRect.right + 1 || rect.left < listRect.left - 1 || rect.bottom > listRect.bottom + 1) {
+                  allTabsFit = false;
+                }
+              }
+            }
+            if (document.documentElement.scrollWidth > innerWidth || shell.scrollWidth > shell.clientWidth + 1) {
+              allTabsFit = false;
+            }
+            if (tab === 'storage') {
+              period.value = priorPeriod;
+              renderStorage();
+            }
+          }
+          selectSettingsTab('general');
+          document.querySelector('#settings-back').click();
+          const returnedToWorkspace = !document.body.classList.contains('settings-open')
+            && document.querySelector('#page-workspace').classList.contains('active')
+            && document.querySelector('.app-sidebar').getClientRects().length > 0;
+          return allTabsFit && returnedToWorkspace;
         })()`) as boolean;
         if (!settingsFit) throw new Error(`Settings fields are clipped at ${width}x${height}, ${language}, ${theme}.`);
       }
@@ -1038,6 +1074,7 @@ async function verifyStorageManagement(window: BrowserWindow): Promise<void> {
     try {
       await selectBot(fixture);
       element('settings-tab').click();
+      document.querySelector('[data-settings-tab="storage"]').click();
       element('storage-period').value = 'custom';
       element('storage-period').dispatchEvent(new Event('change'));
       element('storage-from').value = '2004-04-04';
@@ -1858,6 +1895,7 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
     await verifyRenderer(window);
     const cleared = await window.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-page="settings"]').click();
+      document.querySelector('[data-settings-tab="providers"]').click();
       const recoverable = state.accountError && !state.accountSignedIn
         && !document.querySelector('#account-login').hidden && !document.querySelector('#account-logout').hidden
         && document.querySelector('#account-logout').textContent === t('accountClear')
@@ -1873,6 +1911,7 @@ async function verifyAccountLogin(window: BrowserWindow): Promise<void> {
     await verifyRenderer(window);
     const signedIn = await window.webContents.executeJavaScript(`(async () => {
       document.querySelector('[data-page="settings"]').click();
+      document.querySelector('[data-settings-tab="providers"]').click();
       document.querySelector('#image-detail').value = 'low';
       document.querySelector('#account-login').click();
       const deadline = Date.now() + 5000;
@@ -1927,11 +1966,185 @@ async function captureGuiPage(window: BrowserWindow, target: string): Promise<vo
   if (theme === "light" || theme === "dark") nativeTheme.themeSource = theme;
   const size = process.env.YA_SMOKE_SIZE?.match(/^(\d+)x(\d+)$/u);
   if (size) window.setSize(Number(size[1]), Number(size[2]));
+  const settingsTab = process.env.YA_SMOKE_SETTINGS_TAB ?? "general";
   await window.webContents.executeJavaScript(`switchPage('${page === "changes" || page === "files" ? "workspace" : page}');
+    ${page === "settings" ? `selectSettingsTab('${settingsTab}');` : ""}
     ${page === "files" ? "setDrawer('files');" : ""}
     ${page === "changes" ? "setDrawer('changes'); document.querySelector('#change-list .file-change')?.setAttribute('open', '');" : ""}`);
   await new Promise((resolve) => setTimeout(resolve, 250));
   writeFileSync(target, (await window.webContents.capturePage()).toPNG());
+}
+
+async function verifySettingsExperience(window: BrowserWindow): Promise<void> {
+  const originalConfig = new ModelConfig({
+    model: controller.config.model,
+    reasoningEffort: controller.config.reasoningEffort,
+    thinkingEnabled: controller.config.thinkingEnabled,
+    toaTokenBudget: controller.config.toaTokenBudget,
+    toaTimeout: controller.config.toaTimeout,
+  });
+  const originalLanguage = controller.language;
+  const originalStream = controller.stream;
+  const originalSessionKey = (controller as unknown as { sessionApiKey?: string }).sessionApiKey;
+  const originalSaveMacosApiKey = controller.saveMacosApiKey.bind(controller);
+  let keychainKeyCaptured = "";
+  controller.saveMacosApiKey = (apiKey: string) => {
+    keychainKeyCaptured = apiKey.trim();
+    controller.setSessionApiKey(apiKey);
+  };
+  try {
+    const passed = await window.webContents.executeJavaScript(`(async () => {
+      const modProp = state.platform === 'darwin' ? 'metaKey' : 'ctrlKey';
+      const initialStream = state.stream;
+      const initialThinking = state.config.thinkingEnabled;
+      switchPage('memory');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', [modProp]: true, bubbles: true, cancelable: true }));
+      if (!document.querySelector('#page-settings').classList.contains('active')
+        || !document.body.classList.contains('settings-open')) return 'shortcut-open';
+      document.querySelector('#settings-back').click();
+      if (!document.querySelector('#page-memory').classList.contains('active')
+        || document.body.classList.contains('settings-open')) return 'back-to-memory';
+
+      switchPage('workspace');
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', [modProp]: true, bubbles: true, cancelable: true }));
+      if (!document.querySelector('#page-settings').classList.contains('active')) return 'shortcut-from-workspace';
+
+      const nav = document.querySelector('.settings-nav-groups');
+      document.querySelector('[data-settings-tab="general"]').focus();
+      nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+      if (activeSettingsTab !== 'providers' || document.querySelector('#settings-panel-providers').hidden) return 'arrow-down-tab';
+      nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+      if (activeSettingsTab !== 'general' || document.querySelector('#settings-panel-general').hidden) return 'arrow-up-tab';
+
+      element('setting-language').value = 'zh-CN';
+      element('setting-language').dispatchEvent(new Event('change'));
+      await settingsSaveQueue;
+      if ((await bridge.state()).language !== 'zh-CN' || element('settings-back').textContent.trim() !== '返回应用') return 'autosave-language';
+
+      element('setting-stream').click();
+      await settingsSaveQueue;
+      if ((await bridge.state()).stream !== !initialStream) return 'autosave-stream';
+
+      element('setting-thinking').click();
+      await settingsSaveQueue;
+      if ((await bridge.state()).config.thinkingEnabled !== !initialThinking) return 'autosave-thinking';
+
+      element('setting-budget').value = '500';
+      element('setting-budget').dispatchEvent(new Event('change'));
+      await settingsSaveQueue;
+      if (element('setting-budget').getAttribute('aria-invalid') !== 'true'
+        || element('setting-budget-error').hidden
+        || (await bridge.state()).config.toaTokenBudget === 500) return 'invalid-budget';
+
+      element('setting-stream').click();
+      await settingsSaveQueue;
+      if ((await bridge.state()).stream !== initialStream || element('setting-budget').getAttribute('aria-invalid') !== 'true') {
+        return 'unrelated-save-with-invalid-budget';
+      }
+
+      element('setting-budget').value = '6000';
+      element('setting-budget').dispatchEvent(new Event('input'));
+      element('setting-budget').dispatchEvent(new Event('change'));
+      await settingsSaveQueue;
+      if (element('setting-budget').getAttribute('aria-invalid') !== 'false'
+        || !element('setting-budget-error').hidden
+        || (await bridge.state()).config.toaTokenBudget !== 6000) return 'valid-budget';
+
+      element('setting-timeout').value = '999';
+      element('setting-timeout').dispatchEvent(new Event('change'));
+      await settingsSaveQueue;
+      if (element('setting-timeout').getAttribute('aria-invalid') !== 'true' || element('setting-timeout-error').hidden) {
+        return 'invalid-timeout';
+      }
+      element('setting-timeout').value = '120';
+      element('setting-timeout').dispatchEvent(new Event('input'));
+      element('setting-timeout').dispatchEvent(new Event('change'));
+      await settingsSaveQueue;
+      if ((await bridge.state()).config.toaTimeout !== 120) return 'valid-timeout';
+
+      selectSettingsTab('providers');
+      const keyInput = element('setting-api-key');
+      const saveBtn = element('settings-save');
+      if (!saveBtn.disabled) return 'save-key-should-start-disabled';
+      keyInput.value = 'sk-unsaved-draft';
+      keyInput.dispatchEvent(new Event('input'));
+      if (saveBtn.disabled) return 'save-key-should-enable';
+
+      element('toggle-api-key-visibility').click();
+      if (keyInput.type !== 'text') return 'toggle-key-show';
+      element('toggle-api-key-visibility').click();
+      if (keyInput.type !== 'password') return 'toggle-key-hide';
+
+      element('setting-thinking').click();
+      await settingsSaveQueue;
+      if (keyInput.value !== 'sk-unsaved-draft') return 'unrelated-toggle-consumed-api-key';
+
+      saveBtn.click();
+      await settingsSaveQueue;
+      if (keyInput.value !== '' || !saveBtn.disabled || !(await bridge.state()).hasApiKey) return 'explicit-key-save';
+
+      const search = element('settings-search');
+      search.value = '超时';
+      search.dispatchEvent(new Event('input'));
+      if (element('settings-search-results').hidden || !element('settings-search-results').textContent.includes('ToA')) {
+        return 'search-zh';
+      }
+      search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      if (activeSettingsTab !== 'general'
+        || document.querySelector('[data-setting-id="timeout"]').getAttribute('data-search-target') !== 'row') {
+        return 'search-reveal';
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      if (search.value !== '' || !element('settings-search-results').hidden || document.activeElement !== search) {
+        return 'escape-clears-search';
+      }
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      if (document.activeElement === search || !document.querySelector('#page-settings').classList.contains('active')) {
+        return 'escape-blurs-empty-search';
+      }
+
+      selectSettingsTab('about');
+      const clipboard = navigator.clipboard;
+      const writeText = Object.getOwnPropertyDescriptor(clipboard, 'writeText');
+      let copied = '';
+      try {
+        Object.defineProperty(clipboard, 'writeText', { configurable: true, value: async (text) => { copied = text; } });
+        element('about-version').focus();
+        element('about-version').click();
+        await Promise.resolve();
+      } finally {
+        if (writeText) Object.defineProperty(clipboard, 'writeText', writeText);
+        else delete clipboard.writeText;
+      }
+      if (copied !== 'Ya ' + state.version || !element('about-version').textContent.includes(t('copiedVersion'))) {
+        return 'about-copy';
+      }
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      if (document.querySelector('#page-settings').classList.contains('active')
+        || document.body.classList.contains('settings-open')) return 'escape-closes-settings';
+      return 'ok';
+    })()`) as string;
+    if (passed !== "ok") throw new Error(`Settings experience check failed at: ${passed}.`);
+    if (process.platform === "darwin" && keychainKeyCaptured !== "sk-unsaved-draft") {
+      throw new Error("macOS Keychain API key save path was not exercised.");
+    }
+  } finally {
+    controller.saveMacosApiKey = originalSaveMacosApiKey;
+    controller.saveModelConfig(originalConfig);
+    controller.setLanguage(originalLanguage);
+    installApplicationMenu(originalLanguage);
+    controller.setStream(originalStream);
+    (controller as unknown as { sessionApiKey?: string }).sessionApiKey = originalSessionKey;
+    await window.webContents.executeJavaScript(`(async () => {
+      state = await bridge.state();
+      selectSettingsTab('general');
+      applyLanguage();
+      fillSettings();
+      switchPage('workspace');
+      setStatus(t('ready'));
+    })()`);
+  }
 }
 
 async function verifyApplicationMenu(window: BrowserWindow): Promise<void> {
@@ -2095,6 +2308,7 @@ app.whenReady().then(async () => {
     await verifyIcmHistory(window);
     await verifyReloadDuringTask(window);
     await verifyResponsiveLayout(window);
+    await verifySettingsExperience(window);
     await verifyAccountLogin(window);
     await verifyMemory(window, smokeRoot!);
     if (process.env.YA_SMOKE_CAPTURE) await captureGuiPage(window, process.env.YA_SMOKE_CAPTURE);

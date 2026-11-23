@@ -16,9 +16,11 @@ Existing sessions from earlier versions appear one-for-one as individual bots wi
 
 ### Manage local history
 
-In **Settings → Storage management**, choose **Bot conversations**, **Task records (desktop and CLI)**, or **Action audit logs**. Select records older than 30 or 90 days, or enter a custom range. Both dates are included in your local time zone. To clean up one day, use the same start and end date.
+In **Settings → Storage**, choose **Bot conversations**, **Task records (desktop and CLI)**, or **Action audit logs**. Select records older than 30 or 90 days, or enter a custom range. Both dates are included in your local time zone. To clean up one day, use the same start and end date.
 
 Review the matching count and estimated size, then choose **Delete selected records…** and confirm. Deleting a conversation turn also removes its saved diffs and command output. Older turns use their linked task's date when available. Choose **Unknown date** to review the count and size of records that lack a date.
+
+![Desktop Settings Storage management view at 920x680](../assets/ya-gui-settings-storage-en.png)
 
 Each bot keeps its own draft, replies, and command output locally across restarts. Follow-up requests include that bot's earlier user messages and completed replies—including requests that failed before an answer, so you can configure an API key or sign in and ask Ya to continue. Application errors and incomplete replies are excluded from model context; prior image attachments must be selected again to resend their contents.
 
@@ -56,7 +58,7 @@ After a successful `local_write` or `local_edit`, the conversation shows an expa
 
 ## Workspace controls, vision, and shortcuts
 
-- **Keyboard shortcuts:** `Ctrl/⌘+N` creates a new bot, `Ctrl/⌘+B` collapses the sidebar, and `Ctrl/⌘+Enter` sends a task.
+- **Keyboard shortcuts:** `Ctrl/⌘+N` creates a new bot, `Ctrl/⌘+B` collapses the sidebar, `Ctrl/⌘+,` opens or closes **Settings** (organized into **General**, **Account & API**, **Storage**, **Shortcuts**, and **About** with live search via `Ctrl/⌘+F`), and `Ctrl/⌘+Enter` sends a task.
 - **Model & reasoning controls:** live in the workspace and save immediately when changed. `deepseek-flash` is selected by default and supports native vision input; select it before attaching images.
 - **Task options menu:** in the composer; toggles local tools, web search, Tree of Agents (ToA), and image detail (`low` is labeled as API-key-only while signed in with a DeepSeek account).
 - **Additional capabilities:** bilingual English / 简体中文 UI, DeepSeek platform account sign-in and settings, memory review and pruning, ToA preflight, streaming simple answers, vision image selection, and audit-history management.

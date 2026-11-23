@@ -75,6 +75,10 @@ ya ask --local --exec --workspace "$PWD" "修复这个 bug 并运行相关测试
 
 ![Allowed folder panel in the desktop app showing Choose folder and Revoke access](assets/ya-gui-bot-folder-access.png)
 
+**设置界面** — 分类导航、实时搜索与即时保存（`Ctrl/⌘+,`）：
+
+![Desktop settings view in Chinese dark mode showing Account and API key controls](assets/ya-gui-settings-providers-zh-CN.png)
+
 </details>
 
 关于旧会话迁移、diff 截断上限、原子写入与 IPC 隔离的完整说明，请查看[桌面应用指南](docs/desktop.md)。
@@ -193,7 +197,7 @@ src/
     preload.ts             上下文隔离的窄化 preload 桥接
     renderer.ts            桌面交互与安全 DOM 渲染
     controller.ts          GUI 状态与共享服务门面
-    layout.ts / menu.ts / markdown.ts / shared.ts / index.html / styles.css
+    layout.ts / menu.ts / markdown.ts / shared.ts / index.html / styles.css / settings.css
     folder-grants.ts       按 Bot 授权目录与原生目录标识校验
     folder-io.ts           目录作用域下的读/写/编辑/搜索
     folder-move.ts         目录作用域下的移动/重命名与原子暂存

@@ -6,6 +6,7 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Ya</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="settings.css">
     <script src="renderer.js" defer></script>
   </head>
   <body>
@@ -182,65 +183,400 @@
       </section>
 
       <section id="page-settings" class="page" aria-labelledby="settings-tab">
-        <div class="settings-layout">
-          <section class="panel form-card">
-            <h1 data-i18n="settings">Settings</h1>
-            <div class="form-grid">
-              <label><span data-i18n="language">Language</span><select id="setting-language"><option value="en">English</option><option value="zh-CN">简体中文</option></select></label>
-              <label class="check setting-check"><input id="setting-thinking" type="checkbox"><span data-i18n="thinking">Thinking</span></label>
-              <label><span data-i18n="budget">ToA token budget</span><input id="setting-budget" type="number" min="1000" max="16000" step="100"></label>
-              <label><span data-i18n="timeout">ToA timeout (seconds)</span><input id="setting-timeout" type="number" min="30" max="180"></label>
-              <label class="check setting-check span-two"><input id="setting-stream" type="checkbox"><span data-i18n="stream">Stream simple answers</span></label>
+        <div class="settings-screen" tabindex="-1">
+          <div class="settings-shell">
+            <div class="settings-mobile-nav">
+              <button id="settings-back-mobile" class="settings-back" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                <span data-i18n="backToApp">Back to app</span>
+              </button>
+              <label for="settings-mobile-select" class="sr-only" data-i18n="settings">Settings</label>
+              <select id="settings-mobile-select" class="settings-mobile-select">
+                <option value="general" data-i18n="settingsTabGeneral">General</option>
+                <option value="providers" data-i18n="settingsTabProviders">Account &amp; API</option>
+                <option value="storage" data-i18n="settingsTabStorage">Storage</option>
+                <option value="shortcuts" data-i18n="settingsTabShortcuts">Shortcuts</option>
+                <option value="about" data-i18n="settingsTabAbout">About</option>
+              </select>
             </div>
-          </section>
-          <section class="panel form-card">
-            <h1 data-i18n="deepseekAccount">DeepSeek platform account</h1>
-            <div id="account-state" class="state-pill" role="status" aria-live="polite">Signed out</div>
-            <p class="muted" data-i18n="accountHint">Sign in and authorize Ya in your browser to use your DeepSeek platform account.</p>
-            <div class="account-actions">
-              <button id="account-login" class="primary" type="button" data-i18n="accountLogin">Sign in with DeepSeek</button>
-              <button id="account-cancel" type="button" data-i18n="accountCancel" hidden>Cancel sign-in</button>
-              <button id="account-logout" type="button" data-i18n="accountLogout" hidden>Sign out</button>
+
+            <aside class="settings-sidebar" aria-label="Settings navigation">
+              <div class="settings-nav">
+                <button id="settings-back" class="settings-back" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                  <span data-i18n="backToApp">Back to app</span>
+                </button>
+
+                <div class="settings-search" data-has-query="false">
+                  <div class="settings-search-input-wrap">
+                    <svg class="settings-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <label for="settings-search" class="sr-only" data-i18n="searchSettings">Search settings</label>
+                    <input id="settings-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="searchSettings" placeholder="Search settings">
+                    <span id="settings-search-shortcut" class="settings-search-shortcut" aria-hidden="true">⌘F</span>
+                    <button id="settings-search-clear" class="settings-search-clear" type="button" hidden data-i18n-label="clearSearch">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg>
+                    </button>
+                  </div>
+                  <div id="settings-search-results" class="settings-search-results" role="listbox" hidden></div>
+                </div>
+
+                <div class="settings-nav-groups" role="tablist" aria-orientation="vertical">
+                  <div class="settings-nav-group">
+                    <button id="settings-nav-general" class="settings-nav-item active" type="button" role="tab" aria-selected="true" aria-controls="settings-panel-general" data-settings-tab="general">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m4 0h5M4 17h3m4 0h9"/><circle cx="13" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+                      <span data-i18n="settingsTabGeneral">General</span>
+                    </button>
+                    <button id="settings-nav-providers" class="settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-providers" data-settings-tab="providers">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m11 12 9-9M17 6l3 3M14.5 8.5l2 2"/></svg>
+                      <span data-i18n="settingsTabProviders">Account &amp; API</span>
+                    </button>
+                    <button id="settings-nav-storage" class="settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-storage" data-settings-tab="storage">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+                      <span data-i18n="settingsTabStorage">Storage</span>
+                    </button>
+                  </div>
+                  <div class="settings-nav-group">
+                    <button id="settings-nav-shortcuts" class="settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-shortcuts" data-settings-tab="shortcuts">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+                      <span data-i18n="settingsTabShortcuts">Shortcuts</span>
+                    </button>
+                    <button id="settings-nav-about" class="settings-nav-item" type="button" role="tab" aria-selected="false" aria-controls="settings-panel-about" data-settings-tab="about">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+                      <span data-i18n="settingsTabAbout">About</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <div class="settings-content">
+              <section id="settings-panel-general" class="settings-panel" role="tabpanel" aria-labelledby="settings-nav-general" data-settings-panel="general">
+                <div class="settings-tab-header">
+                  <div class="settings-tab-header-row">
+                    <div class="settings-tab-heading">
+                      <h2 class="settings-tab-title" data-i18n="settingsTabGeneral">General</h2>
+                      <p class="settings-tab-description" data-i18n="generalDescription">Customize language, streaming behavior, and Tree of Agents reasoning limits.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-tab-body">
+                  <section class="settings-section" aria-labelledby="settings-section-interface">
+                    <h3 id="settings-section-interface" class="settings-section-title" data-i18n="sectionInterface">Interface</h3>
+                    <div data-component="settings-list">
+                      <div data-component="settings-row" data-setting-id="language">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-language" data-slot="settings-row-title" data-i18n="language">Language</label>
+                          <p data-slot="settings-row-description" data-i18n="languageDescription">Change the display language and native application menu.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <select id="setting-language"><option value="en">English</option><option value="zh-CN">简体中文</option></select>
+                        </div>
+                      </div>
+                      <div data-component="settings-row" data-setting-id="stream">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-stream" data-slot="settings-row-title" data-i18n="stream">Stream simple answers</label>
+                          <p data-slot="settings-row-description" data-i18n="streamDescription">Stream plain chat replies incrementally when local tools, web search, and ToA are off.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <label class="settings-switch" data-component="switch">
+                            <input id="setting-stream" type="checkbox" role="switch">
+                            <span data-slot="switch-control" aria-hidden="true"><span data-slot="switch-thumb"></span></span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-section" aria-labelledby="settings-section-reasoning">
+                    <h3 id="settings-section-reasoning" class="settings-section-title" data-i18n="sectionReasoning">Reasoning &amp; Tree of Agents</h3>
+                    <div data-component="settings-list">
+                      <div data-component="settings-row" data-setting-id="thinking">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-thinking" data-slot="settings-row-title" data-i18n="thinking">Thinking</label>
+                          <p data-slot="settings-row-description" data-i18n="thinkingDescription">Enable extended model thinking when supported by the selected model.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <label class="settings-switch" data-component="switch">
+                            <input id="setting-thinking" type="checkbox" role="switch">
+                            <span data-slot="switch-control" aria-hidden="true"><span data-slot="switch-thumb"></span></span>
+                          </label>
+                        </div>
+                      </div>
+                      <div data-component="settings-row" data-setting-id="budget">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-budget" data-slot="settings-row-title" data-i18n="budget">ToA token budget</label>
+                          <p data-slot="settings-row-description" data-i18n="budgetDescription">Cumulative completion token budget across Tree of Agents workers (1,000–16,000).</p>
+                        </div>
+                        <div data-slot="settings-row-control" class="settings-row-control--column">
+                          <div class="settings-number-field">
+                            <input id="setting-budget" type="number" min="1000" max="16000" step="100" aria-describedby="setting-budget-error">
+                            <span class="settings-unit">tokens</span>
+                          </div>
+                          <p id="setting-budget-error" class="settings-field-error" role="alert" hidden></p>
+                        </div>
+                      </div>
+                      <div data-component="settings-row" data-setting-id="timeout">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-timeout" data-slot="settings-row-title" data-i18n="timeout">ToA timeout (seconds)</label>
+                          <p data-slot="settings-row-description" data-i18n="timeoutDescription">Maximum wall-clock time for a Tree of Agents run before aborting workers (30–180 s).</p>
+                        </div>
+                        <div data-slot="settings-row-control" class="settings-row-control--column">
+                          <div class="settings-number-field">
+                            <input id="setting-timeout" type="number" min="30" max="180" step="1" aria-describedby="setting-timeout-error">
+                            <span class="settings-unit" data-i18n="secondsUnit">s</span>
+                          </div>
+                          <p id="setting-timeout-error" class="settings-field-error" role="alert" hidden></p>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <p class="settings-footnote" data-i18n="modelLocationNote">Model and reasoning effort are selected directly in the workspace composer and save automatically.</p>
+                </div>
+              </section>
+
+              <section id="settings-panel-providers" class="settings-panel" role="tabpanel" aria-labelledby="settings-nav-providers" data-settings-panel="providers" hidden>
+                <div class="settings-tab-header">
+                  <div class="settings-tab-header-row">
+                    <div class="settings-tab-heading">
+                      <h2 class="settings-tab-title" data-i18n="settingsTabProviders">Account &amp; API</h2>
+                      <p class="settings-tab-description" data-i18n="providersDescription">Manage your DeepSeek platform account session and API key credentials.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-tab-body">
+                  <section class="settings-section" aria-labelledby="settings-section-account">
+                    <h3 id="settings-section-account" class="settings-section-title" data-i18n="deepseekAccount">DeepSeek platform account</h3>
+                    <div data-component="settings-list" data-variant="catalog">
+                      <div class="settings-provider-row" data-setting-id="account">
+                        <div class="settings-provider-lead">
+                          <div class="settings-provider-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3Z"/></svg>
+                          </div>
+                          <div class="settings-provider-copy">
+                            <div class="settings-provider-main">
+                              <span class="settings-provider-name" data-i18n="deepseekPlatform">DeepSeek Platform</span>
+                              <span id="account-state" class="settings-badge" role="status" aria-live="polite">Signed out</span>
+                            </div>
+                            <p data-slot="settings-row-description" data-i18n="accountHint">Sign in and authorize Ya in your browser to use your DeepSeek platform account.</p>
+                          </div>
+                        </div>
+                        <div class="account-actions">
+                          <button id="account-login" class="primary" type="button" data-i18n="accountLogin">Sign in with DeepSeek</button>
+                          <button id="account-cancel" class="secondary" type="button" data-i18n="accountCancel" hidden>Cancel sign-in</button>
+                          <button id="account-logout" class="secondary" type="button" data-i18n="accountLogout" hidden>Sign out</button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-section" aria-labelledby="settings-section-api-key">
+                    <h3 id="settings-section-api-key" class="settings-section-title" data-i18n="apiKey">DeepSeek API key</h3>
+                    <div data-component="settings-list">
+                      <div data-component="settings-row" data-align="start" data-setting-id="api-key">
+                        <div data-slot="settings-row-copy">
+                          <div data-slot="settings-row-title">
+                            <label for="setting-api-key" data-i18n="apiKeyLabel">API key</label>
+                            <span id="api-state" class="settings-badge" role="status">No API key configured</span>
+                          </div>
+                          <p data-slot="settings-row-description" data-i18n="apiKeyDescription">Used when not signed in with a DeepSeek platform account. Environment variable DEEPSEEK_API_KEY is also supported.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <div class="settings-secret-field">
+                            <div class="settings-secret-input-wrap">
+                              <input id="setting-api-key" type="password" autocomplete="off" data-i18n-placeholder="apiPlaceholder" placeholder="Leave blank to keep the current key">
+                              <button id="toggle-api-key-visibility" class="settings-secret-toggle" type="button" aria-pressed="false" data-i18n-label="showApiKey">
+                                <svg class="icon-eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>
+                                <svg class="icon-eye-closed" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="m3 3 18 18M10.6 10.6a2.5 2.5 0 0 0 2.8 2.8M9.9 5.2A10.6 10.6 0 0 1 12 5c6.5 0 10 7 10 7a16.7 16.7 0 0 1-4.3 4.8M6.6 6.6C3.9 8.5 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 4.3-1"/></svg>
+                              </button>
+                            </div>
+                            <button id="settings-save" class="primary" type="button" data-i18n="saveApiKey" disabled>Save key</button>
+                          </div>
+                        </div>
+                      </div>
+                      <div id="setting-keychain-row" data-component="settings-row" data-setting-id="keychain">
+                        <div data-slot="settings-row-copy">
+                          <label for="setting-keychain" data-slot="settings-row-title" data-i18n="keychain">Save in macOS Keychain</label>
+                          <p data-slot="settings-row-description" data-i18n="keychainDescription">Store the key in macOS Keychain across restarts; turn off to keep it in memory for this session only.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <label id="setting-keychain-label" class="settings-switch" data-component="switch">
+                            <input id="setting-keychain" type="checkbox" role="switch" checked>
+                            <span data-slot="switch-control" aria-hidden="true"><span data-slot="switch-thumb"></span></span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section id="settings-panel-storage" class="settings-panel" role="tabpanel" aria-labelledby="settings-nav-storage" data-settings-panel="storage" hidden>
+                <div class="settings-tab-header">
+                  <div class="settings-tab-header-row">
+                    <div class="settings-tab-heading">
+                      <h2 class="settings-tab-title" data-i18n="storage">Storage management</h2>
+                      <p class="settings-tab-description" data-i18n="storageDescription">Preview and permanently delete older bot conversations, task records, or audit logs.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-tab-body">
+                  <section class="settings-section" aria-labelledby="storage-section-title">
+                    <h3 id="storage-section-title" class="settings-section-title" data-i18n="storageFilterSection">History cleanup</h3>
+                    <div data-component="settings-list">
+                      <div data-component="settings-row" data-setting-id="storage-kind">
+                        <div data-slot="settings-row-copy">
+                          <label for="storage-kind" data-slot="settings-row-title" data-i18n="storageCategory">History to manage</label>
+                          <p id="storage-scope" data-slot="settings-row-description"></p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <select id="storage-kind">
+                            <option value="chats" data-i18n="chatHistory">Bot conversations</option>
+                            <option value="tasks" data-i18n="taskHistory">Task records (desktop and CLI)</option>
+                            <option value="audit" data-i18n="auditHistory">Action audit logs</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div data-component="settings-row" data-setting-id="storage-period">
+                        <div data-slot="settings-row-copy">
+                          <label for="storage-period" data-slot="settings-row-title" data-i18n="dateRange">Date range</label>
+                          <p data-slot="settings-row-description" data-i18n="dateRangeDescription">Select a retention cutoff or inspect records within a custom local-date range.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <select id="storage-period">
+                            <option value="30" data-i18n="older30">Older than 30 days</option>
+                            <option value="90" data-i18n="older90">Older than 90 days</option>
+                            <option value="custom" data-i18n="customDates">Custom dates</option>
+                            <option value="undated" data-i18n="unknownDates">Unknown date</option>
+                            <option value="all" data-i18n="allDates">All dates</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div id="storage-custom-dates-row" data-component="settings-row" data-setting-id="storage-custom-dates" hidden>
+                        <div data-slot="settings-row-copy">
+                          <div data-slot="settings-row-title" data-i18n="customDates">Custom dates</div>
+                          <p data-slot="settings-row-description" data-i18n="customDatesDescription">Both start and end dates are inclusive in your local time zone.</p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <div class="settings-date-range">
+                            <label id="storage-from-field" class="settings-date-field" hidden><span data-i18n="dateFrom">From</span><input type="date" id="storage-from" required></label>
+                            <label id="storage-to-field" class="settings-date-field" hidden><span data-i18n="dateTo">Through</span><input type="date" id="storage-to" required></label>
+                          </div>
+                        </div>
+                      </div>
+                      <div data-component="settings-row" class="settings-row--storage-footer" data-setting-id="storage-summary">
+                        <div data-slot="settings-row-copy">
+                          <div data-slot="settings-row-title" data-i18n="selectedRecords">Selected records</div>
+                          <p id="storage-summary" data-slot="settings-row-description" role="status"></p>
+                        </div>
+                        <div data-slot="settings-row-control">
+                          <button id="storage-delete" class="danger" type="button" data-i18n="deleteSelected" disabled>Delete selected records…</button>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section id="settings-panel-shortcuts" class="settings-panel" role="tabpanel" aria-labelledby="settings-nav-shortcuts" data-settings-panel="shortcuts" hidden>
+                <div class="settings-tab-header">
+                  <div class="settings-tab-header-row">
+                    <div class="settings-tab-heading">
+                      <h2 class="settings-tab-title" data-i18n="settingsTabShortcuts">Shortcuts</h2>
+                      <p class="settings-tab-description" data-i18n="shortcutsDescription">Keyboard shortcuts available across the workspace and settings.</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="settings-tab-body">
+                  <section class="settings-section" aria-labelledby="shortcuts-section-workspace">
+                    <h3 id="shortcuts-section-workspace" class="settings-section-title" data-i18n="workspace">Workspace</h3>
+                    <div data-component="settings-list" class="settings-shortcuts-list">
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-new-bot">
+                        <span class="settings-shortcut-label" data-i18n="newBot">New bot</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd" data-shortcut-mod>⌘</kbd><kbd class="settings-kbd">N</kbd></span>
+                      </div>
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-toggle-sidebar">
+                        <span class="settings-shortcut-label" data-i18n="toggleSidebar">Toggle sidebar</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd" data-shortcut-mod>⌘</kbd><kbd class="settings-kbd">B</kbd></span>
+                      </div>
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-send">
+                        <span class="settings-shortcut-label" data-i18n="shortcutSendTask">Send message</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd" data-shortcut-mod>⌘</kbd><kbd class="settings-kbd">Enter</kbd></span>
+                      </div>
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-close-panel">
+                        <span class="settings-shortcut-label" data-i18n="shortcutCloseDrawer">Close side panel or menu</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd">Esc</kbd></span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-section" aria-labelledby="shortcuts-section-settings">
+                    <h3 id="shortcuts-section-settings" class="settings-section-title" data-i18n="settings">Settings</h3>
+                    <div data-component="settings-list" class="settings-shortcuts-list">
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-open-settings">
+                        <span class="settings-shortcut-label" data-i18n="shortcutOpenSettings">Open or close settings</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd" data-shortcut-mod>⌘</kbd><kbd class="settings-kbd">,</kbd></span>
+                      </div>
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-search-settings">
+                        <span class="settings-shortcut-label" data-i18n="searchSettings">Search settings</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd" data-shortcut-mod>⌘</kbd><kbd class="settings-kbd">F</kbd></span>
+                      </div>
+                      <div class="settings-shortcut-row" data-setting-id="shortcut-back-settings">
+                        <span class="settings-shortcut-label" data-i18n="shortcutBackToApp">Return to app (or clear search)</span>
+                        <span class="settings-shortcut-keys"><kbd class="settings-kbd">Esc</kbd></span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section id="settings-panel-about" class="settings-panel settings-panel--about" role="tabpanel" aria-labelledby="settings-nav-about" data-settings-panel="about" hidden>
+                <div class="settings-about-content">
+                  <div class="settings-about-emblem" aria-hidden="true"></div>
+                  <div class="settings-about-intro">
+                    <h2 class="settings-about-wordmark">Ya</h2>
+                    <button id="about-version" class="settings-about-version-btn" type="button" data-i18n-label="copyVersion">Ya</button>
+                  </div>
+                  <p class="settings-about-tagline" data-i18n="aboutTagline">A consent-first personal research agent with persistent named bots, scoped folder access, and local memory.</p>
+                  <div class="settings-about-meta" data-component="settings-list">
+                    <div data-component="settings-row" data-setting-id="about-platform">
+                      <div data-slot="settings-row-copy">
+                        <div data-slot="settings-row-title" data-i18n="aboutPlatformLabel">Platform</div>
+                        <p data-slot="settings-row-description" data-i18n="aboutIsolation">Context-isolated Electron desktop shell with local IPC validation.</p>
+                      </div>
+                      <div data-slot="settings-row-control">
+                        <span id="about-platform" class="settings-about-meta-value">Electron</span>
+                      </div>
+                    </div>
+                    <div data-component="settings-row" data-setting-id="about-license">
+                      <div data-slot="settings-row-copy">
+                        <div data-slot="settings-row-title" data-i18n="aboutLicenseLabel">License</div>
+                        <p data-slot="settings-row-description" data-i18n="aboutLicenseDesc">Open-source software distributed under the MIT License.</p>
+                      </div>
+                      <div data-slot="settings-row-control">
+                        <span class="settings-about-meta-value">MIT</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="settings-about-links">
+                    <button type="button" class="settings-about-link" data-external-url="https://github.com/ZedingZhang/ya-agent">
+                      <span>GitHub</span>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+                    </button>
+                    <button type="button" class="settings-about-link" data-external-url="https://github.com/ZedingZhang/ya-agent/blob/main/docs/desktop.md">
+                      <span data-i18n="aboutDocs">Desktop guide</span>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+                    </button>
+                    <button type="button" class="settings-about-link" data-external-url="https://github.com/ZedingZhang/ya-agent/issues">
+                      <span data-i18n="aboutIssues">Report issue</span>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </section>
             </div>
-          </section>
-          <section class="panel form-card">
-            <h1 data-i18n="apiKey">DeepSeek API key</h1>
-            <div id="api-state" class="state-pill">No API key configured</div>
-            <input id="setting-api-key" type="password" autocomplete="off" data-i18n-placeholder="apiPlaceholder" placeholder="Leave blank to keep the current key">
-            <label id="setting-keychain-label" class="check"><input id="setting-keychain" type="checkbox" checked><span data-i18n="keychain">Save in macOS Keychain</span></label>
-          </section>
-          <section class="panel form-card span-two" aria-labelledby="storage-title">
-            <h1 id="storage-title" data-i18n="storage">Storage management</h1>
-            <div class="form-grid">
-              <label><span data-i18n="storageCategory">History to manage</span>
-                <select id="storage-kind">
-                  <option value="chats" data-i18n="chatHistory">Bot conversations</option>
-                  <option value="tasks" data-i18n="taskHistory">Task records (desktop and CLI)</option>
-                  <option value="audit" data-i18n="auditHistory">Action audit logs</option>
-                </select>
-              </label>
-              <label><span data-i18n="dateRange">Date range</span>
-                <select id="storage-period">
-                  <option value="30" data-i18n="older30">Older than 30 days</option>
-                  <option value="90" data-i18n="older90">Older than 90 days</option>
-                  <option value="custom" data-i18n="customDates">Custom dates</option>
-                  <option value="undated" data-i18n="unknownDates">Unknown date</option>
-                  <option value="all" data-i18n="allDates">All dates</option>
-                </select>
-              </label>
-              <label id="storage-from-field" hidden><span data-i18n="dateFrom">From</span><input type="date" id="storage-from" required></label>
-              <label id="storage-to-field" hidden><span data-i18n="dateTo">Through</span><input type="date" id="storage-to" required></label>
-            </div>
-            <p id="storage-scope" class="muted"></p>
-            <div class="storage-actions">
-              <span id="storage-summary" role="status"></span>
-              <button id="storage-delete" class="danger" type="button" data-i18n="deleteSelected" disabled>Delete selected records…</button>
-            </div>
-          </section>
-          <div class="settings-footer">
-            <span id="about-version" class="muted">Ya</span>
-            <button id="settings-save" class="primary" type="button" data-i18n="saveSettings">Save settings</button>
           </div>
+          <div id="settings-feedback" class="settings-feedback" role="status" aria-live="polite" hidden></div>
         </div>
       </section>
     </main>

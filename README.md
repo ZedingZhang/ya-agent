@@ -75,6 +75,10 @@ ya ask --local --exec --workspace "$PWD" "Fix the bug and run the relevant tests
 
 ![Allowed folder panel in the desktop app showing Choose folder and Revoke access](assets/ya-gui-bot-folder-access.png)
 
+**Settings** — categorized full-frame Settings view with live bilingual search and immediate auto-save (`Ctrl/⌘+,`):
+
+![Desktop settings view showing vertical navigation, search bar, and General settings](assets/ya-gui-settings-general-en.png)
+
 </details>
 
 See the [Desktop application guide](docs/desktop.md) for full details on bot migration, diff limits, atomic writes, and IPC isolation.
@@ -193,7 +197,7 @@ src/
     preload.ts             narrow context-isolated preload bridge
     renderer.ts            desktop interaction and safe DOM rendering
     controller.ts          GUI state and shared-service facade
-    layout.ts / menu.ts / markdown.ts / shared.ts / index.html / styles.css
+    layout.ts / menu.ts / markdown.ts / shared.ts / index.html / styles.css / settings.css
     folder-grants.ts       per-bot directory grants and native identity checks
     folder-io.ts           folder-scoped filesystem read/write/edit/search
     folder-move.ts         folder-scoped move/rename and atomic staging
