@@ -7,8 +7,6 @@ import { loadApiKey, saveApiKey } from "../keychain";
 import {
   LocalWorkspace,
   type TaskWorkspace,
-  auditHistoryEntries,
-  deleteAuditHistory,
   auditLogFiles,
   auditLogTotalBytes,
   clearAuditLogs,
@@ -28,7 +26,6 @@ import {
 } from "../memory";
 import { shouldUseWeb, type RunResult } from "../orchestrator";
 import {
-  defaultTaskStore,
   getTask,
   listTasks,
   reconcileInterruptedTasks,
@@ -41,7 +38,6 @@ import type { BotProfile, ConversationMessage, UserImageContentPart, WebMode } f
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
 import type { FolderAccess, WorkspaceListing } from "./shared";
-import type { HistoryEntry, StoredHistoryKind } from "../history";
 import { loadAccountCredential, type DeepSeekCredential } from "../credentials";
 
 export const LANGUAGES = ["en", "zh-CN"] as const;
@@ -351,14 +347,6 @@ export class GuiController {
 
   auditLogs(): string[] {
     return auditLogFiles();
-  }
-
-  historyEntries(kind: StoredHistoryKind): HistoryEntry[] {
-    return kind === "tasks" ? defaultTaskStore().historyEntries() : auditHistoryEntries();
-  }
-
-  deleteHistory(kind: StoredHistoryKind, ids: readonly string[]): number {
-    return kind === "tasks" ? defaultTaskStore().deleteHistory(ids) : deleteAuditHistory(ids);
   }
 
   auditLogTotalBytes(): number {

@@ -186,3 +186,14 @@ python -m pip install octop-memory==1.0.4
 ## Durable task history
 
 The shared service persists task identity and lifecycle records (`running`, `completed`, `failed`, `cancelled`, `interrupted`) locally across CLI and GUI processes using cross-process file locking (`task-store-lock.ts`) and automatic secret redaction before persisting metadata.
+
+Use `ya history clear` to clean up finished CLI and desktop task records. Choose `audit` to clean up individual actions across active and archived logs. Bot conversation transcripts, saved diffs and command output can be managed in desktop **Settings → Storage management**.
+
+```sh
+ya history clear --dry-run                                 # Preview tasks older than 30 days (default)
+ya history clear tasks --older-than 90                     # Confirm in an interactive terminal
+ya history clear audit --from 2026-11-01 --to 2026-11-07   # Include both local calendar dates
+ya history clear audit --undated --dry-run                 # Preview records with unknown dates
+```
+
+Use either date bound on its own for an open-ended range, or use the same date twice to select a single day. Task dates refer to when the task started. Audit dates refer to when the action occurred. `--all` selects every eligible record in the chosen category, including undated records. The command displays the matching count and estimated bytes before prompting. Use `--yes` for non-interactive deletion.

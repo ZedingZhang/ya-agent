@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { Command, CommanderError, Option } from "commander";
+import { Argument, Command, CommanderError, Option } from "commander";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { assertImageInputSupported, isReasoningEffort, ModelConfig, REASONING_EFFORTS, loadConfig, modelId, saveConfig, type ReasoningEffort } from "./config";
 import { DeepSeekClient, DeepSeekError } from "./deepseek";
 import { imageContentPartsFromSources } from "./images";
+import { deleteStoredHistory, listStoredHistory, type StoredHistoryKind } from "./history";
 import { loadApiKey, saveApiKey } from "./keychain";
 import {
   LocalWorkspace,
@@ -408,6 +409,71 @@ async function memoryPrune(includeCandidates: boolean, yes: boolean, io: CliIo):
   write(io.stdout, `Deleted ${removed.length} memory card(s).\n`);
 }
 
+interface HistoryClearOptions {
+  from?: string;
+  to?: string;
+  olderThan: string;
+  all?: boolean;
+  undated?: boolean;
+  dryRun?: boolean;
+  yes?: boolean;
+}
+
+function parseHistoryDate(value: string): Date {
+  const day = new Date(value + "T00:00:00");
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value) || day.getDate() !== Number(value.slice(-2))) {
+    throw new Error("Use a valid local date in YYYY-MM-DD format.");
+  }
+  return day;
+}
+
+function historyPeriod(options: HistoryClearOptions): { label: string; matches: (timestamp: number | null) => boolean } {
+  if (options.all) return { label: "all dates", matches: () => true };
+  if (options.undated) return { label: "unknown date", matches: (timestamp) => timestamp === null };
+  let start = -Infinity;
+  let end = Infinity;
+  let label: string;
+  if (options.from !== undefined || options.to !== undefined) {
+    if (options.from !== undefined) start = parseHistoryDate(options.from).getTime();
+    if (options.to !== undefined) {
+      const last = parseHistoryDate(options.to);
+      if (start > last.getTime()) throw new Error("--from must be on or before --to.");
+      last.setDate(last.getDate() + 1);
+      end = last.setHours(0, 0, 0, 0);
+    }
+    label = [options.from && `from ${options.from}`, options.to && `through ${options.to}`].filter(Boolean).join(" ");
+  } else {
+    const days = Number(options.olderThan);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    end = cutoff.setHours(0, 0, 0, 0);
+    if (!/^\d+$/u.test(options.olderThan) || days < 1 || !Number.isFinite(end)) {
+      throw new Error("--older-than must be a positive whole number of days within the supported date range.");
+    }
+    label = `older than ${days} days`;
+  }
+  return { label, matches: (timestamp) => timestamp !== null && timestamp >= start && timestamp < end };
+}
+
+async function clearHistory(kind: StoredHistoryKind, options: HistoryClearOptions, io: CliIo): Promise<void> {
+  const period = historyPeriod(options);
+  const selected = listStoredHistory(kind).filter((entry) => period.matches(entry.timestamp));
+  const bytes = selected.reduce((total, entry) => total + entry.bytes, 0);
+  const scope = kind === "tasks" ? "Finished task records (CLI and desktop)" : "Action audit records";
+  write(io.stdout, `${scope}, ${period.label}: ${selected.length} matching record(s), approximately ${bytes} bytes.\n`);
+  if (options.dryRun || selected.length === 0) return;
+  if (!options.yes) {
+    if (!io.stdin.isTTY) throw new Error("ya history clear requires --yes for non-interactive deletion. Use --dry-run to preview.");
+    const answer = await io.prompt("Permanently delete these records? [y/N] ");
+    if (!/^(y|yes)$/iu.test(answer.trim())) {
+      write(io.stdout, "No records deleted.\n");
+      return;
+    }
+  }
+  const count = deleteStoredHistory(kind, selected.map((entry) => entry.id));
+  write(io.stdout, `Deleted ${count} record(s).\n`);
+}
+
 async function auditClear(yes: boolean, io: CliIo): Promise<void> {
   const logs = auditLogFiles();
   if (logs.length === 0) {
@@ -543,6 +609,19 @@ export function createProgram(io: CliIo, runtime: CliRuntime): Command {
     .option("--include-candidates", "Also delete candidate cards", false)
     .option("--yes", "Confirm deletion without an interactive prompt", false)
     .action(async (options: { includeCandidates: boolean; yes: boolean }) => memoryPrune(options.includeCandidates, options.yes, io));
+
+  const history = program.command("history").description("Manage local task and action audit history");
+  history.command("clear")
+    .description("Preview and delete history by local calendar date")
+    .addArgument(new Argument("[kind]", "History category").choices(["tasks", "audit"]).default("tasks"))
+    .option("--from <YYYY-MM-DD>", "First local date to include")
+    .option("--to <YYYY-MM-DD>", "Last local date to include")
+    .addOption(new Option("--older-than <days>", "Select records before the day this many days ago").default("30").conflicts(["from", "to"]))
+    .addOption(new Option("--undated", "Select records with an unknown date").conflicts(["from", "to", "olderThan"]))
+    .addOption(new Option("--all", "Select all dates, including unknown dates").conflicts(["from", "to", "olderThan", "undated"]))
+    .option("--dry-run", "Show the matching count and estimated size, then exit")
+    .option("--yes", "Confirm deletion without an interactive prompt")
+    .action((kind: StoredHistoryKind, options: HistoryClearOptions) => clearHistory(kind, options, io));
 
   const audit = program.command("audit").description("Manage local action audit logs");
   audit.command("clear")

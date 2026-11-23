@@ -105,6 +105,7 @@ ya memory review
 ya memory approve CARD_ID
 ya auth-status deepseek
 ya audit clear
+ya history clear tasks --older-than 30 --dry-run  # 预览 30 天以前的已结束任务
 ```
 
 ### 模型列表

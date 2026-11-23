@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, localConfirm, type CliIo } from "../src/cli";
 import { configPath, loadConfig } from "../src/config";
 import { DeepSeekClient, type ModelReply } from "../src/deepseek";
-import { appendAuditRecord, auditLogFiles, LocalWorkspace, type LocalAction } from "../src/local";
+import { appendAuditRecord, auditHistoryEntries, auditLogFiles, LocalWorkspace, type LocalAction } from "../src/local";
 import { createCandidate, listCards, setStatus } from "../src/memory";
-import { listTasks } from "../src/service";
+import { listTasks, TaskStore } from "../src/service";
 import type { ChatMessage, ToolDefinition, ToolHandler } from "../src/types";
 import { tempHome, type TempHome } from "./helpers";
 
@@ -569,6 +569,66 @@ describe("CLI", () => {
     const capture = fakeIo();
     expect(await main(["audit", "clear", "--yes"], { io: capture.io })).toBe(0);
     expect(capture.stdout.output).toContain("No audit logs to delete");
+  });
+
+  it("previews and clears finished tasks within an inclusive local date range", async () => {
+    let time = new Date(2025, 10, 2);
+    const store = new TaskStore({ now: () => time });
+    function finishTask() {
+      const record = store.create({ objective: "CLI cleanup fixture" });
+      store.transition(record.id, "completed");
+      return record.id;
+    }
+    finishTask();
+    time = new Date(2025, 10, 2, 23, 59, 59, 999);
+    finishTask();
+    time = new Date(2025, 10, 3);
+    const later = finishTask();
+    time = new Date(2025, 10, 2);
+    const running = store.create({ objective: "Active task" });
+    const args = ["history", "clear", "--from", "2025-11-02", "--to", "2025-11-02"];
+    const preview = fakeIo();
+    expect(await main([...args, "--dry-run"], { io: preview.io })).toBe(0);
+    expect(preview.stdout.output).toMatch(/2 matching record\(s\), approximately [1-9]\d* bytes/u);
+    expect(store.list()).toHaveLength(4);
+    expect(await main(args, { io: fakeIo().io })).toBe(2);
+    expect(await main(args, { io: fakeIo(true, ["n"]).io })).toBe(0);
+    expect(store.list()).toHaveLength(4);
+    expect(await main([...args, "--yes"], { io: fakeIo().io })).toBe(0);
+    expect(store.list().map(({ id }) => id)).toEqual([later, running.id]);
+    store.transition(running.id, "completed");
+  });
+
+  it("limits audit cleanup to the preview even when more matching records arrive during confirmation", async () => {
+    const timestamp = "2000-02-29T12:00:00Z";
+    appendAuditRecord({ timestamp, marker: "previewed" });
+    appendAuditRecord({ marker: "unknown date" });
+    appendAuditRecord({ timestamp: new Date().toISOString() });
+    const capture = fakeIo(true);
+    capture.io.prompt = async () => {
+      appendAuditRecord({ timestamp, marker: "new" });
+      return "yes";
+    };
+    expect(await main(["history", "clear", "audit"], { io: capture.io })).toBe(0);
+    expect(capture.stdout.output).toContain("older than 30 days: 1 matching record(s)");
+    const [file] = auditLogFiles();
+    expect(readFileSync(file!, "utf8")).not.toContain("previewed");
+    expect(readFileSync(file!, "utf8")).toContain('"new"');
+    expect(await main(["history", "clear", "audit", "--undated", "--yes"], { io: fakeIo().io })).toBe(0);
+    expect(auditHistoryEntries().map(({ timestamp }) => timestamp)).not.toContain(null);
+    expect(await main(["history", "clear", "audit", "--all", "--yes"], { io: fakeIo().io })).toBe(0);
+    expect(auditHistoryEntries()).toEqual([]);
+  });
+
+  it.each([
+    ["--from", "2025-02-29"], ["--to", ""], ["--from", "2025-01-02", "--to", "2025-01-01"],
+    ["--older-than", "0"], ["--older-than", "1.5"], ["--all", "--to", "2025-01-01"],
+    ["--undated", "--older-than", "30"], ["--all", "--undated"],
+  ])("rejects invalid or conflicting history filters (%s %s)", async (...flags) => {
+    appendAuditRecord({ timestamp: "2024-01-01T00:00:00Z" });
+    const result = await main(["history", "clear", "audit", ...flags, "--yes"], { io: fakeIo().io });
+    expect(result).not.toBe(0);
+    expect(auditHistoryEntries()).toHaveLength(1);
   });
 
   it("persists CLI task lifecycle records through the shared service without storing credentials", async () => {

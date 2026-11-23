@@ -28,6 +28,7 @@ import { DuplicateMemoryError, MemoryLimitError, memoryPath, type MemoryKind } f
 import type { RunResult } from "../orchestrator";
 import { runTask, TaskStore } from "../service";
 import { appendAuditRecord } from "../local";
+import { deleteStoredHistory, listStoredHistory } from "../history";
 import { VERSION } from "../version";
 import type { ChatMessage, ConversationMessage } from "../types";
 import { createFileChange } from "../file-diff";
@@ -562,7 +563,7 @@ function registerIpc(): void {
   ipcMain.handle("history:list", (event, kind: unknown) => {
     assertTrustedSender(event);
     if (kind !== "tasks" && kind !== "audit") throw new Error("Invalid history category.");
-    return controller.historyEntries(kind);
+    return listStoredHistory(kind);
   });
   ipcMain.handle("history:delete", (event, kind: unknown, ids: unknown) => {
     assertTrustedSender(event);
@@ -570,7 +571,7 @@ function registerIpc(): void {
     if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string" && id.length > 0 && id.length <= 128)) {
       throw new Error("Invalid history selection.");
     }
-    return controller.deleteHistory(kind, ids);
+    return deleteStoredHistory(kind, ids);
   });
   ipcMain.handle("external:open", async (event, raw: unknown) => {
     assertTrustedSender(event);
