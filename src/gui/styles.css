@@ -173,7 +173,6 @@ input, select { min-height: 34px; padding: 6px 9px; }
 .task-controls select { min-width: 80px; min-height: 28px; font-size: 11px; }
 .check { display: inline-flex; align-items: center; gap: 7px; color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .check input { width: 15px; min-height: 15px; margin: 0; accent-color: var(--accent); box-shadow: none; }
-.composer-hint { display: flex; min-width: 0; justify-content: flex-end; gap: 12px; padding: 7px 4px 0; color: var(--muted); font-size: 11px; }
 .image-controls { display: flex; align-items: center; gap: 8px; padding: 0 8px 10px; }
 .image-list { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; }
 .image-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; padding: 3px 8px; background: var(--surface-muted); border: 1px solid var(--border); border-radius: 6px; }
