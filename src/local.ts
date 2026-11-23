@@ -868,7 +868,9 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
 
   private async editUnscoped(path: string, input: unknown, revision: string, edits: unknown, confirm: ConfirmEdit): Promise<EditResult> {
     const previous = readText(path);
-    const identity = statSync(path);
+    // Filesystem IDs can exceed Number.MAX_SAFE_INTEGER on Windows.
+    const identity = statSync(path, { bigint: true });
+    if (identity.ino === 0n) throw new Error(`Cannot verify file identity before editing: ${path}`);
     if (textRevision(previous) !== revision) throw new Error("File revision changed. Read again before editing.");
     // Publishing replaces the file, and a rename needs only directory write permission, so without
     // this check Ya would silently rewrite files the user marked read-only.
@@ -884,13 +886,14 @@ export class LocalWorkspace<Scope extends ScopedFolderIO | undefined = undefined
       if (this.resolveInput(input) !== path || this.resolveInput(path) !== path) {
         throw new Error("File path changed during approval. Read again before editing.");
       }
-      const current = statSync(path);
+      const current = statSync(path, { bigint: true });
       if (current.dev !== identity.dev || current.ino !== identity.ino || current.mode !== identity.mode || readText(path) !== previous) {
         throw new Error("File changed during approval. Read again before editing.");
       }
     };
     checkUnchanged();
-    publishEdit(path, content, identity, checkUnchanged);
+    const metadata = { uid: Number(identity.uid), gid: Number(identity.gid), mode: Number(identity.mode) };
+    publishEdit(path, content, metadata, checkUnchanged);
     return { approved, previous, content, count };
   }
 
