@@ -209,10 +209,33 @@
             <input id="setting-api-key" type="password" autocomplete="off" data-i18n-placeholder="apiPlaceholder" placeholder="Leave blank to keep the current key">
             <label id="setting-keychain-label" class="check"><input id="setting-keychain" type="checkbox" checked><span data-i18n="keychain">Save in macOS Keychain</span></label>
           </section>
-          <section class="panel form-card">
-            <h1 data-i18n="clearAudit">Clear audit history</h1>
-            <div id="audit-state" class="muted">0 · 0 bytes</div>
-            <button id="audit-clear" class="danger align-start" type="button" data-i18n="clearAudit">Clear audit history</button>
+          <section class="panel form-card span-two" aria-labelledby="storage-title">
+            <h1 id="storage-title" data-i18n="storage">Storage management</h1>
+            <div class="form-grid">
+              <label><span data-i18n="storageCategory">History to manage</span>
+                <select id="storage-kind">
+                  <option value="chats" data-i18n="chatHistory">Bot conversations</option>
+                  <option value="tasks" data-i18n="taskHistory">Task records (desktop and CLI)</option>
+                  <option value="audit" data-i18n="auditHistory">Action audit logs</option>
+                </select>
+              </label>
+              <label><span data-i18n="dateRange">Date range</span>
+                <select id="storage-period">
+                  <option value="30" data-i18n="older30">Older than 30 days</option>
+                  <option value="90" data-i18n="older90">Older than 90 days</option>
+                  <option value="custom" data-i18n="customDates">Custom dates</option>
+                  <option value="undated" data-i18n="unknownDates">Unknown date</option>
+                  <option value="all" data-i18n="allDates">All dates</option>
+                </select>
+              </label>
+              <label id="storage-from-field" hidden><span data-i18n="dateFrom">From</span><input type="date" id="storage-from" required></label>
+              <label id="storage-to-field" hidden><span data-i18n="dateTo">Through</span><input type="date" id="storage-to" required></label>
+            </div>
+            <p id="storage-scope" class="muted"></p>
+            <div class="storage-actions">
+              <span id="storage-summary" role="status"></span>
+              <button id="storage-delete" class="danger" type="button" data-i18n="deleteSelected" disabled>Delete selected records…</button>
+            </div>
           </section>
           <div class="settings-footer">
             <span id="about-version" class="muted">Ya</span>

@@ -295,6 +295,8 @@ td.wide { white-space: normal; overflow-wrap: anywhere; }
 .small-button { min-height: 26px; padding: 4px 7px; font-size: 11px; }
 .settings-layout { display: grid; align-content: start; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 14px; padding-bottom: 20px; }
 .settings-layout > :first-child { grid-row: span 2; }
+.storage-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+#storage-scope, #storage-summary { font-size: 13px; }
 .settings-footer { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; padding: 4px 2px; }
 .state-pill { display: inline-block; margin-bottom: 12px; padding: 3px 10px; color: var(--active-text); background: var(--active-bg); border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); border-radius: 999px; font-size: 12px; font-weight: 500; }
 .form-card > input[type="password"] { width: 100%; margin-bottom: 12px; }

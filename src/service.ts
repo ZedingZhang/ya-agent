@@ -67,7 +67,7 @@ export interface RunTaskOptions {
 
 const defaultStores = new Map<string, TaskStore>();
 
-function defaultTaskStore(): TaskStore {
+export function defaultTaskStore(): TaskStore {
   const path = tasksPath();
   let store = defaultStores.get(path);
   if (!store) {

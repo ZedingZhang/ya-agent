@@ -21,9 +21,11 @@ import {
   MAX_TEXT_BYTES,
   LocalWorkspace,
   appendAuditRecord,
+  auditHistoryEntries,
   auditLogFiles,
   auditLogTotalBytes,
   clearAuditLogs,
+  deleteAuditHistory,
   setAuditLogMaxBytesForTesting,
   type LocalAction,
   type LocalActivity,
@@ -431,5 +433,23 @@ describe("local workspace", () => {
     writeFileSync(join(home.path, "actions.1.jsonl"), '{"record":0}\n');
     expect(clearAuditLogs().map((path) => basename(path))).toEqual(["actions.jsonl", "actions.1.jsonl"]);
     expect(auditLogFiles()).toEqual([]);
+  });
+
+  it("deletes previewed audit lines even after rotation and preserves later or undated bytes", () => {
+    const first = { timestamp: "2025-02-01T23:59:59Z", operation: "写入" };
+    const next = { timestamp: "2025-02-02T00:00:00Z", operation: "read" };
+    appendAuditRecord(first);
+    appendAuditRecord(next);
+    const [entry] = auditHistoryEntries();
+    expect(entry).toMatchObject({ timestamp: Date.parse(first.timestamp), bytes: Buffer.byteLength(JSON.stringify(first)) + 1 });
+    renameSync(join(home.path, "actions.jsonl"), join(home.path, "actions.1.jsonl"));
+    appendAuditRecord(first);
+    const damaged = Buffer.from([0xff, 0x0a]);
+    writeFileSync(join(home.path, "actions.2.jsonl"), damaged);
+    expect(deleteAuditHistory([entry!.id])).toBe(1);
+    expect(deleteAuditHistory([entry!.id])).toBe(0);
+    expect(readFileSync(join(home.path, "actions.jsonl"), "utf8")).toBe(JSON.stringify(first) + "\n");
+    expect(auditHistoryEntries().map((item) => item.timestamp)).toEqual([Date.parse(first.timestamp), Date.parse(next.timestamp), null]);
+    expect(readFileSync(join(home.path, "actions.2.jsonl"))).toEqual(damaged);
   });
 });
