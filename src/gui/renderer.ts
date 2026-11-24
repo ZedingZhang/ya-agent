@@ -337,7 +337,7 @@ let currentDirectory = ".";
 let directoryGrantVersion: string | undefined;
 let onTaskStarted: (() => void) | undefined;
 let activeAnswer: HTMLElement | undefined;
-let activeAnswerText = "";
+let activePreview: StreamingAnswerPreview | undefined;
 let pendingAction: { id: string; action: LocalAction; responding?: boolean } | undefined;
 let approvalReturnFocus: HTMLElement | undefined;
 let actionExpired = false;
@@ -1104,6 +1104,11 @@ function fileRow(name: string, type: string): HTMLButtonElement {
   return row;
 }
 
+function scrollTimelineToEnd(): void {
+  const timeline = element<HTMLDivElement>("timeline");
+  timeline.scrollTop = timeline.scrollHeight;
+}
+
 function appendTask(task: string, images: SelectedImage[]): HTMLElement {
   const timeline = element<HTMLDivElement>("timeline");
   setTimelineEmpty(false);
@@ -1131,7 +1136,7 @@ function appendTask(task: string, images: SelectedImage[]): HTMLElement {
   answer.textContent = t("working");
   turn.append(prompt, answer);
   timeline.append(turn);
-  timeline.scrollTop = timeline.scrollHeight;
+  scrollTimelineToEnd();
   return answer;
 }
 
@@ -1180,7 +1185,6 @@ async function runTask(): Promise<void> {
     currentBot.turns.push(activeTurn);
     activeAnswer = appendTask(task, taskImages);
     activeAnswer.parentElement!.dataset.turnId = turnId;
-    activeAnswerText = "";
     lastAnswer = "";
     actionExpired = false;
     activities = [];
@@ -1238,7 +1242,6 @@ async function runTask(): Promise<void> {
     }
     const { turn, answer } = beginTurn();
     if (result.taskId) turn.taskId = result.taskId;
-    activeAnswerText = result.content;
     turn.answer = result.content;
     turn.status = "complete";
     turn.partial = result.partial;
@@ -1251,6 +1254,10 @@ async function runTask(): Promise<void> {
       warning.textContent = t("partial");
       answer.append(warning);
     }
+    if (activePreview) {
+      activePreview.cancel();
+      scrollTimelineToEnd();
+    }
     element<HTMLButtonElement>("learn-button").disabled = false;
     setStatus(t("done"));
   } catch (error) {
@@ -1260,6 +1267,7 @@ async function runTask(): Promise<void> {
     }
     const turn = activeTurn;
     const answer = activeAnswer;
+    activePreview?.cancel();
     answer.classList.remove("busy-answer");
     answer.classList.add("error-copy");
     answer.textContent = `${t("taskError")}: ${errorText(error)}`;
@@ -1272,6 +1280,7 @@ async function runTask(): Promise<void> {
     }
     if (local && drawerPage === "files") void renderFiles();
   } finally {
+    activePreview = undefined;
     clearPendingAction();
     onTaskStarted = undefined;
     if (activeTurn) {
@@ -1339,8 +1348,7 @@ function renderCommand(event: ShellCommandEvent): void {
       log.stderr.textContent = [result.stderr, result.error].filter(Boolean).join("\n");
     }
   }
-  const timeline = element<HTMLDivElement>("timeline");
-  timeline.scrollTop = timeline.scrollHeight;
+  scrollTimelineToEnd();
 }
 
 async function stopTask(): Promise<void> {
@@ -2426,136 +2434,6 @@ function learnFromAnswer(): void {
   input.focus();
 }
 
-function renderMarkdown(container: HTMLElement, markdown: string): void {
-  container.replaceChildren();
-  const lines = markdown.replace(/[\x00-\x08\x0B-\x1F\x7F]/gu, "").split(/\r?\n/u);
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-    if (line.trimStart().startsWith("```")) {
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !(lines[index] ?? "").trimStart().startsWith("```")) {
-        if (/^\s{0,3}#{1,6}\s+/u.test(lines[index] ?? "") && code.length > 0) break;
-        code.push(lines[index] ?? "");
-        index += 1;
-      }
-      if ((lines[index] ?? "").trimStart().startsWith("```")) index += 1;
-      const pre = document.createElement("pre");
-      const codeNode = document.createElement("code");
-      codeNode.textContent = code.join("\n");
-      pre.append(codeNode);
-      container.append(pre);
-      continue;
-    }
-    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/u);
-    if (heading) {
-      const level = Math.min(6, heading[1]?.length ?? 2);
-      const node = document.createElement(`h${level}`);
-      appendInline(node, heading[2] ?? "");
-      container.append(node);
-      index += 1;
-      continue;
-    }
-    if (line.includes("|") && index + 1 < lines.length && tableSeparator(lines[index + 1] ?? "")) {
-      const table = document.createElement("table");
-      const headers = tableCells(line);
-      const head = document.createElement("thead");
-      const headerRow = document.createElement("tr");
-      headers.forEach((header) => {
-        const cell = document.createElement("th");
-        appendInline(cell, header);
-        headerRow.append(cell);
-      });
-      head.append(headerRow);
-      table.append(head);
-      const body = document.createElement("tbody");
-      index += 2;
-      while (index < lines.length && (lines[index] ?? "").includes("|") && (lines[index] ?? "").trim()) {
-        const row = document.createElement("tr");
-        tableCells(lines[index] ?? "").forEach((value) => {
-          const cell = document.createElement("td");
-          appendInline(cell, value);
-          row.append(cell);
-        });
-        body.append(row);
-        index += 1;
-      }
-      table.append(body);
-      container.append(table);
-      continue;
-    }
-    if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/u.test(line)) {
-      container.append(document.createElement("hr"));
-      index += 1;
-      continue;
-    }
-    const list = line.match(/^\s*(?:[-+*]|\d+[.)])\s+(.+)$/u);
-    if (list) {
-      const ul = document.createElement("ul");
-      while (index < lines.length) {
-        const item = (lines[index] ?? "").match(/^\s*(?:[-+*]|\d+[.)])\s+(.+)$/u);
-        if (!item) break;
-        const li = document.createElement("li");
-        appendInline(li, item[1] ?? "");
-        ul.append(li);
-        index += 1;
-      }
-      container.append(ul);
-      continue;
-    }
-    const quote = line.match(/^\s*>\s?(.*)$/u);
-    const paragraph = document.createElement(quote ? "blockquote" : "p");
-    appendInline(paragraph, quote?.[1] ?? line);
-    container.append(paragraph);
-    index += 1;
-  }
-}
-
-function appendInline(parent: HTMLElement, text: string): void {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|(?<!\*)\*[^*]+\*(?!\*)|\[[^\]]+\]\([^\s)]+\))/gu;
-  let position = 0;
-  for (const match of text.matchAll(pattern)) {
-    const start = match.index;
-    if (start > position) parent.append(document.createTextNode(text.slice(position, start)));
-    const token = match[0];
-    if (token.startsWith("`")) {
-      const code = document.createElement("code");
-      code.textContent = token.slice(1, -1);
-      parent.append(code);
-    } else if (token.startsWith("**") || token.startsWith("__")) {
-      const strong = document.createElement("strong");
-      strong.textContent = token.slice(2, -2);
-      parent.append(strong);
-    } else if (token.startsWith("*")) {
-      const emphasis = document.createElement("em");
-      emphasis.textContent = token.slice(1, -1);
-      parent.append(emphasis);
-    } else {
-      const link = token.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/u);
-      const anchor = document.createElement("a");
-      anchor.href = "#";
-      anchor.textContent = link?.[1] ?? token;
-      anchor.addEventListener("click", (event) => {
-        event.preventDefault();
-        if (link?.[2]) void bridge.openExternal(link[2]);
-      });
-      parent.append(anchor);
-    }
-    position = start + token.length;
-  }
-  if (position < text.length) parent.append(document.createTextNode(text.slice(position)));
-}
-
-function tableCells(line: string): string[] {
-  return line.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map((cell) => cell.trim());
-}
-
-function tableSeparator(line: string): boolean {
-  const cells = tableCells(line);
-  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/u.test(cell));
-}
-
 function renderPendingMutation(turn: ConversationTurn, container: HTMLElement): void {
   const history = turn.committedActivities ?? [];
   if (!history.some((item) => item.status === "pending")) return;
@@ -2853,12 +2731,10 @@ function registerEvents(): void {
       applyCommittedOutcome(event.outcome);
     } else if (event.type === "started") {
       onTaskStarted?.();
-    } else if (event.type === "content" && activeAnswer) {
-      activeAnswerText += event.content;
-      if (activeTurn) activeTurn.answer = activeAnswerText;
-      activeAnswer.classList.remove("busy-answer");
-      renderMarkdown(activeAnswer, activeAnswerText);
-      element<HTMLDivElement>("timeline").scrollTop = element<HTMLDivElement>("timeline").scrollHeight;
+    } else if (event.type === "content" && activeTurn && activeAnswer) {
+      activeTurn.answer += event.content;
+      activePreview ??= new StreamingAnswerPreview(activeAnswer, scrollTimelineToEnd);
+      activePreview.append(event.content);
       scheduleSessionSave();
     } else if (event.type === "activity") {
       activities.push(event.activity);
