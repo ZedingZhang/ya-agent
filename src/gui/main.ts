@@ -1114,10 +1114,12 @@ async function verifyStorageManagement(window: BrowserWindow): Promise<void> {
 
 async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
   const originalController = controller;
+  const firstChunk = "A streamed ";
+  const markdown = ["A streamed reply.", "- one", "- two", "```ts", "const n = 1;", "```"].join("\n");
   controller = new GuiController(async (_apiKey, task, _config, options = {}) => {
     if (task === "smoke-error") throw new Error("Expected smoke failure");
-    options.onContent?.("A streamed ");
-    if (task === "smoke-stream") {
+    if (task === "smoke-stream" || task === "smoke-stream-characters") {
+      options.onContent?.(firstChunk);
       const delivered = await window.webContents.executeJavaScript(`(async () => {
         const deadline = Date.now() + 2000;
         while (Date.now() < deadline) {
@@ -1128,8 +1130,10 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
         return false;
       })()`) as boolean;
       if (!delivered) throw new Error("The live streaming chunk did not reach the running conversation.");
+      const rest = markdown.slice(firstChunk.length);
+      for (const chunk of task === "smoke-stream" ? [rest] : rest) options.onContent?.(chunk);
+      return { content: markdown, mode: "single", usage: {} };
     }
-    options.onContent?.("reply.");
     if (options.localWorkspace) {
       await options.localWorkspace.write({ path: "smoke.txt", content: "Approved smoke task" });
       if (task === "smoke-approval") {
@@ -1155,11 +1159,25 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#web-mode').value = 'off';
       syncWorkspaceControls();
-      input.value = 'smoke-stream';
-      await runTask();
-      const streamed = currentBot.turns[0].answer === 'A streamed reply.'
-        && currentBot.turns[0].status === 'complete'
-        && document.querySelector('#timeline').textContent.includes('A streamed reply.');
+      const markdown = ${JSON.stringify(markdown)};
+      const expected = document.createElement('div');
+      renderMarkdown(expected, markdown);
+      const render = renderMarkdown;
+      try {
+        for (const task of ['smoke-stream', 'smoke-stream-characters']) {
+          const parsed = [];
+          renderMarkdown = (container, text) => { parsed.push(text); render(container, text); };
+          input.value = task;
+          await runTask();
+          const turn = currentBot.turns.at(-1);
+          const answer = document.querySelector('#timeline .turn:last-child .answer-card');
+          if (turn.status !== 'complete' || turn.answer !== markdown || answer?.innerHTML !== expected.innerHTML
+            || !answer.querySelector('p + ul + pre > code') || answer.querySelectorAll('li').length !== 2) {
+            throw new Error(task + ' produced a different final answer.');
+          }
+          if (parsed.length !== 1 || parsed[0] !== markdown) throw new Error(task + ' parsed intermediate Markdown.');
+        }
+      } finally { renderMarkdown = render; }
       document.querySelector('#local-enabled').checked = true;
       syncWorkspaceControls();
       input.value = 'smoke-approval';
@@ -1210,7 +1228,7 @@ async function verifyTaskHistory(window: BrowserWindow): Promise<void> {
         && document.querySelector('#timeline .file-change .addition .diff-code').textContent === 'Approved smoke task';
       bots = bots.filter((session) => session.id !== testSession.id);
       await selectBot(originalSession);
-      return { streamed, automaticApproval, folderLocked, navigationLocked, approvalCompleted, changeDelivered,
+      return { automaticApproval, folderLocked, navigationLocked, approvalCompleted, changeDelivered,
         changesPanel, deniedChanges, failureSaved, historyRestored };
       } catch (error) { return { failure: errorText(error) }; }
     })()`) as Record<string, boolean | string>;
