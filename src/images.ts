@@ -1,6 +1,6 @@
 import { closeSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, resolve } from "node:path";
+import { expandHome } from "./fs-utils";
 import type { ImageDetail, UserImageContentPart } from "./types";
 
 export const MAX_IMAGES_PER_REQUEST = 600;
@@ -38,12 +38,6 @@ export function detectImageMimeType(bytes: Uint8Array): SupportedImageMimeType |
     return "image/webp";
   }
   return undefined;
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homedir(), value.slice(2));
-  return value;
 }
 
 function imageHeader(path: string): Buffer {

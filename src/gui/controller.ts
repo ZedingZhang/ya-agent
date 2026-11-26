@@ -1,18 +1,14 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { FolderAccessChangedError, FolderGrants, type FolderGrant } from "./folder-grants";
 import { GrantedFolderIO } from "./folder-io";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { auditLogFiles, auditLogTotalBytes, clearAuditLogs } from "../audit-log";
 import { ModelConfig, dataHome, loadConfig, saveConfig, type ModelId, type ReasoningEffort } from "../config";
+import { atomicWriteFileSync } from "../fs-utils";
+import { isRecord } from "../guards";
 import { loadApiKey, saveApiKey } from "../keychain";
-import {
-  LocalWorkspace,
-  type TaskWorkspace,
-  auditLogFiles,
-  auditLogTotalBytes,
-  clearAuditLogs,
-  type LocalActivity,
-  type LocalConfirmation,
-} from "../local";
+import { LocalWorkspace, type TaskWorkspace } from "../local";
+import type { LocalActivity, LocalConfirmation } from "../local-tools";
 import {
   cardsToPrune,
   createCandidate,
@@ -85,10 +81,6 @@ export function preferencesPath(): string {
   return join(dataHome(), "gui.json");
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 export function loadPreferences(): GuiPreferences {
   const path = preferencesPath();
   if (!existsSync(path)) return { language: "en", stream: true };
@@ -105,11 +97,7 @@ export function loadPreferences(): GuiPreferences {
 
 export function savePreferences(language: Language, stream = true): void {
   if (!LANGUAGES.includes(language)) throw new Error("GUI language must be en or zh-CN.");
-  const path = preferencesPath();
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ language, stream }, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  atomicWriteFileSync(preferencesPath(), `${JSON.stringify({ language, stream }, null, 2)}\n`);
 }
 
 function describeFolderAccess(grant?: FolderGrant, validWorkspace?: string): FolderAccess {

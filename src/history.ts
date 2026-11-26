@@ -1,4 +1,4 @@
-import { auditHistoryEntries, deleteAuditHistory } from "./local";
+import { auditHistoryEntries, deleteAuditHistory } from "./audit-log";
 import { TaskStore } from "./tasks";
 
 export type StoredHistoryKind = "tasks" | "audit";

@@ -1,11 +1,8 @@
 import type { DeepSeekPayload, ModelReply } from "./deepseek";
+import { isRecord } from "./guards";
 import type { ChatMessage, TokenUsage, ToolCall } from "./types";
 
 export const ACCOUNT_API_URL = "https://api.deepseek.com/anthropic/v1/messages";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function contentBlocks(message: ChatMessage): Record<string, unknown>[] {
   if (message.role === "assistant" && Array.isArray(message.account_content)) {

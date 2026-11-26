@@ -3,7 +3,8 @@ import { accessSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, open
 import { basename, dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { dataHome } from "../config";
 import { applyTextEdits, textRevision } from "../edits";
-import { isSensitive, listDirectory, MAX_TEXT_BYTES, openRegularFile, readOpenedText, readRegularText, searchFiles, type ConfirmEdit, type EditResult, type ScopedFolderIO } from "../local";
+import { isSensitive, listDirectory, MAX_TEXT_BYTES, openRegularFile, readOpenedText, readRegularText, searchFiles } from "../local-files";
+import type { ConfirmEdit, EditResult, ScopedFolderIO } from "../local-tools";
 import { folderPathResolver } from "./scoped-path";
 import { publishEdit } from "../publish-edit";
 import { moveInGrantedFolder, publishNewFile } from "./folder-move";

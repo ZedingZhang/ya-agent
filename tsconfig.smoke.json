@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "tests/gui-smoke",
+    "outDir": "dist/smoke",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["tests/gui-smoke/**/*.ts"],
+  "exclude": ["dist", "node_modules"]
+}

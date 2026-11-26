@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
-import { isSensitive } from "../local";
+import { isSensitive } from "../local-files";
 import type { FolderGrant } from "./folder-grants";
 
 const denied = "Path must remain inside the authorized workspace.";

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { atomicWriteFileSync, expandHome } from "./fs-utils";
+import { isRecord } from "./guards";
 import {
   ModelConfig,
   VALID_MODELS,
@@ -165,16 +166,6 @@ export class StaleTaskRecordError extends Error {
 
 export function tasksPath(): string {
   return join(dataHome(), "tasks.json");
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homedir(), value.slice(2));
-  return value;
 }
 
 export function validateWorkspaceIdentity(value: string): string {
@@ -548,17 +539,12 @@ export class TaskStore {
       tasks: [...tasks],
     };
     const payload = `${JSON.stringify(envelope, null, 2)}\n`;
-    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      if (this.customWriteFile) {
-        this.customWriteFile(temporary, payload);
-      } else {
-        writeFileSync(temporary, payload, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      }
-      renameSync(temporary, file);
-    } finally {
-      rmSync(temporary, { force: true });
-    }
+    atomicWriteFileSync(file, payload, {
+      mode: 0o600,
+      flag: "wx",
+      ensureDir: false,
+      ...(this.customWriteFile ? { write: (temporary, content) => this.customWriteFile!(temporary, String(content)) } : {}),
+    });
   }
 
   private mutateStore<T>(

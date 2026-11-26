@@ -14,7 +14,7 @@ import {
 import { FolderGrants, folderIdentityExecutable, nativeIdentity } from "../src/gui/folder-grants";
 import { GrantedFolderIO } from "../src/gui/folder-io";
 import { initialWindowGeometry } from "../src/gui/layout";
-import { markdownLines } from "../src/gui/markdown";
+import { answerDisplayText, parseInlineTokens, parseMarkdownBlocks } from "../src/gui/renderer/answer-view";
 import { appendAuditRecord, LocalWorkspace } from "../src/local";
 import { DeepSeekClient } from "../src/deepseek";
 import { TaskStore, runTask } from "../src/service";
@@ -927,7 +927,7 @@ describe("GUI presentation helpers", () => {
   });
 
   it("parses headings, inline styles, links, lists, quotes, code, and tables", () => {
-    const lines = markdownLines(`## Heading
+    const blocks = parseMarkdownBlocks(`## Heading
 **bold** and *italic* and \`code\` and [link](https://example.com)
 - item
 > quote
@@ -938,15 +938,24 @@ const x = 1;
 | --- | --- |
 | Ya | Agent |
 `);
-    expect(lines[0]).toEqual([{ text: "Heading", tags: ["heading"] }]);
-    expect(lines.flat().some((span) => span.tags.includes("bold") && span.text === "bold")).toBe(true);
-    expect(lines.flat().some((span) => span.tags.includes("italic") && span.text === "italic")).toBe(true);
-    expect(lines.flat().some((span) => span.tags.includes("link") && span.url === "https://example.com")).toBe(true);
-    expect(lines.flat().some((span) => span.tags.includes("code_block") && span.text === "const x = 1;")).toBe(true);
-    expect(lines.flat().some((span) => span.text === "Name: ")).toBe(true);
+    expect(blocks[0]).toEqual({ kind: "heading", level: 2, text: "Heading" });
+    expect(blocks[1]).toEqual({ kind: "paragraph", text: "**bold** and *italic* and `code` and [link](https://example.com)" });
+    expect(parseInlineTokens((blocks[1] as { text: string }).text)).toEqual([
+      { kind: "bold", text: "bold" },
+      { kind: "text", text: " and " },
+      { kind: "italic", text: "italic" },
+      { kind: "text", text: " and " },
+      { kind: "code", text: "code" },
+      { kind: "text", text: " and " },
+      { kind: "link", text: "link", url: "https://example.com" },
+    ]);
+    expect(blocks[2]).toEqual({ kind: "list", items: ["item"] });
+    expect(blocks[3]).toEqual({ kind: "quote", text: "quote" });
+    expect(blocks[4]).toEqual({ kind: "code", lines: ["const x = 1;"] });
+    expect(blocks[5]).toEqual({ kind: "table", headers: ["Name", "Value"], rows: [["Ya", "Agent"]] });
   });
 
-  it("removes terminal controls before GUI rendering", () => {
-    expect(markdownLines("safe\u001b[31m text\u0007")).toEqual([[{ text: "safe text", tags: [] }]]);
+  it("removes control characters before GUI rendering", () => {
+    expect(answerDisplayText("safe\u001b[31m text\u0007\nnext")).toBe("safe[31m text\nnext");
   });
 });
