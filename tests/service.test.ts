@@ -131,7 +131,7 @@ describe("conversation context in model requests", () => {
       return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }));
     };
     await runTask("test-key", "继续", new ModelConfig(), {
-      history, webMode: "off", clientFactory: (key) => new DeepSeekClient(key, fetcher),
+      history, webMode: "auto", clientFactory: (key) => new DeepSeekClient(key, fetcher),
     });
     expect(requests).toHaveLength(2);
     for (const messages of requests) expect(messages.slice(1)).toEqual([...history, { role: "user", content: "继续" }]);

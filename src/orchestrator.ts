@@ -205,7 +205,7 @@ export async function singleAgent(
     const remaining = draft.slice(emittedLength);
     if (remaining) onContent(remaining);
     const result = await applyIcm(client, task, config,
-      { content: reply.content, mode: "single", usage: reply.usage }, reserve, webSearch, images, conversation);
+      { content: reply.content, mode: "single", usage: reply.usage }, reserve, webMode, webSearch, images, conversation);
     const content = stripIcmMarkers(result.content);
     const supplement = content.slice(draft.length);
     if (supplement) onContent(supplement);
@@ -217,7 +217,7 @@ export async function singleAgent(
     result.commands = [...localWorkspace.commandResults];
     return { ...result, content: stripIcmMarkers(result.content) };
   }
-  return applyIcm(client, task, config, result, reserve, webSearch, images, conversation);
+  return applyIcm(client, task, config, result, reserve, webMode, webSearch, images, conversation);
 }
 
 export async function toaAgent(
@@ -274,6 +274,7 @@ Evidence packets:\n${JSON.stringify(packets.filter((packet) => packet !== undefi
     config,
     { content: reply.content, mode: "toa", usage, partial: failures.length > 0 },
     icmReserve,
+    "on",
     webSearch,
     images,
     conversation,
@@ -301,13 +302,16 @@ async function applyIcm(
   config: ModelConfig,
   result: RunResult,
   reserve: number,
+  webMode: WebMode,
   webSearch: ToolHandler,
   images: UserImageContentPart[],
   conversation: TaskConversation,
   signal?: AbortSignal,
   budget?: CompletionBudget,
 ): Promise<RunResult> {
-  if (!icmFollowUpNeeded(result.content)) return { ...result, content: stripIcmMarkers(result.content) };
+  if (webMode === "off" || !icmFollowUpNeeded(result.content)) {
+    return { ...result, content: stripIcmMarkers(result.content) };
+  }
   const instruction = `The prior draft identifies one material evidence gap. Use web_search only if it can
 resolve that gap. Return a short, source-backed supplement and do not repeat the full answer.
 Prior draft:\n${result.content}`;

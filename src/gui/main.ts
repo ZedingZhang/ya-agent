@@ -1415,7 +1415,7 @@ async function verifyIcmHistory(window: BrowserWindow): Promise<void> {
       const session = createBot(); await selectBot(session);
       document.querySelector('#local-enabled').checked = false;
       document.querySelector('#toa-enabled').checked = false;
-      document.querySelector('#web-mode').value = 'off'; syncWorkspaceControls();
+      document.querySelector('#web-mode').value = 'auto'; syncWorkspaceControls();
       document.querySelector('#task-input').value = 'Check answer cleanup'; await runTask();
       const answer = currentBot.turns.at(-1).answer;
       return { id: session.id, originalId, clean: answer.includes('Evidence supplement:') && !answer.toLowerCase().includes('[icm_gap]') };

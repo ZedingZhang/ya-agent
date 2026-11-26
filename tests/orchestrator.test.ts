@@ -80,6 +80,32 @@ describe("agent orchestration", () => {
     expect(client.streamed).toBe(true);
   });
 
+  it.each([false, true])("honors Web Off when a single-agent draft flags an evidence gap (streaming=%s)", async (streaming) => {
+    const client = new FakeClient();
+    const visible: string[] = [];
+    const draft = "Need more evidence.[ICM_GAP]";
+    client.completeStream = async (_messages, _config, _maxTokens, onContent) => {
+      onContent(draft);
+      return reply(draft);
+    };
+    const run = client.runWithTools.bind(client);
+    client.runWithTools = async (...args) => {
+      await run(...args);
+      return reply(draft);
+    };
+
+    const result = await singleAgent(
+      client, "Explain recursion", new ModelConfig(), "off",
+      streaming ? (chunk) => visible.push(chunk) : undefined,
+    );
+
+    expect(result.content).toBe("Need more evidence.");
+    expect(result.usage.icm_follow_up).toBeUndefined();
+    expect(client.calls).toHaveLength(streaming ? 0 : 1);
+    if (streaming) expect(visible.join("")).toBe(result.content);
+    else expect(client.calls[0]?.tools).toBeUndefined();
+  });
+
   it.each(Array.from({ length: "[ICM_GAP]".length + 1 }, (_, index) => index))(
     "filters an ICM marker split at offset %i and emits one supplement", async (offset) => {
       const client = new FakeClient();
@@ -96,7 +122,7 @@ describe("agent orchestration", () => {
         expect(maxTokens).toBeLessThanOrEqual(1_024);
         return { ...reply("Supplement"), usage: { output_tokens: 3 } };
       };
-      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "auto", (text) => output.push(text));
       expect(result.content).toBe("Draft  tail\n\nEvidence supplement:\nSupplement");
       expect(output.join("")).toBe(result.content);
       expect(client.calls).toHaveLength(1);
@@ -147,7 +173,7 @@ describe("agent orchestration", () => {
         return reply(draft);
       };
       client.runWithTools = async (messages) => { client.calls.push({ messages }); return reply("Supplement [ICM_GAP]"); };
-      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+      const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "auto", (text) => output.push(text));
       expect(result.content).toBe(`${clean}\n\nEvidence supplement:\nSupplement `);
       expect(output.join(""), `split offset ${offset}`).toBe(result.content);
       expect(client.calls).toHaveLength(1);
@@ -166,7 +192,7 @@ describe("agent orchestration", () => {
       expect(output.join("")).toBe("Start ");
       return reply(`Start ${prefix}${tail}`);
     };
-    const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "off", (text) => output.push(text));
+    const result = await singleAgent(client, "Explain recursion", new ModelConfig(), "auto", (text) => output.push(text));
     expect(result.content).toBe("Start  end\n\nEvidence supplement:\nanswer");
     expect(output.join("")).toBe(result.content);
     expect(client.calls).toHaveLength(1);
@@ -256,7 +282,7 @@ describe("agent orchestration", () => {
       client.calls.push({ messages });
       return reply(client.calls.length === 1 ? "Draft [icm_gap]" : "Source-backed supplement");
     };
-    const result = await singleAgent(client, "Research a topic", new ModelConfig(), "off");
+    const result = await singleAgent(client, "Research a topic", new ModelConfig(), "on");
     expect(result.content).toBe("Draft \n\nEvidence supplement:\nSource-backed supplement");
     expect(result.usage).toHaveProperty("icm_follow_up");
     expect(client.calls).toHaveLength(2);
@@ -280,7 +306,7 @@ describe("agent orchestration", () => {
       ? new LocalWorkspace(home.path, () => true, undefined, { commandsEnabled: mode === "command" }) : undefined;
     const chunks: string[] = [];
     const result = mode === "toa" ? await toaAgent(client, "Explain this", new ModelConfig(), 1, () => "[]")
-      : await singleAgent(client, "Explain this", new ModelConfig(), mode === "web" ? "on" : "off",
+      : await singleAgent(client, "Explain this", new ModelConfig(), mode === "web" ? "on" : "auto",
         mode === "stream" ? (chunk) => chunks.push(chunk) : undefined, workspace, () => "[]");
     expect(result.content).not.toMatch(/\[icm_gap\]/iu);
     expect(result.content).toContain("Draft  and  and .");
