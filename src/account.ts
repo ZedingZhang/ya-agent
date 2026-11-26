@@ -6,6 +6,7 @@ import { abortable } from "./cancellation";
 import { clearAccountCredential, DEEPSEEK_PLATFORM, loadAccountCredential, saveAccountCredential,
   type AccountCredential } from "./credentials";
 import type { FetchLike } from "./deepseek";
+import { isRecord } from "./guards";
 import { VERSION } from "./version";
 
 export interface AccountLoginOptions {
@@ -15,10 +16,6 @@ export interface AccountLoginOptions {
   fetcher?: FetchLike;
   timeoutMs?: number;
   saveCredential?: (credential: AccountCredential) => void;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function clientHeaders(locale = "en"): Record<string, string> {

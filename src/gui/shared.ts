@@ -2,7 +2,7 @@ import type { ModelId, ReasoningEffort } from "../config";
 import type { CommandEvent } from "../commands";
 import type { FileChange } from "../file-diff";
 import type { HistoryEntry, StoredHistoryKind } from "../history";
-import type { LocalAction, LocalActivity } from "../local";
+import type { LocalAction, LocalActivity } from "../local-tools";
 import type { MemoryCard, MemoryKind, MemoryMatch, MemoryStatus } from "../memory";
 import type { RunResult } from "../orchestrator";
 import type { BotProfile, ConversationMessage, ImageDetail, WebMode } from "../types";

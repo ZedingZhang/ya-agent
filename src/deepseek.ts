@@ -11,6 +11,7 @@ import { assertImageCount } from "./images";
 import { abortable, delay as waitDelay } from "./cancellation";
 import { clearAccountCredential, type DeepSeekCredential } from "./credentials";
 import { ACCOUNT_API_URL, messagesPayload, messagesReply } from "./messages";
+import { isRecord } from "./guards";
 import { CompletionBudget, sumUsage } from "./tokens";
 
 export const API_URL = "https://api.deepseek.com/chat/completions";
@@ -75,10 +76,6 @@ export interface DeepSeekPayload {
   reasoning_effort?: ReasoningEffort;
   tools?: ToolDefinition[];
   stream_options?: { include_usage: true };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function messageFromBody(body: unknown): ChatMessage {

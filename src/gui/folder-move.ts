@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { BOT_PERMISSIONS_DIR, dataHome } from "../config";
-import { isSensitive } from "../local";
+import { isSensitive } from "../local-files";
 
 function containsPath(parent: string, child: string): boolean {
   const path = relative(parent, child);

@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { atomicWriteFileSync, expandHome } from "./fs-utils";
+import { isRecord } from "./guards";
 
 export const VALID_MODELS = {
   flash: "deepseek-flash",
@@ -106,10 +108,6 @@ export class ModelConfig implements ModelConfigValues {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /**
  * Resolves a stored model name, including the ids the V4.1 line-up retired.
  * An unrecognised name is passed through so `validate()` can report the
@@ -130,12 +128,6 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
 
 function readNumber(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homedir(), value.slice(2));
-  return value;
 }
 
 export const BOT_PERMISSIONS_DIR = ".ya-bot-permissions";
@@ -167,11 +159,7 @@ export function loadConfig(): ModelConfig {
 
 export function saveConfig(config: ModelConfig): void {
   config.validate();
-  const path = configPath();
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(config.toJSON(), null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
+  atomicWriteFileSync(configPath(), `${JSON.stringify(config.toJSON(), null, 2)}\n`);
 }
 
 /** Resolves an alias, a current model id, or a retired model name. */

@@ -1,27 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
 import {
   accessSync,
-  appendFileSync,
-  closeSync,
   constants,
   existsSync,
-  fstatSync,
   lstatSync,
   mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  readSync,
   realpathSync,
   renameSync,
-  rmSync,
   statSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import {
-  basename,
   dirname,
   isAbsolute,
   join,
@@ -30,466 +18,81 @@ import {
   sep,
 } from "node:path";
 import { createTwoFilesPatch } from "diff";
-import { BOT_PERMISSIONS_DIR, dataHome } from "./config";
+import { appendAuditRecord } from "./audit-log";
 import { abortable } from "./cancellation";
-import { applyTextEdits, MAX_EDITS, textRevision } from "./edits";
+import {
+  DEFAULT_COMMAND_TIMEOUT_SECONDS,
+  MAX_COMMAND_TIMEOUT_SECONDS,
+  runCommand,
+  validateCommand,
+  type CommandResult,
+} from "./commands";
+import { BOT_PERMISSIONS_DIR, dataHome } from "./config";
+import { applyTextEdits, textRevision } from "./edits";
+import { createFileChange } from "./file-diff";
+import { expandHome } from "./fs-utils";
+import { errorMessage } from "./guards";
+import {
+  MAX_TEXT_BYTES,
+  isSensitive,
+  listDirectory,
+  outsideWorkspace,
+  physicalWorkspacePath,
+  readText,
+  searchFiles,
+} from "./local-files";
+import {
+  LOCAL_RUN_TOOL,
+  LOCAL_TOOLS,
+  type ConfirmEdit,
+  type EditResult,
+  type LocalAction,
+  type LocalActivity,
+  type LocalActivityObserver,
+  type LocalConfirmation,
+  type LocalWorkspaceOptions,
+  type ScopedFolderIO,
+} from "./local-tools";
 import { publishEdit } from "./publish-edit";
-import type { HistoryEntry } from "./history";
-import { withTaskStoreLock } from "./task-store-lock";
-import { createFileChange, type FileChange } from "./file-diff";
-import { DEFAULT_COMMAND_TIMEOUT_SECONDS, MAX_COMMAND_LINES, MAX_COMMAND_TIMEOUT_SECONDS, runCommand, validateCommand, type CommandEvent, type CommandResult } from "./commands";
 import type { ToolArguments, ToolDefinition, ToolHandler } from "./types";
 
-export const MAX_TEXT_BYTES = 1024 * 1024;
-export const MAX_LIST_ENTRIES = 200;
-export const MAX_SEARCH_RESULTS = 100;
+export {
+  AUDIT_LOG_MAX_BYTES,
+  MAX_AUDIT_ARCHIVES,
+  appendAuditRecord,
+  auditHistoryEntries,
+  auditLogFiles,
+  auditLogPath,
+  auditLogTotalBytes,
+  clearAuditLogs,
+  deleteAuditHistory,
+  setAuditLogMaxBytesForTesting,
+} from "./audit-log";
+export {
+  MAX_LIST_ENTRIES,
+  MAX_SEARCH_RESULTS,
+  MAX_TEXT_BYTES,
+  isSensitive,
+  listDirectory,
+  openRegularFile,
+  physicalWorkspacePath,
+  readOpenedText,
+  readRegularText,
+  searchFiles,
+} from "./local-files";
+export { LOCAL_RUN_TOOL, LOCAL_TOOLS } from "./local-tools";
+export type {
+  ConfirmEdit,
+  EditResult,
+  LocalAction,
+  LocalActivity,
+  LocalActivityObserver,
+  LocalConfirmation,
+  LocalWorkspaceOptions,
+  ScopedFolderIO,
+} from "./local-tools";
+
 export const MAX_DIFF_LINES = 200;
-export let AUDIT_LOG_MAX_BYTES = 1024 * 1024;
-export const MAX_AUDIT_ARCHIVES = 3;
-
-const EXCLUDED_SEARCH_DIRECTORIES = new Set(["node_modules", "dist", ".next"]);
-
-export interface LocalAction {
-  operation: "mkdir" | "write" | "edit" | "move" | "run";
-  paths: string[];
-  summary: string;
-  diff?: string;
-}
-
-export interface LocalActivity {
-  operation: "list" | "read" | "search" | "mkdir" | "write" | "edit" | "move" | "run";
-  paths: string[];
-  status: "success" | "denied" | "error" | "pending";
-}
-
-export type LocalConfirmation = (action: LocalAction) => boolean | Promise<boolean>;
-export type LocalActivityObserver = (activity: LocalActivity) => void;
-
-export interface EditResult {
-  approved: boolean;
-  previous: string;
-  content: string;
-  count: number;
-}
-
-export type ConfirmEdit = (previous: string, content: string, count: number, path: string) => Promise<boolean>;
-
-export interface ScopedFolderIO {
-  list(directory: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
-  read(file: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
-  search(directory: string, query: string, signal?: AbortSignal, onResolved?: (path: string) => void): Promise<string>;
-  write(file: string, content: string, confirm: (previous: string | undefined, path: string) => Promise<boolean>, signal?: AbortSignal): Promise<{ approved: boolean; previous?: string }>;
-  mkdir(path: string, confirm: (path: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean>;
-  edit(path: string, revision: string, edits: unknown, confirm: ConfirmEdit, signal?: AbortSignal): Promise<EditResult>;
-  move(source: string, destination: string, confirm: (source: string, destination: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean>;
-}
-
-export interface LocalWorkspaceOptions<Scope extends ScopedFolderIO | undefined = undefined> {
-  scopedFolder?: Scope;
-  assertAccess?: () => void;
-  assertPreviewAccess?: () => void;
-  searchFolder?: (relativeDirectory: string, query: string) => string;
-  commandsEnabled?: boolean;
-  signal?: AbortSignal;
-  onCommandEvent?: (event: CommandEvent) => void;
-  onFileChange?: (change: FileChange) => void;
-}
-
-export const LOCAL_RUN_TOOL: ToolDefinition = {
-  type: "function",
-  function: {
-    name: "local_run",
-    description: "Run an approved shell command to check, test, or build the project. On Windows use cmd.exe syntax; on macOS/Linux use /bin/sh syntax. stdin is closed: use non-interactive, one-shot commands, not watch modes. Returns status, exit code, stdout and stderr tails (64 KiB each), truncation flags and duration. cwd must be inside the workspace; this is not a sandbox. Commands run with the user's permissions after separate approval.",
-    parameters: {
-      type: "object",
-      properties: {
-        command: { type: "string", minLength: 1, maxLength: 8_192, description: `At most ${MAX_COMMAND_LINES} lines. Consecutive blank or whitespace-only lines are refused.` },
-        cwd: { type: "string", description: "Working directory relative to the workspace (default: .)." },
-        timeout_seconds: { type: "integer", minimum: 1, maximum: MAX_COMMAND_TIMEOUT_SECONDS, description: "Timeout in seconds (default: 120, max: 600)." },
-      },
-      required: ["command"],
-      additionalProperties: false,
-    },
-  },
-};
-
-export const LOCAL_TOOLS: ToolDefinition[] = [
-  {
-    type: "function",
-    function: {
-      name: "local_list",
-      description: "List up to 200 entries in a directory inside the authorized workspace.",
-      parameters: { type: "object", properties: { path: { type: "string" } } },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_read",
-      description: "Read a UTF-8 text file up to 1 MiB inside the authorized workspace. Returns exact content and its revision for local_edit. Sensitive files are blocked.",
-      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_search",
-      description: "Search file names and non-sensitive UTF-8 text files inside the authorized workspace, skipping node_modules, dist, and .next directories unless selected as the search root.",
-      parameters: {
-        type: "object",
-        properties: { query: { type: "string" }, path: { type: "string" } },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_mkdir",
-      description: "Create one directory inside the workspace. Its parent must already exist. The client asks the user before writing.",
-      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_write",
-      description: "Create a non-sensitive UTF-8 text file, or replace an entire non-sensitive file only when explicitly needed. Prefer local_edit for changes to existing files. Its parent must already exist. The client shows a diff and asks before writing.",
-      parameters: {
-        type: "object",
-        properties: { path: { type: "string" }, content: { type: "string" } },
-        required: ["path", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_edit",
-      description: "Edit an existing non-sensitive writable UTF-8 file using the revision from local_read and exact old_text/new_text replacements. Each old_text must occur exactly once in the original file, with enough context to disambiguate; ranges cannot overlap. No fuzzy matching or newline normalization. A batch is approved and applied as a whole; stale and read-only files are rejected. On conflict, read again and rebuild the edits.",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          expected_revision: { type: "string", pattern: "^[a-f0-9]{64}$" },
-          edits: {
-            type: "array", minItems: 1, maxItems: MAX_EDITS,
-            items: {
-              type: "object",
-              properties: { old_text: { type: "string", minLength: 1 }, new_text: { type: "string" } },
-              required: ["old_text", "new_text"], additionalProperties: false,
-            },
-          },
-        },
-        required: ["path", "expected_revision", "edits"], additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "local_move",
-      description: "Move or rename a non-sensitive file or directory between non-sensitive paths inside the workspace without replacing a destination. The client asks before writing.",
-      parameters: {
-        type: "object",
-        properties: { source: { type: "string" }, destination: { type: "string" } },
-        required: ["source", "destination"],
-      },
-    },
-  },
-];
-
-export function setAuditLogMaxBytesForTesting(value: number): void {
-  AUDIT_LOG_MAX_BYTES = value;
-}
-
-export function auditLogPath(index = 0): string {
-  return join(dataHome(), `actions${index === 0 ? "" : `.${index}`}.jsonl`);
-}
-
-export function auditLogFiles(): string[] {
-  const paths: string[] = [];
-  for (let index = 0; index <= MAX_AUDIT_ARCHIVES; index += 1) {
-    const path = auditLogPath(index);
-    if (lstatSync(path, { throwIfNoEntry: false })?.isFile()) paths.push(path);
-  }
-  return paths;
-}
-
-export function auditLogTotalBytes(): number {
-  return auditLogFiles().reduce((total, path) => total + (lstatSync(path, { throwIfNoEntry: false })?.size ?? 0), 0);
-}
-
-export function clearAuditLogs(): string[] {
-  return withTaskStoreLock(auditLogPath(), () => {
-    const removed = auditLogFiles();
-    for (const path of removed) unlinkSync(path);
-    return removed;
-  });
-}
-
-function* auditLines(path: string) {
-  // A rotated file keeps its identity. A replacement file can contain identical JSON at the same offset.
-  const { dev, ino, birthtimeNs } = statSync(path, { bigint: true });
-  const data = readFileSync(path);
-  for (let start = 0; start < data.length;) {
-    const newline = data.indexOf(0x0a, start);
-    const end = newline < 0 ? data.length : newline + 1;
-    const line = data.subarray(start, end);
-    const id = createHash("sha256").update(`${dev}:${ino}:${birthtimeNs}:${start}:`).update(line).digest("hex");
-    yield { line, id };
-    start = end;
-  }
-}
-
-export function auditHistoryEntries(): HistoryEntry[] {
-  return withTaskStoreLock(auditLogPath(), () => {
-    const entries: HistoryEntry[] = [];
-    for (const path of auditLogFiles()) {
-      for (const { line, id } of auditLines(path)) {
-        let timestamp = NaN;
-        try {
-          const record = JSON.parse(line.toString("utf8"));
-          if (typeof record?.timestamp === "string") timestamp = Date.parse(record.timestamp);
-        } catch { /* Keep undated or damaged lines available for explicit cleanup. */ }
-        entries.push({ id, timestamp: Number.isFinite(timestamp) ? timestamp : null, bytes: line.length });
-      }
-    }
-    return entries;
-  });
-}
-
-export function deleteAuditHistory(ids: readonly string[]): number {
-  const selected = new Set(ids);
-  return withTaskStoreLock(auditLogPath(), () => {
-    let removed = 0;
-    for (const path of auditLogFiles()) {
-      const kept: Buffer[] = [];
-      let changed = false;
-      for (const { line, id } of auditLines(path)) {
-        if (!selected.has(id)) { kept.push(line); continue; }
-        changed = true;
-        removed++;
-      }
-      if (!changed) continue;
-      if (!kept.length) { unlinkSync(path); continue; }
-      const temporary = `${path}.${randomUUID()}.tmp`;
-      try {
-        writeFileSync(temporary, Buffer.concat(kept), { flag: "wx", mode: 0o600 });
-        renameSync(temporary, path);
-      } finally { rmSync(temporary, { force: true }); }
-    }
-    return removed;
-  });
-}
-
-function tailCompleteLines(data: Buffer, limit: number): Buffer {
-  if (data.byteLength <= limit) return data;
-  const tail = data.subarray(data.byteLength - limit);
-  const newline = tail.indexOf(0x0a);
-  return newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0);
-}
-
-function rotateAuditLogs(): void {
-  for (let index = MAX_AUDIT_ARCHIVES; index >= 1; index -= 1) {
-    const source = auditLogPath(index - 1);
-    const destination = auditLogPath(index);
-    if (!existsSync(source) || !statSync(source).isFile()) continue;
-    if (existsSync(destination)) unlinkSync(destination);
-    if (index === 1 && statSync(source).size > AUDIT_LOG_MAX_BYTES) {
-      const data = tailCompleteLines(readFileSync(source), AUDIT_LOG_MAX_BYTES);
-      const temporary = `${destination}.${process.pid}.tmp`;
-      writeFileSync(temporary, data);
-      renameSync(temporary, destination);
-      unlinkSync(source);
-    } else {
-      renameSync(source, destination);
-    }
-  }
-}
-
-export function appendAuditRecord(record: Record<string, unknown>): void {
-  const encoded = Buffer.from(`${JSON.stringify(record)}\n`, "utf8");
-  const active = auditLogPath();
-  withTaskStoreLock(active, () => {
-    if (existsSync(active) && statSync(active).size + encoded.byteLength > AUDIT_LOG_MAX_BYTES) rotateAuditLogs();
-    appendFileSync(active, encoded);
-  });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function expandHome(value: string): string {
-  if (value === "~") return homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) return join(homedir(), value.slice(2));
-  return value;
-}
-
-export function isSensitive(path: string): boolean {
-  const lowered = basename(path).toLocaleLowerCase("und");
-  const extension = lowered.includes(".") ? lowered.slice(lowered.lastIndexOf(".")) : "";
-  const parts = path.toLocaleLowerCase("und").split(sep);
-  if (parts.includes(".git") || parts.includes(BOT_PERMISSIONS_DIR)) return true;
-  if (lowered === ".env" || lowered.startsWith(".env.")) return true;
-  if (["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "credentials.json", ".git-credentials", ".netrc", ".npmrc"].includes(lowered)) return true;
-  return [".pem", ".key", ".p12", ".pfx", ".kdbx", ".der", ".token"].includes(extension) || lowered.includes("secret");
-}
-
-function readText(path: string): string {
-  if (isSensitive(path)) throw new Error("Reading sensitive files is blocked in local mode.");
-  if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`Not a file: ${path}`);
-  if (statSync(path).size > MAX_TEXT_BYTES) throw new Error("Text files larger than 1 MiB cannot be read or replaced.");
-  return decodeText(readFileSync(path));
-}
-
-function decodeText(data: Buffer): string {
-  if (data.includes(0)) throw new Error("Binary files cannot be read in local mode.");
-  try {
-    // Preserve the BOM as content so reads, approval diffs, and writes agree.
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(data);
-  } catch {
-    throw new Error("Only UTF-8 text files can be read in local mode.");
-  }
-}
-
-// Open the leaf without truncating or following it. Check the handle against
-// its directory entry before reading data or publishing an approved change.
-export function openRegularFile(name: string, flags = constants.O_RDONLY): number {
-  if (!lstatSync(name).isFile()) throw new Error("Not a regular file.");
-  const fd = openSync(name, flags | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-  try {
-    const file = fstatSync(fd, { bigint: true });
-    const entry = lstatSync(name, { bigint: true });
-    if (!file.isFile() || !entry.isFile() || file.dev !== entry.dev || file.ino !== entry.ino) {
-      throw new Error("Not a regular file.");
-    }
-    return fd;
-  } catch (error) {
-    closeSync(fd);
-    throw error;
-  }
-}
-
-export function readOpenedText(fd: number): string {
-  const size = fstatSync(fd).size;
-  if (size > MAX_TEXT_BYTES) throw new Error("Text files larger than 1 MiB cannot be read or replaced.");
-  // Positioned reads keep the descriptor usable across approval. Some virtual
-  // files report a size of zero, so enforce the limit on bytes actually read.
-  const chunkSize = Math.min(64 * 1024, Math.max(4096, size + 1));
-  const chunks: Buffer[] = [];
-  let offset = 0;
-  for (;;) {
-    const chunk = Buffer.allocUnsafe(Math.min(chunkSize, MAX_TEXT_BYTES - offset + 1));
-    const count = readSync(fd, chunk, 0, chunk.length, offset);
-    if (!count) break;
-    offset += count;
-    if (offset > MAX_TEXT_BYTES) throw new Error("Text files larger than 1 MiB cannot be read or replaced.");
-    chunks.push(chunk.subarray(0, count));
-  }
-  return decodeText(Buffer.concat(chunks, offset));
-}
-
-export function readRegularText(name: string): string {
-  const fd = openRegularFile(name);
-  try { return readOpenedText(fd); } finally { closeSync(fd); }
-}
-
-export function searchFiles(root: string, query: string, displayPath: (path: string) => string, checkAccess?: () => void, verifyCwd?: (directory: string) => void): string {
-  const needle = query.toLocaleLowerCase("und");
-  const results: Array<Record<string, unknown>> = [];
-  for (const path of walkFiles(root, checkAccess, verifyCwd)) {
-    const relativePath = displayPath(path);
-    if (basename(path).toLocaleLowerCase("und").includes(needle)) {
-      results.push({ path: relativePath, match: "filename" });
-      if (results.length >= MAX_SEARCH_RESULTS) break;
-    }
-    let text: string;
-    try {
-      text = verifyCwd ? readRegularText(basename(path)) : readText(path);
-    } catch {
-      // Binary, oversized, and unreadable files are intentionally skipped.
-      continue;
-    }
-    verifyCwd?.(dirname(path));
-    const lines = text.split(/\r?\n/u);
-    for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index] ?? "";
-      if (line.toLocaleLowerCase("und").includes(needle)) {
-        results.push({ path: relativePath, match: "text", line: index + 1, text: line.slice(0, 400) });
-        if (results.length >= MAX_SEARCH_RESULTS) break;
-      }
-    }
-    if (results.length >= MAX_SEARCH_RESULTS) break;
-  }
-  verifyCwd?.(root);
-  checkAccess?.();
-  return JSON.stringify({ query, results, limited: results.length >= MAX_SEARCH_RESULTS });
-}
-
-function* walkFiles(root: string, checkAccess?: () => void, verifyCwd?: (directory: string) => void): Generator<string> {
-  checkAccess?.();
-  verifyCwd?.(root);
-  const entries = readdirSync(verifyCwd ? "." : root, { withFileTypes: true }).sort((left, right) =>
-    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
-  );
-  for (const entry of entries) {
-    checkAccess?.();
-    const path = join(root, entry.name);
-    if (entry.isSymbolicLink() || isSensitive(path)) continue;
-    if (entry.isDirectory()) {
-      if (EXCLUDED_SEARCH_DIRECTORIES.has(entry.name)) continue;
-      if (verifyCwd) process.chdir(entry.name);
-      try {
-        yield* walkFiles(path, checkAccess, verifyCwd);
-      } finally {
-        if (verifyCwd) {
-          process.chdir("..");
-          verifyCwd(root);
-        }
-      }
-    } else if (entry.isFile()) {
-      verifyCwd?.(root);
-      yield path;
-    }
-  }
-}
-
-export function listDirectory(path: string, displayPath: string): string {
-  const allEntries = readdirSync(path, { withFileTypes: true }).sort((left, right) =>
-    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }),
-  );
-  const entries = allEntries.slice(0, MAX_LIST_ENTRIES).map((entry) => {
-    const child = join(displayPath, entry.name);
-    const type = entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : "file";
-    return { path: child, type };
-  });
-  return JSON.stringify({ path: displayPath, entries, limited: allEntries.length > MAX_LIST_ENTRIES });
-}
-
-function outsideWorkspace(relativePath: string): boolean {
-  return relativePath === ".." || relativePath.startsWith(".." + sep) || isAbsolute(relativePath);
-}
-
-export function physicalWorkspacePath(root: string, input: string, resolveAncestor: (path: string) => string = realpathSync): string {
-  const candidate = resolve(root, input);
-  let ancestor = candidate;
-  // lstat sees dangling links; realpath below must reject them rather than
-  // treating the link itself as a new file inside the workspace.
-  while (!lstatSync(ancestor, { throwIfNoEntry: false })) {
-    const parent = dirname(ancestor);
-    if (parent === ancestor) break;
-    ancestor = parent;
-  }
-  const physicalAncestor = resolveAncestor(ancestor);
-  const physical = resolve(physicalAncestor, relative(ancestor, candidate));
-  const fromRoot = relative(root, physical);
-  if (outsideWorkspace(fromRoot)) {
-    throw new Error("Path must remain inside the authorized workspace.");
-  }
-  return physical;
-}
 
 // Task runners accept both the synchronous CLI workspace and desktop folder tools.
 export type TaskWorkspace = LocalWorkspace<ScopedFolderIO | undefined>;

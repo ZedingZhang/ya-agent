@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { dataHome } from "./config";
+import { atomicWriteFileSync } from "./fs-utils";
 import { runSecurityInteractive } from "./keychain";
 
 export const DEEPSEEK_PLATFORM = "https://platform.deepseek.com";
@@ -121,15 +122,14 @@ function saveCredential(credential: AccountCredential): void {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
   const path = accountCredentialPath();
-  const temporary = `${path}.${randomUUID()}.token`;
   try {
-    writeFileSync(temporary, `${JSON.stringify({ version: 1, issuer: DEEPSEEK_PLATFORM, token: credential.token })}\n`,
-      { mode: 0o600, flag: "wx" });
-    renameSync(temporary, path);
+    atomicWriteFileSync(
+      path,
+      `${JSON.stringify({ version: 1, issuer: DEEPSEEK_PLATFORM, token: credential.token })}\n`,
+      { mode: 0o600, flag: "wx", suffix: "token", ensureDir: false },
+    );
   } catch {
     throw new Error("Could not save the DeepSeek account credential.");
-  } finally {
-    rmSync(temporary, { force: true });
   }
 }
 

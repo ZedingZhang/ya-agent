@@ -65,3 +65,6 @@ const bridge: YaBridge = {
 };
 
 contextBridge.exposeInMainWorld("ya", bridge);
+if (process.argv.includes("--ya-smoke-test")) {
+  contextBridge.exposeInMainWorld("__yaSmokeEnabled", true);
+}

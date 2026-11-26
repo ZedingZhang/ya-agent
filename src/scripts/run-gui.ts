@@ -5,7 +5,8 @@ import { basename, dirname, join } from "node:path";
 
 const requireFromHere = createRequire(__filename);
 const electronExecutable = requireFromHere("electron") as string;
-const mainFile = join(__dirname, "../gui/main.js");
+const smokeTest = process.argv.includes("--smoke-test");
+const mainFile = smokeTest ? join(__dirname, "../../smoke/main.js") : join(__dirname, "../gui/main.js");
 
 function runChecked(command: string, arguments_: string[], input?: string): string {
   const result = spawnSync(command, arguments_, { encoding: "utf8", input });
